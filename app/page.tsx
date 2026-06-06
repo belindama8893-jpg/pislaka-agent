@@ -14,6 +14,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AgentWorkspace } from "@/components/agent/AgentWorkspace";
 import { ProfileCompletionForm } from "@/components/profile/ProfileCompletionForm";
+import { MobileTabBar } from "@/components/workspace/MobileTabBar";
 import { SignOutButton } from "@/components/workspace/SignOutButton";
 import type { BrokerEventRecord } from "@/lib/events/types";
 import { getRecentLeadsForBroker } from "@/lib/leads/queries";
@@ -263,6 +264,7 @@ export default async function Home() {
           </div>
         </div>
       </aside>
+      <MobileTabBar active="agent" listingsCount={listings.length} leadsCount={newLeadsCount} />
 
       <section className="workspace">
         <header className="topbar">
