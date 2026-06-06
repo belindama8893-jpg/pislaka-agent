@@ -3,7 +3,6 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ListingDraftsPanel } from "@/components/listings/ListingDraftsPanel";
 import { AccountMenu } from "@/components/workspace/AccountMenu";
-import { MobileTabBar } from "@/components/workspace/MobileTabBar";
 import { getRecentLeadsForBroker } from "@/lib/leads/queries";
 import type { ListingMediaRecord, ListingRecord } from "@/lib/listings/types";
 import { createServiceClient, createSupabaseServerClient } from "@/lib/supabase/server";
@@ -149,7 +148,6 @@ export default async function ListingsPage() {
           </div>
         </div>
       </aside>
-      <MobileTabBar active="listings" listingsCount={listings.length} leadsCount={newLeadsCount} />
 
       <section className="workspace library-page">
         <header className="topbar library-topbar">

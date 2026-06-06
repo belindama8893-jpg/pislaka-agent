@@ -2596,10 +2596,6 @@ a {
   }
 }
 
-.mobile-tabbar {
-  display: none;
-}
-
 @media (max-width: 720px) {
   body {
     background:
@@ -2611,64 +2607,12 @@ a {
     display: block;
     height: auto;
     min-height: 100dvh;
-    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
     overflow: visible;
   }
 
   .sidebar {
     display: none;
-  }
-
-  .mobile-tabbar {
-    position: fixed;
-    right: 10px;
-    bottom: calc(8px + env(safe-area-inset-bottom));
-    left: 10px;
-    z-index: 60;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 4px;
-    padding: 6px;
-    background: rgba(255, 255, 255, 0.92);
-    border: 1px solid var(--border-soft);
-    border-radius: 16px;
-    box-shadow: 0 14px 42px rgba(15, 23, 42, 0.16);
-    backdrop-filter: blur(18px);
-  }
-
-  .mobile-tabbar a {
-    position: relative;
-    display: flex;
-    gap: 5px;
-    align-items: center;
-    justify-content: center;
-    min-width: 0;
-    min-height: 46px;
-    color: var(--muted);
-    border-radius: 12px;
-    font-size: 0.76rem;
-    font-weight: 520;
-    text-decoration: none;
-  }
-
-  .mobile-tabbar a.active {
-    color: var(--primary);
-    background: var(--primary-light);
-  }
-
-  .mobile-tabbar strong {
-    min-width: 18px;
-    padding: 1px 5px;
-    color: var(--primary);
-    background: rgba(8, 127, 111, 0.1);
-    border-radius: 999px;
-    font-size: 0.68rem;
-    line-height: 1.25;
-  }
-
-  .mobile-tabbar strong.urgent {
-    color: #ef4444;
-    background: #fee2e2;
   }
 
   .workspace {
@@ -2884,7 +2828,7 @@ a {
   .composer {
     position: fixed;
     right: 10px;
-    bottom: calc(76px + env(safe-area-inset-bottom));
+    bottom: calc(10px + env(safe-area-inset-bottom));
     left: 10px;
     z-index: 70;
     gap: 7px;

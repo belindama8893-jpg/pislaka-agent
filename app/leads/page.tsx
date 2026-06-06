@@ -3,7 +3,6 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { LeadListPanel } from "@/components/leads/LeadListPanel";
 import { AccountMenu } from "@/components/workspace/AccountMenu";
-import { MobileTabBar } from "@/components/workspace/MobileTabBar";
 import { getRecentLeadsForBroker } from "@/lib/leads/queries";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -97,7 +96,6 @@ export default async function LeadsPage() {
           </div>
         </div>
       </aside>
-      <MobileTabBar active="leads" leadsCount={newLeadsCount} />
 
       <section className="workspace library-page">
         <header className="topbar library-topbar">
