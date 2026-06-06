@@ -1,11 +1,8 @@
 import {
   BarChart3,
-  Bell,
   CalendarClock,
   ChevronRight,
   List,
-  Menu,
-  Plus,
   Sparkles,
   Users,
   Zap
@@ -14,8 +11,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AgentWorkspace } from "@/components/agent/AgentWorkspace";
 import { ProfileCompletionForm } from "@/components/profile/ProfileCompletionForm";
+import { AccountMenu } from "@/components/workspace/AccountMenu";
 import { MobileTabBar } from "@/components/workspace/MobileTabBar";
-import { SignOutButton } from "@/components/workspace/SignOutButton";
 import type { BrokerEventRecord } from "@/lib/events/types";
 import { getRecentLeadsForBroker } from "@/lib/leads/queries";
 import type { LeadListItem } from "@/lib/leads/types";
@@ -219,9 +216,6 @@ export default async function Home() {
   const firstName = getFirstName(broker);
   const profileComplete = isProfileComplete(broker);
   const newLeadsCount = leads.filter((lead) => lead.status === "new").length;
-  const listingsWithMediaCount = listings.filter((listing) => listing.media?.length).length;
-  const activeCampaignLeadsCount = leads.filter((lead) => lead.campaign_code).length;
-  const topLead = leads[0];
 
   return (
     <main className="dashboard-shell">
@@ -269,9 +263,6 @@ export default async function Home() {
       <section className="workspace">
         <header className="topbar">
           <div className="greeting">
-            <button className="icon-button mobile-only" aria-label="Open menu">
-              <Menu size={20} />
-            </button>
             <div>
               <span className="workspace-eyebrow">Agent workspace</span>
               <h1>Good afternoon, {firstName}</h1>
@@ -279,35 +270,19 @@ export default async function Home() {
             </div>
           </div>
           <div className="topbar-actions">
-            <button className="primary-button">
-              <Plus size={18} /> Quick Post
-            </button>
-            <button className="icon-button" aria-label="Notifications">
-              <Bell size={19} />
-            </button>
-            <SignOutButton />
+            <AccountMenu
+              initials={getInitials(broker)}
+              name={broker.full_name || broker.email || "Pislaka Broker"}
+              email={broker.email}
+              agency={broker.agency_name}
+              city={broker.city}
+              listingsCount={listings.length}
+              leadsCount={newLeadsCount}
+            />
           </div>
         </header>
 
         {!profileComplete ? <ProfileCompletionForm profile={broker} /> : null}
-
-        <section className="workspace-summary" aria-label="Workspace summary">
-          <div>
-            <span>Listings</span>
-            <strong>{listings.length}</strong>
-            <small>{listingsWithMediaCount} with media</small>
-          </div>
-          <div>
-            <span>New leads</span>
-            <strong>{newLeadsCount}</strong>
-            <small>{activeCampaignLeadsCount} from campaigns</small>
-          </div>
-          <div>
-            <span>Next action</span>
-            <strong>{events[0] ? "Schedule" : topLead ? "Follow up" : "Create listing"}</strong>
-            <small>{events[0]?.title || topLead?.full_name || "Voice, photo, or chat"}</small>
-          </div>
-        </section>
 
         <div className="content-grid">
           <AgentWorkspace

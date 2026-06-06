@@ -2,8 +2,8 @@ import { BarChart3, List, Sparkles, Users } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ListingDraftsPanel } from "@/components/listings/ListingDraftsPanel";
+import { AccountMenu } from "@/components/workspace/AccountMenu";
 import { MobileTabBar } from "@/components/workspace/MobileTabBar";
-import { SignOutButton } from "@/components/workspace/SignOutButton";
 import { getRecentLeadsForBroker } from "@/lib/leads/queries";
 import type { ListingMediaRecord, ListingRecord } from "@/lib/listings/types";
 import { createServiceClient, createSupabaseServerClient } from "@/lib/supabase/server";
@@ -163,7 +163,15 @@ export default async function ListingsPage() {
             <Link className="outline-button" href="/">
               Back to Agent Workspace
             </Link>
-            <SignOutButton />
+            <AccountMenu
+              initials={getInitials(broker)}
+              name={broker.full_name || broker.email || "Pislaka Broker"}
+              email={broker.email}
+              agency={broker.agency_name}
+              city={broker.city}
+              listingsCount={listings.length}
+              leadsCount={newLeadsCount}
+            />
           </div>
         </header>
 
