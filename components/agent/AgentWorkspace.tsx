@@ -1909,7 +1909,7 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
   }
 
   return (
-    <section className="chat-panel glass-panel">
+    <section className={`chat-panel glass-panel ${messages.length === 1 ? "is-empty" : "has-thread"}`}>
       <div className="panel-header">
         <h2>
           <Bot size={20} /> Agent Workspace
@@ -1918,7 +1918,18 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
       </div>
 
       <div className="messages">
-        {messages.map((message) => (
+        {messages.length === 1 ? (
+          <div className="agent-start">
+            <span>Pislaka Agent</span>
+            <h2>What should we handle today?</h2>
+            <p>
+              Publish listings, capture leads, schedule viewings, or draft WhatsApp follow-ups in one conversation.
+            </p>
+          </div>
+        ) : null}
+
+        {messages.map((message, index) => (
+          messages.length === 1 && index === 0 ? null : (
           <article className={`message ${message.role}`} key={message.id}>
             <p>{message.content}</p>
             {message.draft ? (
@@ -2007,82 +2018,85 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
               />
             ) : null}
           </article>
+          )
         ))}
 
+        <div ref={messagesEndRef} />
+      </div>
+
+      <form className="composer" onSubmit={handleSubmit}>
+        <div className="composer-row">
+          <input
+            ref={fileInputRef}
+            className="media-file-input"
+            type="file"
+            accept="image/*,video/*"
+            multiple
+            onChange={(event) => handleMediaSelected(event.target.files)}
+          />
+          <button type="button" aria-label="Attach listing media" onClick={() => fileInputRef.current?.click()}>
+            <Paperclip size={20} />
+          </button>
+          {isListening || isTranscribing ? (
+            <VoiceWaveform
+              isTranscribing={isTranscribing}
+              levels={voiceLevels}
+              seconds={recordingSeconds}
+            />
+          ) : (
+            <input
+              placeholder="Ask Pislaka Agent to publish, follow up, or schedule..."
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+            />
+          )}
+          <button
+            type="button"
+            className={`voice-button ${isListening ? "recording" : ""}`}
+            aria-label={isListening ? "Stop recording" : "Record voice"}
+            aria-pressed={isListening}
+            disabled={isTranscribing}
+            onClick={handleVoiceInput}
+          >
+            {isTranscribing ? <LoaderCircle className="spin-icon" size={18} /> : isListening ? <Square size={15} /> : <Mic size={20} />}
+          </button>
+          <button
+            type="submit"
+            className="send-button"
+            aria-label="Send message"
+            disabled={isSubmitting || isListening || isTranscribing}
+          >
+            <Send size={19} />
+          </button>
+        </div>
+
         {messages.length === 1 ? (
-          <div className="chips">
+          <div className="prompt-suggestions" aria-label="Common agent actions">
             <button
               type="button"
               onClick={() =>
                 void submitMessage("Create a listing for 1 Kanal house in DHA Phase 6, price 8.5 crore.")
               }
             >
-              Try sample listing
+              <Sparkles size={15} /> Publish a listing
             </button>
             <button type="button" onClick={() => fileInputRef.current?.click()}>
-              <Camera size={15} /> Add media after confirmation
+              <Camera size={15} /> Add property media
             </button>
-            <button type="button">Saved listings: {listingsCount}</button>
-            <button type="button" onClick={() => void submitMessage("Promote my latest listing for WhatsApp, Facebook, Instagram, and portals.")}>
-              <Megaphone size={15} /> Promote latest
-            </button>
-            <button type="button" onClick={() => void submitMessage("Promote my DHA 5 marla house.")}>
-              Promote DHA 5 marla
+            <button type="button" onClick={() => void submitMessage("Record a new lead named Ahmed. He wants a 5 marla house in DHA Phase 5 with a budget around 1 crore.")}>
+              <MessageCircle size={15} /> Capture a lead
             </button>
             <button type="button" onClick={() => void submitMessage("Schedule a viewing with Ahmed tomorrow at 3pm for my DHA Phase 5 villa.")}>
-              <CalendarClock size={15} /> Schedule viewing
+              <CalendarClock size={15} /> Create a schedule
+            </button>
+            <button type="button" onClick={() => void submitMessage("Promote my latest listing for WhatsApp, Facebook, Instagram, and portals.")}>
+              <Megaphone size={15} /> Promote latest listing
             </button>
             <button type="button" onClick={() => void submitMessage("Which new leads should I follow up today?")}>
               <MessageCircle size={15} /> Review leads
             </button>
           </div>
         ) : null}
-        <div ref={messagesEndRef} />
-      </div>
-
-      <form className="composer" onSubmit={handleSubmit}>
-        <input
-          ref={fileInputRef}
-          className="media-file-input"
-          type="file"
-          accept="image/*,video/*"
-          multiple
-          onChange={(event) => handleMediaSelected(event.target.files)}
-        />
-        <button type="button" aria-label="Attach listing media" onClick={() => fileInputRef.current?.click()}>
-          <Paperclip size={20} />
-        </button>
-        {isListening || isTranscribing ? (
-          <VoiceWaveform
-            isTranscribing={isTranscribing}
-            levels={voiceLevels}
-            seconds={recordingSeconds}
-          />
-        ) : (
-          <input
-            placeholder="Describe a property to publish..."
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-          />
-        )}
-        <button
-          type="button"
-          className={`voice-button ${isListening ? "recording" : ""}`}
-          aria-label={isListening ? "Stop recording" : "Record voice"}
-          aria-pressed={isListening}
-          disabled={isTranscribing}
-          onClick={handleVoiceInput}
-        >
-          {isTranscribing ? <LoaderCircle className="spin-icon" size={18} /> : isListening ? <Square size={15} /> : <Mic size={20} />}
-        </button>
-        <button
-          type="submit"
-          className="send-button"
-          aria-label="Send message"
-          disabled={isSubmitting || isListening || isTranscribing}
-        >
-          <Send size={19} />
-        </button>
       </form>
     </section>
   );
