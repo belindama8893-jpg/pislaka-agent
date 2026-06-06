@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pislaka Agent - Real Estate Broker Agent</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <span>Pislaka Agent</span>
+            </div>
+            <div class="nav-section-title" style="font-size: 0.75rem; text-transform: uppercase; color: #94a3b8; font-weight: 600; margin: 20px 0 10px 12px; letter-spacing: 0.5px;">Workspace</div>
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active">
+                    <div class="nav-item-content"><i class="fa-solid fa-wand-magic-sparkles"></i> AI Assistant</div>
+                </a>
+                
+                <div class="nav-section-title" style="font-size: 0.75rem; text-transform: uppercase; color: #94a3b8; font-weight: 600; margin: 24px 0 10px 12px; letter-spacing: 0.5px;">Structured Data</div>
+                <a href="#" class="nav-item" onclick="handleSuggestion('Manage my listings')">
+                    <div class="nav-item-content"><i class="fa-solid fa-list"></i> Listings</div>
+                    <span class="nav-badge">15</span>
+                </a>
+                <a href="#" class="nav-item" onclick="handleSuggestion('Show urgent leads')">
+                    <div class="nav-item-content"><i class="fa-solid fa-users"></i> Leads</div>
+                    <span class="nav-badge urgent">4</span>
+                </a>
+                <a href="#" class="nav-item" onclick="handleSuggestion('Show data analytics')">
+                    <div class="nav-item-content"><i class="fa-solid fa-chart-line"></i> Analytics</div>
+                </a>
+            </nav>
+            <div class="user-profile">
+                <img src="https://ui-avatars.com/api/?name=Ali+Khan&background=0D8A72&color=fff" alt="User Avatar" class="avatar">
+                <div class="user-info">
+                    <span class="user-name">Ali Khan</span>
+                    <span class="user-role">Broker, Lahore</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="top-header">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <button class="btn-icon mobile-menu-btn" onclick="toggleSidebar()">
+                        <i class="fa-solid fa-bars"></i>
+                    </button>
+                    <div class="greeting">
+                        <h1>Good afternoon, Ali 👋</h1>
+                        <p class="desktop-only">I'm your AI assistant. How can I help you grow your real estate business today?</p>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <button class="btn-primary" onclick="triggerListingFlow()">
+                        <i class="fa-solid fa-plus"></i> Quick Post
+                    </button>
+                    <button class="btn-icon">
+                        <i class="fa-regular fa-bell"></i>
+                    </button>
+                </div>
+            </header>
+
+            <div class="content-grid">
+                <!-- AI Chat Interface -->
+                <div class="ai-chat-section glass-panel">
+                    <div class="chat-header">
+                        <h2><i class="fa-solid fa-robot"></i> Agent Workspace</h2>
+                        <span class="status-badge online">Online</span>
+                    </div>
+                    
+                    <div class="chat-messages" id="chat-messages">
+                        <!-- Initial AI Welcome Message -->
+                        <div class="message ai-message">
+                            <div class="message-content">
+                                <strong>Good morning, Ali! ☀️</strong><br><br>
+                                Here is your daily structured briefing:<br>
+                                • You have <strong>15 Active Listings</strong>.<br>
+                                • You have <strong>4 Pending Leads</strong> (2 need urgent follow-ups).<br><br>
+                                What's the plan for today? You can drop photos here to post a new property, or say "review leads" to follow up with clients.
+                                
+                                <div class="suggested-actions">
+                                    <button class="action-chip" onclick="handleSuggestion('Review urgent leads')">Review Leads</button>
+                                    <button class="action-chip" onclick="handleSuggestion('Show my active listings')">Check Listings</button>
+                                    <button class="action-chip" onclick="simulateImageUpload()"><i class="fa-solid fa-camera"></i> Upload Photos</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="chat-input-area">
+                        <button class="btn-attach" onclick="simulateImageUpload()" title="Upload photos">
+                            <i class="fa-solid fa-paperclip"></i>
+                        </button>
+                        <input type="text" id="ai-input" placeholder="Type a message or use voice..." onkeypress="handleKeyPress(event)">
+                        <button class="btn-voice" id="btn-voice" onclick="toggleVoiceRecording()" title="Hold to speak">
+                            <i class="fa-solid fa-microphone"></i>
+                        </button>
+                        <button class="btn-send" onclick="sendMessage()">
+                            <i class="fa-solid fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Side Widgets -->
+                <div class="widgets-section">
+                    <!-- Leads Widget -->
+                    <div class="widget glass-panel">
+                        <div class="widget-header">
+                            <h3><i class="fa-solid fa-bolt"></i> Urgent Leads</h3>
+                            <a href="#" class="view-all">View All</a>
+                        </div>
+                        <div class="lead-item unread">
+                            <div class="lead-info">
+                                <h4>Sarah Ahmed</h4>
+                                <p>Interested in 1 Kanal, DHA Phase 6</p>
+                            </div>
+                            <button class="btn-sm btn-outline" onclick="aiReplyLead('Sarah Ahmed', 'DHA Phase 6')">AI Reply</button>
+                        </div>
+                        <div class="lead-item unread">
+                            <div class="lead-info">
+                                <h4>Zain Malik</h4>
+                                <p>Asked for floor plan (Bahria Town)</p>
+                            </div>
+                            <button class="btn-sm btn-outline" onclick="aiReplyLead('Zain Malik', 'Bahria Town')">AI Reply</button>
+                        </div>
+                    </div>
+
+                    <!-- Market Insights Widget -->
+                    <div class="widget glass-panel">
+                        <div class="widget-header">
+                            <h3><i class="fa-solid fa-chart-pie"></i> Market Pulse (Lahore)</h3>
+                        </div>
+                        <div class="insight-item">
+                            <span class="insight-label">DHA Phase 6 Demand</span>
+                            <span class="insight-value positive"><i class="fa-solid fa-arrow-trend-up"></i> +12%</span>
+                        </div>
+                        <div class="insight-item">
+                            <span class="insight-label">Avg. Rent (Bahria)</span>
+                            <span class="insight-value">PKR 120k</span>
+                        </div>
+                        <div class="insight-item">
+                            <span class="insight-label">AI Recommendation</span>
+                            <p class="insight-desc">Push marketing for 10 Marla plots. High buyer interest this week.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Preview Modal -->
+    <div id="preview-modal" class="modal-overlay hidden">
+        <div class="modal-content glass-panel preview-mode">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-eye"></i> Public Listing Preview</h2>
+                <button class="btn-close" onclick="closeModal('preview-modal')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body preview-body">
+                <div class="preview-hero">
+                    <img src="https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80" alt="House Hero" class="preview-image">
+                    <div class="preview-price-tag">PKR 8.5 Crore</div>
+                </div>
+                <div class="preview-details">
+                    <h3 class="preview-title">Luxurious 1 Kanal Villa in DHA Phase 6</h3>
+                    <div class="preview-location"><i class="fa-solid fa-location-dot"></i> DHA Phase 6, Lahore</div>
+                    
+                    <div class="preview-specs">
+                        <span><i class="fa-solid fa-bed"></i> 5 Beds</span>
+                        <span><i class="fa-solid fa-bath"></i> 6 Baths</span>
+                        <span><i class="fa-solid fa-vector-square"></i> 1 Kanal</span>
+                    </div>
+
+                    <div class="preview-desc">
+                        <h4>Property Overview</h4>
+                        <p>Experience premium living in this highly sought-after 1 Kanal designer villa located in the heart of DHA Phase 6. Featuring a modern imported kitchen, lush green lawn, and top-tier security.</p>
+                        <div class="ai-tags">
+                            <span class="ai-tag"><i class="fa-solid fa-wand-magic-sparkles"></i> AI Tag: Modern Kitchen</span>
+                            <span class="ai-tag"><i class="fa-solid fa-wand-magic-sparkles"></i> AI Tag: Corner Plot</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer preview-footer" style="justify-content: flex-end;">
+                <div class="preview-actions">
+                    <button class="btn-outline" onclick="closeModal('preview-modal')">Edit Content</button>
+                    <button class="btn-primary" onclick="publishListing()"><i class="fa-solid fa-database"></i> Save to Inventory</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast hidden">
+        <i class="fa-solid fa-check-circle"></i> <span id="toast-message">Success!</span>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

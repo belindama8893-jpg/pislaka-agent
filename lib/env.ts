@@ -1,0 +1,30 @@
+function readEnv(name: string) {
+  return process.env[name] ?? "";
+}
+
+export const env = {
+  supabaseUrl: readEnv("NEXT_PUBLIC_SUPABASE_URL"),
+  supabaseAnonKey: readEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+  supabaseServiceRoleKey: readEnv("SUPABASE_SERVICE_ROLE_KEY"),
+  deepseekApiKey: readEnv("DEEPSEEK_API_KEY"),
+  deepseekBaseUrl: readEnv("DEEPSEEK_BASE_URL") || "https://api.deepseek.com",
+  deepseekModel: readEnv("DEEPSEEK_MODEL") || "deepseek-chat",
+  sttProvider: readEnv("STT_PROVIDER") || "openai",
+  openaiApiKey: readEnv("OPENAI_API_KEY"),
+  openaiTranscriptionModel: readEnv("OPENAI_TRANSCRIPTION_MODEL") || "whisper-1",
+  deepgramApiKey: readEnv("DEEPGRAM_API_KEY"),
+  deepgramModel: readEnv("DEEPGRAM_MODEL") || "nova-3-general",
+  deepgramLanguage: readEnv("DEEPGRAM_LANGUAGE") || "multi",
+  googleSttApiKey: readEnv("GOOGLE_STT_API_KEY"),
+  appUrl: readEnv("NEXT_PUBLIC_APP_URL") || "http://localhost:3000"
+};
+
+export function requireServerEnv(name: keyof typeof env) {
+  const value = env[name];
+
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+
+  return value;
+}
