@@ -1,7 +1,8 @@
 "use client";
 
 import { ArrowUp, LoaderCircle, Mic, Plus, Square, X, type LucideIcon } from "lucide-react";
-import type { FormEvent, ReactNode } from "react";
+import { useEffect, useRef } from "react";
+import type { FormEvent, KeyboardEvent, ReactNode } from "react";
 
 export type AgentComposerAction = {
   icon: LucideIcon;
@@ -51,6 +52,25 @@ export function AgentComposer({
   value,
   voiceSlot
 }: AgentComposerProps) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    textarea.style.height = "0px";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 144)}px`;
+  }, [value]);
+
+  function handleTextareaKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
+    }
+  }
+
   return (
     <form className={`agent-composer ${className}`} onSubmit={onSubmit}>
       {media.length ? (
@@ -82,12 +102,15 @@ export function AgentComposer({
         {voiceSlot ? (
           voiceSlot
         ) : (
-          <input
+          <textarea
+            ref={textareaRef}
             aria-label={inputAriaLabel}
             className="agent-composer-input"
             placeholder={placeholder}
+            rows={1}
             value={value}
             onChange={(event) => onChange(event.target.value)}
+            onKeyDown={handleTextareaKeyDown}
           />
         )}
         <button

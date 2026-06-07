@@ -62,6 +62,7 @@ type ChatMessage = {
   promotion?: ListingPromotion;
   promotionTarget?: RecentListingSummary;
   promotionInstruction?: string;
+  promotionChannels?: PromotionChannel[];
 };
 
 type LeadStatusUpdatePreview = {
@@ -91,6 +92,7 @@ type ChatMessageUiPayload = Partial<
     | "promotion"
     | "promotionTarget"
     | "promotionInstruction"
+    | "promotionChannels"
   >
 >;
 
@@ -128,7 +130,8 @@ function structuredPayloadForMessage(message: ChatMessage): Record<string, unkno
     "leadReply",
     "promotion",
     "promotionTarget",
-    "promotionInstruction"
+    "promotionInstruction",
+    "promotionChannels"
   ] as const) {
     if (message[key] !== undefined) {
       ui[key] = message[key];
@@ -144,6 +147,26 @@ const promotionChannels: Array<{ channel: PromotionChannel; label: string }> = [
   { channel: "instagram", label: "Instagram" },
   { channel: "portal", label: "Portal" }
 ];
+
+function extractPromotionChannels(messageText: string): PromotionChannel[] {
+  const normalized = messageText.toLowerCase();
+  const channels: PromotionChannel[] = [];
+
+  if (/\bwhats\s*app\b|\bwhatsapp\b|\bwa\b/.test(normalized)) {
+    channels.push("whatsapp");
+  }
+  if (/\bfacebook\b|\bfb\b/.test(normalized)) {
+    channels.push("facebook");
+  }
+  if (/\binstagram\b|\binsta\b|\big\b/.test(normalized)) {
+    channels.push("instagram");
+  }
+  if (/\bportal\b|\bzameen\b|\bolx\b|\bwebsite\b/.test(normalized)) {
+    channels.push("portal");
+  }
+
+  return channels;
+}
 
 const waveformBarCount = 48;
 const idleVoiceLevels = Array.from({ length: waveformBarCount }, (_, index) => {
@@ -665,16 +688,17 @@ function PromotionPack({ promotion }: { promotion: ListingPromotion }) {
 }
 
 function PromotionConfirmCard({
+  initialChannels,
   listing,
   onGenerate
 }: {
+  initialChannels?: PromotionChannel[];
   listing: RecentListingSummary;
   onGenerate: (channels: PromotionChannel[]) => void;
 }) {
-  const [selectedChannels, setSelectedChannels] = useState<PromotionChannel[]>([
-    "whatsapp",
-    "facebook"
-  ]);
+  const [selectedChannels, setSelectedChannels] = useState<PromotionChannel[]>(
+    initialChannels?.length ? initialChannels : ["whatsapp"]
+  );
 
   function toggleChannel(channel: PromotionChannel) {
     setSelectedChannels((current) =>
@@ -1772,7 +1796,8 @@ export function AgentWorkspace({
     appendAssistantMessage({
       content: "I found a matching listing. Please confirm the property and choose channels before I generate campaign links.",
       promotionTarget: selectedListing,
-      promotionInstruction: messageText
+      promotionInstruction: messageText,
+      promotionChannels: extractPromotionChannels(messageText)
     });
   }
 
@@ -2454,6 +2479,7 @@ export function AgentWorkspace({
                 {message.promotion ? <PromotionPack promotion={message.promotion} /> : null}
                 {message.promotionTarget ? (
                   <PromotionConfirmCard
+                    initialChannels={message.promotionChannels}
                     listing={message.promotionTarget}
                     onGenerate={(channels) =>
                       void generatePromotionForListing(

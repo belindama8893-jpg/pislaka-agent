@@ -1400,12 +1400,12 @@ a {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
   gap: 8px;
-  align-items: center;
+  align-items: end;
   min-height: 58px;
-  padding: 0 8px 0 16px;
+  padding: 8px 8px 8px 16px;
   background: rgba(255, 255, 255, 0.92);
   border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 999px;
+  border-radius: 30px;
   box-shadow: 0 20px 70px rgba(15, 23, 42, 0.07);
   backdrop-filter: blur(18px);
 }
@@ -1420,15 +1420,20 @@ a {
 .agent-composer-input {
   width: 100%;
   min-width: 0;
-  min-height: 52px;
-  padding: 0 8px;
+  max-height: 144px;
+  min-height: 42px;
+  padding: 10px 8px;
   color: var(--text);
   background: transparent;
   border: 0;
   outline: 0;
   font-size: 0.98rem;
   font-weight: 300;
+  line-height: 1.35;
+  resize: none;
   text-align: left;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .agent-composer-input::placeholder {
@@ -4584,7 +4589,8 @@ a {
 
   .agent-composer-row {
     min-height: 58px;
-    padding: 0 8px 0 12px;
+    padding: 8px 8px 8px 12px;
+    border-radius: 30px;
   }
 
   .agent-composer-media {
@@ -4600,8 +4606,9 @@ a {
   }
 
   .agent-composer-input {
-    min-height: 50px;
-    padding: 0 14px;
+    max-height: 132px;
+    min-height: 42px;
+    padding: 10px 14px;
     font-size: 16px;
   }
 
