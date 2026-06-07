@@ -24,6 +24,10 @@ type RawListingRecord = Omit<ListingRecord, "media"> & {
   listing_media?: ListingMediaRecord[] | null;
 };
 
+type HomeProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
 function getFirstName(profile: BrokerProfile) {
   return profile.full_name?.trim().split(/\s+/)[0] || "Broker";
 }
@@ -40,6 +44,27 @@ function getInitials(profile: BrokerProfile) {
 
 function isProfileComplete(profile: BrokerProfile) {
   return Boolean(profile.full_name?.trim() && profile.city?.trim() && profile.agency_name?.trim());
+}
+
+function getSearchParamValue(
+  searchParams: Record<string, string | string[] | undefined>,
+  key: string
+) {
+  const value = searchParams[key];
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function formatListingPrice(listing: ListingRecord) {
+  if (!listing.price_amount) {
+    return "Price not set";
+  }
+
+  const crore = listing.price_amount / 10000000;
+  if (crore >= 1) {
+    return `${listing.price_currency ?? "PKR"} ${crore.toFixed(crore % 1 === 0 ? 0 : 1)} Crore`;
+  }
+
+  return `${listing.price_currency ?? "PKR"} ${listing.price_amount.toLocaleString("en-PK")}`;
 }
 
 async function getCurrentBrokerContext() {
@@ -127,13 +152,82 @@ async function getListingsForBroker(
   );
 }
 
-export default async function Home() {
+export default async function Home({ searchParams }: HomeProps) {
+  const resolvedSearchParams = searchParams ? await searchParams : {};
   const { supabase, broker } = await getCurrentBrokerContext();
   const [listings, leads, chatHistory] = await Promise.all([
     getListingsForBroker(supabase, broker.id),
-    getRecentLeadsForBroker(supabase, broker.id, 5),
+    getRecentLeadsForBroker(supabase, broker.id, 100),
     getAgentChatMessages(supabase, broker.id, { limit: 50 })
   ]);
+  const selectedListingId = getSearchParamValue(resolvedSearchParams, "listing");
+  const selectedLeadId = getSearchParamValue(resolvedSearchParams, "lead");
+  const selectedLeadIds = [
+    selectedLeadId,
+    ...(getSearchParamValue(resolvedSearchParams, "leads") ?? "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+  ].filter((item): item is string => Boolean(item));
+  const selectedListing = selectedListingId
+    ? listings.find((listing) => listing.id === selectedListingId)
+    : null;
+  const selectedLeads = selectedLeadIds.length
+    ? leads.filter((lead) => selectedLeadIds.includes(lead.id))
+    : [];
+  const selectedLeadAttachments = selectedLeads.map((selectedLead) => ({
+    id: `lead:${selectedLead.id}`,
+    type: "lead" as const,
+    entity_id: selectedLead.id,
+    label: selectedLead.full_name || selectedLead.phone || selectedLead.email || "Unnamed buyer",
+    summary: [
+      selectedLead.status,
+      [selectedLead.listing_title, selectedLead.listing_area, selectedLead.listing_city]
+        .filter(Boolean)
+        .join(", ") || null,
+      selectedLead.phone || null
+    ]
+      .filter(Boolean)
+      .join(" · "),
+    snapshot: {
+      status: selectedLead.status,
+      urgency: selectedLead.urgency,
+      full_name: selectedLead.full_name,
+      phone: selectedLead.phone,
+      email: selectedLead.email,
+      listing_title: selectedLead.listing_title,
+      listing_area: selectedLead.listing_area,
+      listing_city: selectedLead.listing_city
+    }
+  }));
+  const initialContextAttachments = [
+    selectedListing
+      ? {
+          id: `listing:${selectedListing.id}`,
+          type: "listing" as const,
+          entity_id: selectedListing.id,
+          label: selectedListing.title || "Untitled listing",
+          summary: [
+            [selectedListing.area_value, selectedListing.area_unit].filter(Boolean).join(" ") || null,
+            [selectedListing.location_area, selectedListing.city].filter(Boolean).join(", ") || null,
+            formatListingPrice(selectedListing)
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          snapshot: {
+            status: selectedListing.status,
+            title: selectedListing.title,
+            location_area: selectedListing.location_area,
+            city: selectedListing.city,
+            property_type: selectedListing.property_type,
+            listing_type: selectedListing.listing_type,
+            price_amount: selectedListing.price_amount,
+            price_currency: selectedListing.price_currency
+          }
+        }
+      : null,
+    ...selectedLeadAttachments
+  ].filter((item): item is NonNullable<typeof item> => Boolean(item));
   const firstName = getFirstName(broker);
   const profileComplete = isProfileComplete(broker);
   const newLeadsCount = leads.filter((lead) => lead.status === "new").length;
@@ -153,6 +247,7 @@ export default async function Home() {
             conversationId={chatHistory.conversationId}
             firstName={firstName}
             hasOlderMessages={chatHistory.hasMore}
+            initialContextAttachments={initialContextAttachments}
             initialMessages={chatHistory.messages}
             recentLeads={leads}
             recentListings={listings.map((listing) => ({

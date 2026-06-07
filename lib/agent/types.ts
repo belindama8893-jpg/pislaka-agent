@@ -1,11 +1,24 @@
 import { z } from "zod";
 import { brokerEventDraftInputSchema } from "@/lib/events/types";
 
+export const agentContextAttachmentSchema = z.object({
+  id: z.string().min(1),
+  type: z.enum(["listing", "lead"]),
+  entity_id: z.string().uuid(),
+  label: z.string().optional(),
+  summary: z.string().optional(),
+  snapshot: z.record(z.unknown()).optional()
+});
+
+export type AgentContextAttachment = z.infer<typeof agentContextAttachmentSchema>;
+
 export const agentMessageSchema = z.object({
   conversationId: z.string().uuid().optional(),
   message: z.string().min(1),
   brokerId: z.string().uuid().optional(),
   current_listing_id: z.string().uuid().optional(),
+  current_lead_id: z.string().uuid().optional(),
+  context_attachments: z.array(agentContextAttachmentSchema).max(20).optional(),
   context_messages: z
     .array(
       z.object({
@@ -77,6 +90,7 @@ export const agentResolutionSchema = z.object({
 export const agentActionSchema = z.object({
   intent: z.enum([
     "create_listing_draft",
+    "create_lead",
     "update_listing_draft",
     "publish_listing",
     "create_campaign_links",
@@ -85,6 +99,8 @@ export const agentActionSchema = z.object({
     "create_schedule_event",
     "list_schedule_events",
     "update_lead_status",
+    "update_lead_details",
+    "update_lead_listing",
     "show_basic_attribution",
     "general_reply"
   ]),
@@ -109,3 +125,38 @@ export const leadOperationPayloadSchema = z.object({
 });
 
 export type LeadOperationPayload = z.infer<typeof leadOperationPayloadSchema>;
+
+export const leadDetailsUpdatePayloadSchema = z.object({
+  lead_id: z.string().uuid().optional(),
+  lead_name: z.string().optional(),
+  query: z.string().optional(),
+  full_name: z.string().min(1).optional(),
+  phone: z.string().min(3).optional(),
+  email: z.string().email().nullable().optional(),
+  message: z.string().max(1000).nullable().optional()
+});
+
+export type LeadDetailsUpdatePayload = z.infer<typeof leadDetailsUpdatePayloadSchema>;
+
+export const leadListingUpdatePayloadSchema = z.object({
+  lead_id: z.string().uuid().optional(),
+  lead_name: z.string().optional(),
+  listing_id: z.string().uuid().optional(),
+  listing_query: z.string().optional(),
+  query: z.string().optional()
+});
+
+export type LeadListingUpdatePayload = z.infer<typeof leadListingUpdatePayloadSchema>;
+
+export const leadCreatePayloadSchema = z.object({
+  listing_id: z.string().uuid().optional(),
+  full_name: z.string().min(1).optional(),
+  phone: z.string().min(3).optional(),
+  email: z.string().email().optional(),
+  message: z.string().max(1000).optional(),
+  status: z.enum(["new", "contacted", "qualified", "closed", "lost"]).optional(),
+  urgency: z.enum(["low", "normal", "high"]).optional(),
+  source_channel: z.string().optional()
+});
+
+export type LeadCreatePayload = z.infer<typeof leadCreatePayloadSchema>;

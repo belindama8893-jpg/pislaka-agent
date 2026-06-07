@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowUp, LoaderCircle, Mic, Plus, Square, X, type LucideIcon } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent, ReactNode } from "react";
 
 export type AgentComposerAction = {
@@ -17,15 +17,33 @@ type AgentComposerMediaPreview = {
   previewUrl: string;
 };
 
+type AgentComposerFilePreview = {
+  id: string;
+  name: string;
+  sizeLabel: string;
+};
+
+export type AgentComposerContextPreview = {
+  id: string;
+  type: "listing" | "lead";
+  label: string;
+  summary: string;
+};
+
 type AgentComposerProps = {
   actions?: AgentComposerAction[];
+  attachActions?: AgentComposerAction[];
   className?: string;
+  contextAttachments?: AgentComposerContextPreview[];
+  files?: AgentComposerFilePreview[];
   inputAriaLabel?: string;
   isListening?: boolean;
   isTranscribing?: boolean;
   media?: AgentComposerMediaPreview[];
   onAttach: () => void;
   onChange: (value: string) => void;
+  onRemoveContext?: (contextId: string) => void;
+  onRemoveFile?: (fileId: string) => void;
   onRemoveMedia?: (mediaId: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onVoice: () => void;
@@ -37,13 +55,18 @@ type AgentComposerProps = {
 
 export function AgentComposer({
   actions,
+  attachActions,
   className = "",
+  contextAttachments = [],
+  files = [],
   inputAriaLabel = "Ask Pislaka Agent",
   isListening = false,
   isTranscribing = false,
   media = [],
   onAttach,
   onChange,
+  onRemoveContext,
+  onRemoveFile,
   onRemoveMedia,
   onSubmit,
   onVoice,
@@ -53,6 +76,7 @@ export function AgentComposer({
   voiceSlot
 }: AgentComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -71,10 +95,54 @@ export function AgentComposer({
     }
   }
 
+  function handleAttachClick() {
+    if (attachActions?.length) {
+      setIsAttachMenuOpen((current) => !current);
+      return;
+    }
+
+    onAttach();
+  }
+
+  function runAttachAction(action: AgentComposerAction) {
+    setIsAttachMenuOpen(false);
+    action.onClick();
+  }
+
   return (
     <form className={`agent-composer ${className}`} onSubmit={onSubmit}>
-      {media.length ? (
-        <div className="agent-composer-media" aria-label="Selected media">
+      {contextAttachments.length || files.length || media.length ? (
+        <div className="agent-composer-attachments" aria-label="Selected attachments">
+          {contextAttachments.map((item) => (
+            <div className={`agent-composer-context-chip ${item.type}`} key={item.id}>
+              <span>{item.type === "listing" ? "Listing" : "Lead"}</span>
+              <strong>{item.label}</strong>
+              <small>{item.summary}</small>
+              <button
+                aria-label={`Remove ${item.label}`}
+                type="button"
+                onClick={() => onRemoveContext?.(item.id)}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+
+          {files.map((item) => (
+            <div className="agent-composer-file-chip" key={item.id}>
+              <span>File</span>
+              <strong>{item.name}</strong>
+              <small>{item.sizeLabel}</small>
+              <button
+                aria-label={`Remove ${item.name}`}
+                type="button"
+                onClick={() => onRemoveFile?.(item.id)}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+
           {media.map((item) => (
             <div className="agent-composer-media-thumb" key={item.id}>
               {item.mediaType === "image" ? (
@@ -96,9 +164,31 @@ export function AgentComposer({
       ) : null}
 
       <div className="agent-composer-row">
-        <button aria-label="Attach media" className="agent-composer-icon" type="button" onClick={onAttach}>
+        <div className="agent-composer-attach-wrap">
+          <button
+            aria-expanded={isAttachMenuOpen}
+            aria-label="Add attachment"
+            className="agent-composer-icon"
+            type="button"
+            onClick={handleAttachClick}
+          >
           <Plus size={21} />
-        </button>
+          </button>
+          {isAttachMenuOpen && attachActions?.length ? (
+            <div className="agent-attach-menu" role="menu">
+              {attachActions.map((action) => {
+                const Icon = action.icon;
+
+                return (
+                  <button key={action.label} role="menuitem" type="button" onClick={() => runAttachAction(action)}>
+                    <Icon size={16} />
+                    <span>{action.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
         {voiceSlot ? (
           voiceSlot
         ) : (

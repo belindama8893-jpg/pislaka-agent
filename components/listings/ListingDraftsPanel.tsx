@@ -1,7 +1,19 @@
 "use client";
 
 import { type FormEvent, useState } from "react";
-import { Check, Copy, Edit3, Home, ImageIcon, Megaphone, Save, Upload, Video } from "lucide-react";
+import {
+  Check,
+  Copy,
+  Edit3,
+  Home,
+  ImageIcon,
+  Megaphone,
+  MessageCircle,
+  Save,
+  Sparkles,
+  Upload,
+  Video
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { ListingRecord } from "@/lib/listings/types";
 import type { ListingPromotion } from "@/lib/promotions/types";
@@ -358,6 +370,20 @@ export function ListingDraftsPanel({ className = "", collapsed = false, listings
                 </div>
 
                 <div className="listing-row-actions">
+                  <button
+                    className="outline-button small"
+                    type="button"
+                    onClick={() => router.push(`/?listing=${listing.id}`)}
+                  >
+                    <MessageCircle size={14} /> Ask Agent
+                  </button>
+                  <button
+                    className="outline-button small"
+                    type="button"
+                    onClick={() => router.push(`/?listing=${listing.id}&mode=edit`)}
+                  >
+                    <Sparkles size={14} /> Edit with Agent
+                  </button>
                   <button className="outline-button small" type="button" onClick={() => startEditing(listing)}>
                     <Edit3 size={14} /> Edit
                   </button>

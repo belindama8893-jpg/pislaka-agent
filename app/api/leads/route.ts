@@ -14,10 +14,32 @@ const leadRequestSchema = z.object({
   message: z.string().max(1000).optional()
 });
 
+const manualLeadCreateSchema = z
+  .object({
+    listing_id: z.string().uuid().optional(),
+    full_name: z.string().min(1).optional(),
+    phone: z.string().min(3).optional(),
+    email: z.string().email().optional().or(z.literal("")),
+    message: z.string().max(1000).optional(),
+    status: z.enum(["new", "contacted", "qualified", "closed", "lost"]).default("new"),
+    urgency: z.enum(["low", "normal", "high"]).default("normal"),
+    source_channel: z.string().default("manual")
+  })
+  .refine((value) => Boolean(value.full_name || value.phone || value.email), {
+    message: "A lead needs at least a name, phone, or email"
+  });
+
 const leadUpdateSchema = z.object({
   id: z.string().uuid(),
+  listing_id: z.string().uuid().nullable().optional(),
+  full_name: z.string().min(1).optional(),
+  phone: z.string().min(3).optional(),
+  email: z.string().email().nullable().optional(),
+  message: z.string().max(1000).nullable().optional(),
   status: z.enum(["new", "contacted", "qualified", "closed", "lost"]).optional(),
   urgency: z.enum(["low", "normal", "high"]).optional()
+}).refine((value) => Object.keys(value).some((key) => key !== "id"), {
+  message: "At least one lead field must be provided"
 });
 
 export async function GET() {
@@ -34,6 +56,79 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const body = await request.json();
+  const isCampaignLead = typeof body?.campaign_code === "string" && body.campaign_code.trim().length > 0;
+
+  if (!isCampaignLead) {
+    const parsedManualLead = manualLeadCreateSchema.safeParse(body);
+
+    if (!parsedManualLead.success) {
+      return NextResponse.json(
+        { error: "Invalid lead payload", issues: parsedManualLead.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    try {
+      const { supabase, broker } = await requireCurrentBroker();
+      const { data: listing } = parsedManualLead.data.listing_id
+        ? await supabase
+            .from("listings")
+            .select(
+              "id, status, title, description, city, location_area, property_type, listing_type, price_amount, price_currency, area_value, area_unit, bedrooms, bathrooms, features, created_at, updated_at"
+            )
+            .eq("id", parsedManualLead.data.listing_id)
+            .eq("broker_id", broker.id)
+            .maybeSingle()
+        : { data: null };
+      const aiSummary = await generateLeadSummary({
+        fullName: parsedManualLead.data.full_name ?? "Unnamed buyer",
+        phone: parsedManualLead.data.phone ?? "",
+        message: parsedManualLead.data.message || null,
+        channel: parsedManualLead.data.source_channel,
+        listing: (listing as ListingRecord | null) ?? null
+      });
+
+      const { data: lead, error: leadError } = await supabase
+        .from("leads")
+        .insert({
+          broker_id: broker.id,
+          listing_id: listing?.id ?? null,
+          campaign_link_id: null,
+          source_channel: parsedManualLead.data.source_channel,
+          full_name: parsedManualLead.data.full_name ?? null,
+          phone: parsedManualLead.data.phone ?? null,
+          email: parsedManualLead.data.email || null,
+          message: parsedManualLead.data.message ?? null,
+          ai_summary: aiSummary,
+          urgency: parsedManualLead.data.urgency,
+          status: parsedManualLead.data.status
+        })
+        .select("id, broker_id, listing_id, campaign_link_id, source_channel, full_name, phone, email, message, status, urgency, ai_summary, created_at, updated_at")
+        .single();
+
+      if (leadError || !lead) {
+        return NextResponse.json({ error: leadError?.message ?? "Unable to save lead" }, { status: 500 });
+      }
+
+      await supabase.from("audit_logs").insert({
+        broker_id: broker.id,
+        actor_type: "user",
+        action: "create_lead",
+        entity_type: "lead",
+        entity_id: lead.id,
+        after_payload: lead,
+        metadata: {
+          source: "api"
+        }
+      });
+
+      return NextResponse.json({ lead });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 500 });
+    }
+  }
+
   const parsed = leadRequestSchema.safeParse(body);
 
   if (!parsed.success) {

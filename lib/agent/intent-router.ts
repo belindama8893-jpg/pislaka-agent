@@ -1,6 +1,9 @@
 export type LocalIntentKind =
+  | "lead_create"
   | "lead_reply"
   | "lead_status_update"
+  | "lead_details_update"
+  | "lead_listing_update"
   | "schedule_event"
   | "lead_query"
   | "promotion"
@@ -31,12 +34,42 @@ export function isLeadQueryRequest(message: string) {
   );
 }
 
+export function isLeadCreateRequest(message: string) {
+  const hasCreateVerb = /\b(add|create|record|save|new)\b|新增|添加|记录|保存|新建/iu.test(message);
+  return hasCreateVerb && isLeadQueryRequest(message);
+}
+
 export function isLeadStatusRequest(message: string) {
   return (
     /mark|set|change|update|status|contacted|qualified|closed|lost|hot|cold|标记|改成|状态|已联系|成交|丢失|无效|高意向/i.test(
       message
     ) && isLeadQueryRequest(message)
   );
+}
+
+export function isLeadDetailsUpdateRequest(message: string) {
+  const hasUpdateVerb = /\b(change|changed|update|edit|modify|revise|set|correct)\b|修改|更改|改成|调整|编辑|更新/iu.test(
+    message
+  );
+  const hasLeadField = /\b(phone|mobile|number|contact|email|mail|name|buyer name|client name|message|note)\b|电话|手机号|号码|邮箱|姓名|名字|备注|留言/iu.test(
+    message
+  );
+
+  return hasUpdateVerb && hasLeadField && isLeadQueryRequest(message);
+}
+
+export function isLeadListingUpdateRequest(message: string) {
+  const hasLead = isLeadQueryRequest(message);
+  const hasListing =
+    /\b(listing|property|house|home|villa|apartment|flat|penthouse|plot|shop|commercial)\b|这套|这个房源|房源|房子|公寓|地皮|商铺/iu.test(
+      message
+    );
+  const hasRelationVerb =
+    /\b(link|attach|associate|connect|assign|move|change|switch|set)\b|关联|绑定|换到|改到|转到|设为|添加到/iu.test(
+      message
+    );
+
+  return hasLead && hasListing && hasRelationVerb;
 }
 
 export function isPromotionRequest(message: string) {
@@ -77,8 +110,20 @@ export function isListingDraftRequest(message: string) {
 }
 
 export function classifyLocalIntent(message: string): LocalIntentKind {
+  if (isLeadCreateRequest(message)) {
+    return "lead_create";
+  }
+
   if (isLeadReplyRequest(message)) {
     return "lead_reply";
+  }
+
+  if (isLeadDetailsUpdateRequest(message)) {
+    return "lead_details_update";
+  }
+
+  if (isLeadListingUpdateRequest(message)) {
+    return "lead_listing_update";
   }
 
   if (isLeadStatusRequest(message)) {

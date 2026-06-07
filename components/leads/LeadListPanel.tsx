@@ -14,6 +14,7 @@ import {
   X
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { LeadListItem, LeadRecord } from "@/lib/leads/types";
 import type { LeadReplyDraft } from "@/lib/leads/reply-types";
 
@@ -53,6 +54,7 @@ function getLeadInterest(lead: LeadListItem) {
 }
 
 export function LeadListPanel({ className = "", leads }: LeadListPanelProps) {
+  const router = useRouter();
   const [status, setStatus] = useState<string | null>(null);
   const [localLeads, setLocalLeads] = useState(leads);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
@@ -62,6 +64,7 @@ export function LeadListPanel({ className = "", leads }: LeadListPanelProps) {
   const [channelFilter, setChannelFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
   const channelOptions = useMemo(
     () =>
       Array.from(
@@ -102,6 +105,22 @@ export function LeadListPanel({ className = "", leads }: LeadListPanelProps) {
     () => localLeads.find((lead) => lead.id === selectedLeadId) ?? null,
     [localLeads, selectedLeadId]
   );
+
+  function toggleLeadSelection(leadId: string) {
+    setSelectedLeadIds((current) =>
+      current.includes(leadId)
+        ? current.filter((id) => id !== leadId)
+        : [...current, leadId]
+    );
+  }
+
+  function openSelectedLeadsInAgent() {
+    if (!selectedLeadIds.length) {
+      return;
+    }
+
+    router.push(`/?leads=${encodeURIComponent(selectedLeadIds.join(","))}`);
+  }
 
   async function updateLeadStatus(leadId: string, nextStatus: LeadRecord["status"]) {
     setUpdatingId(leadId);
@@ -201,6 +220,27 @@ export function LeadListPanel({ className = "", leads }: LeadListPanelProps) {
         </label>
       </div>
 
+      {selectedLeadIds.length ? (
+        <div className="lead-bulk-bar" role="status">
+          <strong>{selectedLeadIds.length} selected</strong>
+          <button className="outline-button small" type="button" onClick={openSelectedLeadsInAgent}>
+            <MessageCircle size={14} /> Ask Agent
+          </button>
+          <button className="outline-button small" type="button" onClick={openSelectedLeadsInAgent}>
+            Draft follow-ups
+          </button>
+          <button className="outline-button small" type="button" onClick={openSelectedLeadsInAgent}>
+            Change status
+          </button>
+          <button className="outline-button small" type="button" onClick={openSelectedLeadsInAgent}>
+            Schedule follow-up
+          </button>
+          <button className="icon-button compact" type="button" aria-label="Clear selected leads" onClick={() => setSelectedLeadIds([])}>
+            <X size={15} />
+          </button>
+        </div>
+      ) : null}
+
       {localLeads.length === 0 ? (
         <p className="empty-state">Buyer inquiries from public campaign pages will appear here.</p>
       ) : filteredLeads.length === 0 ? (
@@ -209,6 +249,13 @@ export function LeadListPanel({ className = "", leads }: LeadListPanelProps) {
         <div className="lead-list-stack">
           {filteredLeads.map((lead) => (
             <article className={`lead-list-row ${lead.urgency === "high" ? "urgent-lead" : ""}`} key={lead.id}>
+              <label className="lead-select-box" aria-label={`Select ${lead.full_name || lead.phone || "lead"}`}>
+                <input
+                  checked={selectedLeadIds.includes(lead.id)}
+                  type="checkbox"
+                  onChange={() => toggleLeadSelection(lead.id)}
+                />
+              </label>
               <div className="lead-list-main">
                 <div className="lead-list-header">
                   <strong>
@@ -240,6 +287,13 @@ export function LeadListPanel({ className = "", leads }: LeadListPanelProps) {
                   onClick={() => setSelectedLeadId(lead.id)}
                 >
                   View details
+                </button>
+                <button
+                  className="outline-button small"
+                  type="button"
+                  onClick={() => router.push(`/?lead=${lead.id}`)}
+                >
+                  <MessageCircle size={14} /> Ask Agent
                 </button>
                 <button
                   className="outline-button small"

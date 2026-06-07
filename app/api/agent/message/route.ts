@@ -59,6 +59,8 @@ export async function POST(request: Request) {
     const resolvedAction = broker?.id
       ? await resolveAgentActionEntities(action, supabase, broker.id, {
           currentListingId: parsed.data.current_listing_id,
+          currentLeadId: parsed.data.current_lead_id,
+          contextAttachments: parsed.data.context_attachments,
           originalMessage: parsed.data.message
         })
       : action;

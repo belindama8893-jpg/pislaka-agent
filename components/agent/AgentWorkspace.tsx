@@ -5,8 +5,10 @@ import {
   CalendarClock,
   CheckCircle2,
   Copy,
+  FileText,
   Globe2,
   House,
+  ImageIcon,
   Megaphone,
   MessageCircle,
   Phone,
@@ -16,13 +18,20 @@ import {
   X,
   UserPlus
 } from "lucide-react";
-import { AgentComposer } from "@/components/agent/AgentComposer";
+import { AgentComposer, type AgentComposerContextPreview } from "@/components/agent/AgentComposer";
 import { useRouter } from "next/navigation";
 import type { AgentChatMessageRecord } from "@/lib/agent/conversations";
 import type { BrokerEventDraftInput } from "@/lib/events/types";
 import type { LeadListItem, LeadRecord } from "@/lib/leads/types";
 import type { LeadReplyDraft } from "@/lib/leads/reply-types";
-import type { AgentAction, LeadOperationPayload, ListingUpdatePayload } from "@/lib/agent/types";
+import type {
+  AgentAction,
+  LeadCreatePayload,
+  LeadDetailsUpdatePayload,
+  LeadListingUpdatePayload,
+  LeadOperationPayload,
+  ListingUpdatePayload
+} from "@/lib/agent/types";
 import type { ListingDraftInput, ListingDraftUpdateInput } from "@/lib/listings/types";
 import type { ListingPromotion, PromotionChannel } from "@/lib/promotions/types";
 
@@ -49,6 +58,7 @@ type AgentWorkspaceProps = {
   firstName: string;
   hasOlderMessages: boolean;
   initialMessages: AgentChatMessageRecord[];
+  initialContextAttachments?: ChatContextAttachment[];
   recentListings: RecentListingSummary[];
   recentLeads: LeadListItem[];
 };
@@ -60,10 +70,16 @@ type ChatMessage = {
   content: string;
   isStreaming?: boolean;
   attachments?: PendingMedia[];
+  contextAttachments?: ChatContextAttachment[];
+  fileAttachments?: PendingFileAttachment[];
   draft?: ListingDraftInput;
   scheduleEvent?: BrokerEventDraftInput;
   leadResults?: LeadListItem[];
   leadLatestOffer?: boolean;
+  leadDetailsUpdate?: LeadDetailsUpdatePreview;
+  leadCreate?: LeadCreatePreview;
+  leadBatchStatusUpdate?: LeadBatchStatusUpdatePreview;
+  leadListingUpdate?: LeadListingUpdatePreview;
   leadStatusUpdate?: LeadStatusUpdatePreview;
   leadReply?: LeadReplyDraftWithLink;
   listingUpdate?: ListingUpdatePreview;
@@ -78,6 +94,28 @@ type LeadStatusUpdatePreview = {
   lead: LeadListItem;
   status?: LeadRecord["status"];
   urgency?: LeadRecord["urgency"];
+};
+
+type LeadDetailsUpdateChanges = Partial<Pick<LeadDetailsUpdatePayload, "full_name" | "phone" | "email" | "message">>;
+
+type LeadDetailsUpdatePreview = {
+  lead: LeadListItem;
+  changes: LeadDetailsUpdateChanges;
+};
+
+type LeadCreatePreview = {
+  payload: LeadCreatePayload;
+};
+
+type LeadBatchStatusUpdatePreview = {
+  leads: LeadListItem[];
+  status?: LeadRecord["status"];
+  urgency?: LeadRecord["urgency"];
+};
+
+type LeadListingUpdatePreview = {
+  lead: LeadListItem;
+  listing: RecentListingSummary;
 };
 
 type ListingUpdateChanges = Partial<Omit<ListingDraftUpdateInput, "id">>;
@@ -109,6 +147,10 @@ type ChatMessageUiPayload = Partial<
     | "scheduleEvent"
     | "leadResults"
     | "leadLatestOffer"
+    | "leadDetailsUpdate"
+    | "leadCreate"
+    | "leadBatchStatusUpdate"
+    | "leadListingUpdate"
     | "leadStatusUpdate"
     | "leadReply"
     | "listingUpdate"
@@ -119,6 +161,15 @@ type ChatMessageUiPayload = Partial<
     | "promotionChannels"
   >
 >;
+
+type ChatContextAttachment = {
+  id: string;
+  type: "listing" | "lead";
+  entity_id: string;
+  label: string;
+  summary: string;
+  snapshot?: Record<string, unknown>;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -150,6 +201,10 @@ function structuredPayloadForMessage(message: ChatMessage): Record<string, unkno
     "scheduleEvent",
     "leadResults",
     "leadLatestOffer",
+    "leadDetailsUpdate",
+    "leadCreate",
+    "leadBatchStatusUpdate",
+    "leadListingUpdate",
     "leadStatusUpdate",
     "leadReply",
     "listingUpdate",
@@ -205,6 +260,11 @@ type PendingMedia = {
   file: File;
   previewUrl: string;
   mediaType: "image" | "video";
+};
+
+type PendingFileAttachment = {
+  id: string;
+  file: File;
 };
 
 function ChannelLogo({ channel }: { channel: PromotionChannel }) {
@@ -345,6 +405,26 @@ function hasListingUpdateChanges(changes: ListingUpdateChanges) {
   return Object.keys(changes).length > 0;
 }
 
+function leadDetailsPayloadToChanges(payload: LeadDetailsUpdatePayload): LeadDetailsUpdateChanges {
+  const changes: LeadDetailsUpdateChanges = {};
+
+  for (const key of ["full_name", "phone", "email", "message"] as const) {
+    if (payload[key] !== undefined) {
+      changes[key] = payload[key] as never;
+    }
+  }
+
+  return changes;
+}
+
+function hasLeadDetailsUpdateChanges(changes: LeadDetailsUpdateChanges) {
+  return Object.keys(changes).length > 0;
+}
+
+function getLeadValue(lead: LeadListItem, field: keyof LeadDetailsUpdateChanges) {
+  return lead[field];
+}
+
 function toDatetimeLocal(value: string | undefined) {
   if (!value) {
     return "";
@@ -450,6 +530,123 @@ function formatListingCurrency(amount: number | null | undefined, currency = "PK
   }
 
   return `${currency} ${amount.toLocaleString("en-PK")}`;
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  const kilobytes = bytes / 1024;
+  if (kilobytes < 1024) {
+    return `${kilobytes.toFixed(kilobytes >= 100 ? 0 : 1)} KB`;
+  }
+
+  const megabytes = kilobytes / 1024;
+  return `${megabytes.toFixed(megabytes >= 100 ? 0 : 1)} MB`;
+}
+
+function listingToContextAttachment(listing: RecentListingSummary): ChatContextAttachment {
+  const area = [listing.area_value, listing.area_unit].filter(Boolean).join(" ");
+  const location = [listing.location_area, listing.city].filter(Boolean).join(", ");
+
+  return {
+    id: `listing:${listing.id}`,
+    type: "listing",
+    entity_id: listing.id,
+    label: listing.title || "Untitled listing",
+    summary: [area || null, location || null, formatListingCurrency(listing.price_amount, listing.price_currency ?? "PKR")]
+      .filter(Boolean)
+      .join(" · "),
+    snapshot: {
+      status: listing.status,
+      title: listing.title,
+      location_area: listing.location_area,
+      city: listing.city,
+      property_type: listing.property_type,
+      listing_type: listing.listing_type,
+      price_amount: listing.price_amount,
+      price_currency: listing.price_currency,
+      area_value: listing.area_value,
+      area_unit: listing.area_unit,
+      bedrooms: listing.bedrooms,
+      bathrooms: listing.bathrooms
+    }
+  };
+}
+
+function leadToContextAttachment(lead: LeadListItem): ChatContextAttachment {
+  return {
+    id: `lead:${lead.id}`,
+    type: "lead",
+    entity_id: lead.id,
+    label: lead.full_name || lead.phone || lead.email || "Unnamed buyer",
+    summary: [lead.status, getLeadInterestLine(lead), lead.phone || null].filter(Boolean).join(" · "),
+    snapshot: {
+      status: lead.status,
+      urgency: lead.urgency,
+      full_name: lead.full_name,
+      phone: lead.phone,
+      email: lead.email,
+      listing_title: lead.listing_title,
+      listing_area: lead.listing_area,
+      listing_city: lead.listing_city,
+      campaign_channel: lead.campaign_channel,
+      source_channel: lead.source_channel
+    }
+  };
+}
+
+function summarizeContextAttachments(contextAttachments: ChatContextAttachment[]) {
+  if (!contextAttachments.length) {
+    return "";
+  }
+
+  return `Selected context: ${contextAttachments
+    .map((item) => `${item.type === "listing" ? "Listing" : "Lead"} ${item.label}`)
+    .join(", ")}.`;
+}
+
+function summarizeFileAttachments(fileAttachments: PendingFileAttachment[]) {
+  if (!fileAttachments.length) {
+    return "";
+  }
+
+  return `Attached ${fileAttachments.length} file${fileAttachments.length === 1 ? "" : "s"}: ${fileAttachments
+    .map((item) => item.file.name)
+    .join(", ")}.`;
+}
+
+function looksLikeBulkLeadWrite(message: string) {
+  return /reply|follow[-\s]?up|follow up|mark|status|schedule|hot|warm|contacted|qualified|phone|mobile|number|email|name|contact|话术|回复|跟进|标记|状态|安排|回访|电话|手机号|邮箱|名字/i.test(message);
+}
+
+function leadStatusFromMessage(message: string): Pick<LeadBatchStatusUpdatePreview, "status" | "urgency"> | null {
+  if (/lost|无效|丢失/i.test(message)) {
+    return { status: "lost" };
+  }
+
+  if (/closed|成交/i.test(message)) {
+    return { status: "closed" };
+  }
+
+  if (/hot|qualified|高意向|强意向/i.test(message)) {
+    return { status: "qualified", urgency: "high" };
+  }
+
+  if (/contacted|已联系|联系过|跟进过/i.test(message)) {
+    return { status: "contacted" };
+  }
+
+  if (/\bnew\b|新/i.test(message)) {
+    return { status: "new" };
+  }
+
+  return null;
+}
+
+function looksLikeBulkLeadStatusUpdate(message: string) {
+  return /mark|status|hot|contacted|qualified|closed|lost|new|标记|状态|已联系|成交|丢失|无效|高意向/i.test(message);
 }
 
 function formatListingUpdateValue(value: unknown, field: string) {
@@ -837,7 +1034,13 @@ function PromotionConfirmCard({
   );
 }
 
-function LeadResultsCard({ leads }: { leads: LeadListItem[] }) {
+function LeadResultsCard({
+  leads,
+  onSelect
+}: {
+  leads: LeadListItem[];
+  onSelect?: (lead: LeadListItem) => void;
+}) {
   return (
     <div className="lead-chat-card">
       <div className="card-title">
@@ -854,7 +1057,14 @@ function LeadResultsCard({ leads }: { leads: LeadListItem[] }) {
                   {lead.status} · {lead.phone || "No phone"} · {formatLeadCreatedAt(lead.created_at)}
                 </small>
               </div>
-              <span className={`lead-status ${lead.status}`}>{lead.status}</span>
+              <div className="lead-chat-row-action">
+                <span className={`lead-status ${lead.status}`}>{lead.status}</span>
+                {onSelect ? (
+                  <button className="outline-button small" type="button" onClick={() => onSelect(lead)}>
+                    Select
+                  </button>
+                ) : null}
+              </div>
             </div>
           ))}
         </div>
@@ -890,6 +1100,7 @@ function LeadStatusConfirmCard({
   preview: LeadStatusUpdatePreview;
   onUpdated: () => void;
 }) {
+  const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -946,6 +1157,337 @@ function LeadStatusConfirmCard({
       <div className="card-actions">
         <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
           <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm update"}
+        </button>
+      </div>
+      {status ? <p className="agent-draft-status">{status}</p> : null}
+    </div>
+  );
+}
+
+const leadDetailsFieldLabels: Record<keyof LeadDetailsUpdateChanges, string> = {
+  full_name: "Name",
+  phone: "Phone",
+  email: "Email",
+  message: "Message"
+};
+
+function LeadDetailsConfirmCard({
+  preview,
+  onUpdated
+}: {
+  preview: LeadDetailsUpdatePreview;
+  onUpdated: () => void;
+}) {
+  const router = useRouter();
+  const [isSaving, setIsSaving] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const entries = Object.entries(preview.changes).filter(([, value]) => value !== undefined) as Array<
+    [keyof LeadDetailsUpdateChanges, string | null]
+  >;
+
+  async function handleConfirm() {
+    if (isSaving) {
+      return;
+    }
+
+    setIsSaving(true);
+    setStatus("Updating lead...");
+    const response = await fetch("/api/leads", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        id: preview.lead.id,
+        ...preview.changes
+      })
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      setStatus(payload?.error ?? "Unable to update lead");
+      setIsSaving(false);
+      return;
+    }
+
+    setStatus("Lead updated.");
+    onUpdated();
+    setIsSaving(false);
+  }
+
+  return (
+    <div className="lead-chat-card">
+      <div className="card-title">
+        <Pencil size={16} /> Confirm lead details update
+      </div>
+      <div className="lead-chat-row standalone">
+        <div>
+          <strong>{preview.lead.full_name || "Unnamed buyer"}</strong>
+          <p>{getLeadInterestLine(preview.lead)}</p>
+          <small>{preview.lead.phone || "No phone"}</small>
+        </div>
+        <span className={`lead-status ${preview.lead.status}`}>{preview.lead.status}</span>
+      </div>
+      <div className="listing-update-list">
+        {entries.map(([field, nextValue]) => (
+          <div className="listing-update-row" key={field}>
+            <span>{leadDetailsFieldLabels[field]}</span>
+            <div>
+              <small>{formatListingUpdateValue(getLeadValue(preview.lead, field), field)}</small>
+              <strong>{formatListingUpdateValue(nextValue, field)}</strong>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="card-actions">
+        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
+          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm update"}
+        </button>
+      </div>
+      {status ? <p className="agent-draft-status">{status}</p> : null}
+    </div>
+  );
+}
+
+function LeadCreateConfirmCard({
+  preview,
+  onSaved
+}: {
+  preview: LeadCreatePreview;
+  onSaved: () => void;
+}) {
+  const router = useRouter();
+  const [isSaving, setIsSaving] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  async function handleConfirm() {
+    if (isSaving) {
+      return;
+    }
+
+    setIsSaving(true);
+    setStatus("Saving lead...");
+    const response = await fetch("/api/leads", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(preview.payload)
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      setStatus(payload?.error ?? "Unable to save lead");
+      setIsSaving(false);
+      return;
+    }
+
+    setStatus("Lead saved.");
+    onSaved();
+    router.refresh();
+    setIsSaving(false);
+  }
+
+  return (
+    <div className="lead-chat-card">
+      <div className="card-title">
+        <UserPlus size={16} /> Confirm new lead
+      </div>
+      <div className="listing-update-list">
+        {[
+          ["Name", preview.payload.full_name],
+          ["Phone", preview.payload.phone],
+          ["Email", preview.payload.email],
+          ["Status", preview.payload.status ?? "new"],
+          ["Urgency", preview.payload.urgency ?? "normal"],
+          ["Message", preview.payload.message]
+        ]
+          .filter(([, value]) => Boolean(value))
+          .map(([label, value]) => (
+            <div className="listing-update-row" key={label}>
+              <span>{label}</span>
+              <div>
+                <strong>{String(value)}</strong>
+              </div>
+            </div>
+          ))}
+      </div>
+      <div className="card-actions">
+        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
+          <CheckCircle2 size={15} /> {isSaving ? "Saving..." : "Confirm & save"}
+        </button>
+      </div>
+      {status ? <p className="agent-draft-status">{status}</p> : null}
+    </div>
+  );
+}
+
+function LeadBatchStatusConfirmCard({
+  preview,
+  onUpdated
+}: {
+  preview: LeadBatchStatusUpdatePreview;
+  onUpdated: () => void;
+}) {
+  const router = useRouter();
+  const [isSaving, setIsSaving] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  async function handleConfirm() {
+    if (isSaving || !preview.status) {
+      return;
+    }
+
+    setIsSaving(true);
+    setStatus(`Updating ${preview.leads.length} leads...`);
+    const results = await Promise.all(
+      preview.leads.map((lead) =>
+        fetch("/api/leads", {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            id: lead.id,
+            status: preview.status,
+            urgency: preview.urgency
+          })
+        })
+      )
+    );
+    const failed = results.filter((response) => !response.ok).length;
+
+    if (failed) {
+      setStatus(`${failed} lead${failed === 1 ? "" : "s"} could not be updated.`);
+      setIsSaving(false);
+      return;
+    }
+
+    setStatus("Leads updated.");
+    onUpdated();
+    router.refresh();
+    setIsSaving(false);
+  }
+
+  return (
+    <div className="lead-chat-card">
+      <div className="card-title">
+        <CheckCircle2 size={16} /> Confirm batch lead update
+      </div>
+      <p className="agent-draft-status">
+        {preview.leads.length} lead{preview.leads.length === 1 ? "" : "s"} will be changed to{" "}
+        {preview.status ?? "the selected status"}
+        {preview.urgency ? ` with ${preview.urgency} urgency` : ""}.
+      </p>
+      <div className="lead-chat-list">
+        {preview.leads.slice(0, 6).map((lead) => (
+          <div className="lead-chat-row" key={lead.id}>
+            <div>
+              <strong>{lead.full_name || lead.phone || "Unnamed buyer"}</strong>
+              <small>
+                {lead.status} {preview.status ? `→ ${preview.status}` : ""} · {lead.phone || "No phone"}
+              </small>
+            </div>
+            <span className={`lead-status ${preview.status ?? lead.status}`}>{preview.status ?? lead.status}</span>
+          </div>
+        ))}
+      </div>
+      <div className="card-actions">
+        <button
+          className="primary-button small"
+          type="button"
+          disabled={isSaving || !preview.status}
+          onClick={handleConfirm}
+        >
+          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm batch update"}
+        </button>
+      </div>
+      {status ? <p className="agent-draft-status">{status}</p> : null}
+    </div>
+  );
+}
+
+function LeadListingConfirmCard({
+  preview,
+  onUpdated
+}: {
+  preview: LeadListingUpdatePreview;
+  onUpdated: () => void;
+}) {
+  const router = useRouter();
+  const [isSaving, setIsSaving] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const currentListingLabel =
+    [preview.lead.listing_title, preview.lead.listing_area, preview.lead.listing_city]
+      .filter(Boolean)
+      .join(", ") || "No primary listing";
+  const nextListingLabel =
+    preview.listing.title ||
+    [preview.listing.area_value, preview.listing.area_unit, preview.listing.property_type]
+      .filter(Boolean)
+      .join(" ") ||
+    "Untitled listing";
+
+  async function handleConfirm() {
+    if (isSaving) {
+      return;
+    }
+
+    setIsSaving(true);
+    setStatus("Updating lead listing...");
+    const response = await fetch("/api/leads", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        id: preview.lead.id,
+        listing_id: preview.listing.id
+      })
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      setStatus(payload?.error ?? "Unable to update lead listing");
+      setIsSaving(false);
+      return;
+    }
+
+    setStatus("Lead listing updated.");
+    onUpdated();
+    router.refresh();
+    setIsSaving(false);
+  }
+
+  return (
+    <div className="lead-chat-card">
+      <div className="card-title">
+        <House size={16} /> Confirm lead listing
+      </div>
+      <div className="lead-chat-row standalone">
+        <div>
+          <strong>{preview.lead.full_name || preview.lead.phone || "Unnamed buyer"}</strong>
+          <p>{getLeadInterestLine(preview.lead)}</p>
+          <small>{preview.lead.phone || "No phone"}</small>
+        </div>
+        <span className={`lead-status ${preview.lead.status}`}>{preview.lead.status}</span>
+      </div>
+      <div className="listing-update-list">
+        <div className="listing-update-row">
+          <span>Primary listing</span>
+          <div>
+            <small>{currentListingLabel}</small>
+            <strong>
+              {nextListingLabel} ·{" "}
+              {[preview.listing.location_area, preview.listing.city].filter(Boolean).join(", ") ||
+                "Location not set"}
+            </strong>
+          </div>
+        </div>
+      </div>
+      <div className="card-actions">
+        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
+          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm listing"}
         </button>
       </div>
       {status ? <p className="agent-draft-status">{status}</p> : null}
@@ -1523,15 +2065,21 @@ export function AgentWorkspace({
   conversationId: initialConversationId,
   firstName,
   hasOlderMessages,
+  initialContextAttachments = [],
   initialMessages,
   recentLeads,
   recentListings
 }: AgentWorkspaceProps) {
   const [input, setInput] = useState("");
   const [composerMedia, setComposerMedia] = useState<PendingMedia[]>([]);
+  const [composerFiles, setComposerFiles] = useState<PendingFileAttachment[]>([]);
+  const [contextAttachments, setContextAttachments] = useState<ChatContextAttachment[]>(initialContextAttachments);
+  const [contextPickerMode, setContextPickerMode] = useState<"listing" | "lead" | null>(null);
   const [pendingMedia, setPendingMedia] = useState<PendingMedia[]>([]);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
-  const [activeListingId, setActiveListingId] = useState<string | null>(recentListings[0]?.id ?? null);
+  const [activeListingId, setActiveListingId] = useState<string | null>(
+    initialContextAttachments.find((item) => item.type === "listing")?.entity_id ?? recentListings[0]?.id ?? null
+  );
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [canLoadOlder, setCanLoadOlder] = useState(hasOlderMessages);
   const [oldestMessageCreatedAt, setOldestMessageCreatedAt] = useState<string | null>(
@@ -1554,6 +2102,7 @@ export function AgentWorkspace({
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [voiceLevels, setVoiceLevels] = useState(idleVoiceLevels);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const documentFileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const activeTurnAnchorRef = useRef<string | null>(null);
@@ -1597,6 +2146,28 @@ export function AgentWorkspace({
       label: "Schedule Viewing",
       onClick: () =>
         void submitMessage("Schedule a viewing with Ahmed tomorrow at 3pm for my DHA Phase 5 villa.")
+    }
+  ];
+  const attachActions = [
+    {
+      icon: ImageIcon,
+      label: "Upload photo/video",
+      onClick: openComposerMediaPicker
+    },
+    {
+      icon: FileText,
+      label: "Upload file",
+      onClick: openDocumentPicker
+    },
+    {
+      icon: House,
+      label: "Choose listing",
+      onClick: () => setContextPickerMode("listing" as const)
+    },
+    {
+      icon: MessageCircle,
+      label: "Choose lead",
+      onClick: () => setContextPickerMode("lead" as const)
     }
   ];
 
@@ -1713,6 +2284,48 @@ export function AgentWorkspace({
       }));
   }
 
+  function addContextAttachment(attachment: ChatContextAttachment) {
+    setContextAttachments((current) => {
+      const withoutDuplicate = current.filter((item) => item.id !== attachment.id);
+      return [...withoutDuplicate, attachment].slice(-8);
+    });
+
+    if (attachment.type === "listing") {
+      setActiveListingId(attachment.entity_id);
+    }
+  }
+
+  function addListingContext(listing: RecentListingSummary) {
+    addContextAttachment(listingToContextAttachment(listing));
+    setContextPickerMode(null);
+  }
+
+  function addLeadContext(lead: LeadListItem) {
+    addContextAttachment(leadToContextAttachment(lead));
+    setContextPickerMode(null);
+  }
+
+  function removeContextAttachment(contextId: string) {
+    setContextAttachments((current) => current.filter((item) => item.id !== contextId));
+  }
+
+  function removeComposerFile(fileId: string) {
+    setComposerFiles((current) => current.filter((item) => item.id !== fileId));
+  }
+
+  function selectedContextEntityId(type: ChatContextAttachment["type"]) {
+    return [...contextAttachments].reverse().find((item) => item.type === type)?.entity_id;
+  }
+
+  function composerContextPreviews(): AgentComposerContextPreview[] {
+    return contextAttachments.map((item) => ({
+      id: item.id,
+      type: item.type,
+      label: item.label,
+      summary: item.summary
+    }));
+  }
+
   async function persistAssistantMessage(message: ChatMessage) {
     try {
       const response = await fetch("/api/agent/messages", {
@@ -1770,13 +2383,20 @@ export function AgentWorkspace({
 
   function appendUserMessage(
     content: string,
-    options: { attachments?: PendingMedia[]; persist?: boolean } = {}
+    options: {
+      attachments?: PendingMedia[];
+      contextAttachments?: ChatContextAttachment[];
+      fileAttachments?: PendingFileAttachment[];
+      persist?: boolean;
+    } = {}
   ) {
     const nextMessage: ChatMessage = {
       id: createId(),
       role: "user",
       content,
-      attachments: options.attachments
+      attachments: options.attachments,
+      contextAttachments: options.contextAttachments,
+      fileAttachments: options.fileAttachments
     };
 
     setMessages((current) => [...current, nextMessage]);
@@ -2366,6 +2986,151 @@ export function AgentWorkspace({
     });
   }
 
+  function proposeLeadDetailsUpdate(
+    actionResponse: string,
+    payload: LeadDetailsUpdatePayload,
+    resolution?: AgentResolution
+  ) {
+    const target = getLeadTarget(payload, resolution);
+    const changes = leadDetailsPayloadToChanges(payload);
+
+    if (!hasLeadDetailsUpdateChanges(changes)) {
+      appendAssistantMessage({
+        content:
+          "I found the lead edit request, but I could not identify which detail to change. Tell me the new phone, email, name, or message."
+      });
+      return;
+    }
+
+    if (target.ambiguous) {
+      const candidateText = formatResolutionCandidates(target.candidates);
+      appendAssistantMessage({
+        content: candidateText
+          ? `I found more than one matching lead: ${candidateText}. Please choose the exact lead before I update contact details.`
+          : "I found more than one matching lead. Please choose the exact lead before I update contact details."
+      });
+      return;
+    }
+
+    if (!target.lead) {
+      const requestedLead = payload.lead_name ? ` "${payload.lead_name}"` : "";
+      appendAssistantMessage({
+        content: `I could not find a matching recent lead${requestedLead}. Please check the buyer name, phone number, or open Leads to choose the exact record.`
+      });
+      return;
+    }
+
+    appendAssistantMessage({
+      content: actionResponse,
+      leadDetailsUpdate: {
+        lead: target.lead,
+        changes
+      }
+    });
+  }
+
+  function proposeLeadCreate(payload: LeadCreatePayload) {
+    if (!payload.full_name && !payload.phone && !payload.email) {
+      appendAssistantMessage({
+        content: "I can create a lead, but I need at least a buyer name, phone, or email."
+      });
+      return;
+    }
+
+    appendAssistantMessage({
+      content: "I prepared a new lead. Please confirm before I save it.",
+      leadCreate: {
+        payload: {
+          ...payload,
+          status: payload.status ?? "new",
+          urgency: payload.urgency ?? "normal",
+          source_channel: payload.source_channel ?? "manual"
+        }
+      }
+    });
+  }
+
+  function proposeBatchLeadStatusUpdate(messageText: string, leadContexts: ChatContextAttachment[]) {
+    const nextStatus = leadStatusFromMessage(messageText);
+    const leads = leadContexts
+      .map((context) => recentLeads.find((lead) => lead.id === context.entity_id))
+      .filter((lead): lead is LeadListItem => Boolean(lead));
+
+    if (!nextStatus?.status || !leads.length) {
+      appendAssistantMessage({
+        content:
+          "I attached those leads, but I need a clear status before I can prepare a batch update. Try contacted, hot, qualified, closed, lost, or new."
+      });
+      return;
+    }
+
+    appendAssistantMessage({
+      content: "I prepared a batch lead status update. Please confirm before I change these records.",
+      leadBatchStatusUpdate: {
+        leads,
+        ...nextStatus
+      }
+    });
+  }
+
+  function proposeLeadListingUpdate(
+    actionResponse: string,
+    payload: LeadListingUpdatePayload,
+    resolution?: AgentResolution
+  ) {
+    const target = getLeadTarget(payload, resolution);
+
+    if (resolution?.target_type === "listing" && resolution.status === "ambiguous") {
+      appendAssistantMessage({
+        content: "I found more than one matching listing. Choose the exact property before I update the lead."
+      });
+      return;
+    }
+
+    if (resolution?.target_type === "listing" && resolution.status !== "matched") {
+      appendAssistantMessage({
+        content: "I need a confirmed listing before I can change this lead's primary listing. Select a listing card or add more property details."
+      });
+      return;
+    }
+
+    if (target.ambiguous) {
+      const candidateText = formatResolutionCandidates(target.candidates);
+      appendAssistantMessage({
+        content: candidateText
+          ? `I found more than one matching lead: ${candidateText}. Please choose the exact lead before I update its listing.`
+          : "I found more than one matching lead. Please choose the exact lead before I update its listing."
+      });
+      return;
+    }
+
+    if (!target.lead) {
+      appendAssistantMessage({
+        content: "I need a confirmed lead before I can change the primary listing. Select a lead card or add the buyer name or phone."
+      });
+      return;
+    }
+
+    const listing = payload.listing_id
+      ? recentListings.find((item) => item.id === payload.listing_id)
+      : null;
+
+    if (!listing) {
+      appendAssistantMessage({
+        content: "I need a confirmed listing before I can change this lead's primary listing. Select a listing card or add more property details."
+      });
+      return;
+    }
+
+    appendAssistantMessage({
+      content: actionResponse,
+      leadListingUpdate: {
+        lead: target.lead,
+        listing
+      }
+    });
+  }
+
   async function draftReplyForLead(
     actionResponse: string,
     payload: LeadOperationPayload,
@@ -2456,27 +3221,41 @@ export function AgentWorkspace({
   async function submitMessage(messageText: string) {
     const trimmed = messageText.trim();
     const outgoingMedia = composerMedia;
+    const outgoingFiles = composerFiles;
+    const outgoingContext = contextAttachments;
     const hasOutgoingMedia = outgoingMedia.length > 0;
+    const hasOutgoingFiles = outgoingFiles.length > 0;
+    const hasOutgoingContext = outgoingContext.length > 0;
 
-    if ((!trimmed && !hasOutgoingMedia) || isSubmitting) {
+    if ((!trimmed && !hasOutgoingMedia && !hasOutgoingFiles && !hasOutgoingContext) || isSubmitting) {
       return;
     }
 
     const mediaSummary = hasOutgoingMedia
       ? `Attached ${outgoingMedia.length} listing media file${outgoingMedia.length === 1 ? "" : "s"}.`
       : "";
+    const fileSummary = summarizeFileAttachments(outgoingFiles);
+    const contextSummary = summarizeContextAttachments(outgoingContext);
     const userMessageContent = trimmed || mediaSummary;
-    const agentMessageContent = hasOutgoingMedia
-      ? [trimmed, mediaSummary].filter(Boolean).join("\n\n")
-      : trimmed;
+    const visibleUserMessageContent = [userMessageContent, fileSummary, contextSummary].filter(Boolean).join("\n\n");
+    const agentMessageContent = [trimmed, mediaSummary, fileSummary, contextSummary].filter(Boolean).join("\n\n");
+    const currentListingId = selectedContextEntityId("listing") ?? activeListingId ?? undefined;
+    const currentLeadId = selectedContextEntityId("lead") ?? undefined;
 
     setInput("");
     setComposerMedia([]);
+    setComposerFiles([]);
+    setContextAttachments([]);
     setIsSubmitting(true);
     if (hasOutgoingMedia) {
       setPendingMedia((current) => [...current, ...outgoingMedia]);
     }
-    const userMessage = appendUserMessage(userMessageContent, { attachments: outgoingMedia, persist: false });
+    const userMessage = appendUserMessage(visibleUserMessageContent, {
+      attachments: outgoingMedia,
+      contextAttachments: outgoingContext,
+      fileAttachments: outgoingFiles,
+      persist: false
+    });
     activeTurnAnchorRef.current = userMessage.id;
     activeOutputRef.current = null;
     setActiveTurnAnchorId(userMessage.id);
@@ -2485,9 +3264,27 @@ export function AgentWorkspace({
 
     if (!trimmed) {
       appendAssistantMessage({
-        content: activeDraftId
-          ? "I added these media files to the current listing preview. They will upload when you confirm the listing."
-          : "I can use these as listing media. Please add the property details, and I will draft the listing with these files attached."
+        content: hasOutgoingMedia
+          ? activeDraftId
+            ? "I added these media files to the current listing preview. They will upload when you confirm the listing."
+            : "I can use these as listing media. Please add the property details, and I will draft the listing with these files attached."
+          : "I attached that context. Tell me what you want to do with it, for example edit it, draft a reply, promote it, or schedule a follow-up."
+      });
+      setIsSubmitting(false);
+      return;
+    }
+
+    const selectedLeadContexts = outgoingContext.filter((item) => item.type === "lead");
+    if (selectedLeadContexts.length > 1 && looksLikeBulkLeadWrite(trimmed)) {
+      if (looksLikeBulkLeadStatusUpdate(trimmed)) {
+        proposeBatchLeadStatusUpdate(trimmed, selectedLeadContexts);
+        setIsSubmitting(false);
+        return;
+      }
+
+      appendAssistantMessage({
+        content:
+          "I attached those leads, but bulk replies and follow-up scheduling need their own batch preview before I create anything. I can handle one selected lead now, or we can add those batch workflows next."
       });
       setIsSubmitting(false);
       return;
@@ -2506,7 +3303,9 @@ export function AgentWorkspace({
         body: JSON.stringify({
           conversationId,
           message: agentMessageContent,
-          current_listing_id: activeListingId ?? undefined,
+          current_listing_id: currentListingId,
+          current_lead_id: currentLeadId,
+          context_attachments: outgoingContext,
           context_messages: recentContextMessages()
         })
       });
@@ -2537,6 +3336,11 @@ export function AgentWorkspace({
           : undefined;
       const leadPayload = payload.action.payload as LeadOperationPayload | undefined;
 
+      if (payload.action.intent === "create_lead") {
+        proposeLeadCreate(payload.action.payload as LeadCreatePayload);
+        return;
+      }
+
       if (payload.action.intent === "list_leads" && leadPayload) {
         showLeadResults(payload.action.response, leadPayload);
         return;
@@ -2544,6 +3348,24 @@ export function AgentWorkspace({
 
       if (payload.action.intent === "update_lead_status" && leadPayload) {
         proposeLeadStatusUpdate(payload.action.response, leadPayload, payload.action.resolution);
+        return;
+      }
+
+      if (payload.action.intent === "update_lead_details") {
+        proposeLeadDetailsUpdate(
+          payload.action.response,
+          payload.action.payload as LeadDetailsUpdatePayload,
+          payload.action.resolution
+        );
+        return;
+      }
+
+      if (payload.action.intent === "update_lead_listing") {
+        proposeLeadListingUpdate(
+          payload.action.response,
+          payload.action.payload as LeadListingUpdatePayload,
+          payload.action.resolution
+        );
         return;
       }
 
@@ -2765,9 +3587,30 @@ export function AgentWorkspace({
     mediaSelectionTargetRef.current = "composer";
   }
 
+  function handleDocumentSelected(files: FileList | null) {
+    if (!files?.length) {
+      return;
+    }
+
+    const accepted = Array.from(files).map((file) => ({
+      id: createId(),
+      file
+    }));
+
+    setComposerFiles((current) => [...current, ...accepted].slice(-8));
+
+    if (documentFileInputRef.current) {
+      documentFileInputRef.current.value = "";
+    }
+  }
+
   function openComposerMediaPicker() {
     mediaSelectionTargetRef.current = "composer";
     fileInputRef.current?.click();
+  }
+
+  function openDocumentPicker() {
+    documentFileInputRef.current?.click();
   }
 
   function openDraftMediaPicker() {
@@ -2834,6 +3677,22 @@ export function AgentWorkspace({
                 ))}
               </div>
             ) : null}
+            {message.fileAttachments?.length || message.contextAttachments?.length ? (
+              <div className="message-context-preview" aria-label="Sent context">
+                {message.contextAttachments?.map((item) => (
+                  <span className={`message-context-chip ${item.type}`} key={item.id}>
+                    <strong>{item.type === "listing" ? "Listing" : "Lead"}</strong>
+                    {item.label}
+                  </span>
+                ))}
+                {message.fileAttachments?.map((item) => (
+                  <span className="message-context-chip file" key={item.id}>
+                    <strong>File</strong>
+                    {item.file.name}
+                  </span>
+                ))}
+              </div>
+            ) : null}
             {!message.isStreaming ? (
               <>
                 {message.draft ? (
@@ -2865,7 +3724,7 @@ export function AgentWorkspace({
                     }}
                   />
                 ) : null}
-                {message.leadResults ? <LeadResultsCard leads={message.leadResults} /> : null}
+                {message.leadResults ? <LeadResultsCard leads={message.leadResults} onSelect={addLeadContext} /> : null}
                 {message.leadLatestOffer ? (
                   <LeadLatestOfferCard
                     onConfirm={() => {
@@ -2885,6 +3744,46 @@ export function AgentWorkspace({
                     onUpdated={() => {
                       appendAssistantMessage({
                         content: "Done. I updated the lead status. You can review all lead activity from the Leads page."
+                      });
+                    }}
+                  />
+                ) : null}
+                {message.leadDetailsUpdate ? (
+                  <LeadDetailsConfirmCard
+                    preview={message.leadDetailsUpdate}
+                    onUpdated={() => {
+                      appendAssistantMessage({
+                        content: "Done. I updated the lead details. You can review the latest contact record from the Leads page."
+                      });
+                    }}
+                  />
+                ) : null}
+                {message.leadCreate ? (
+                  <LeadCreateConfirmCard
+                    preview={message.leadCreate}
+                    onSaved={() => {
+                      appendAssistantMessage({
+                        content: "Done. I saved the lead. You can review it from the Leads page."
+                      });
+                    }}
+                  />
+                ) : null}
+                {message.leadBatchStatusUpdate ? (
+                  <LeadBatchStatusConfirmCard
+                    preview={message.leadBatchStatusUpdate}
+                    onUpdated={() => {
+                      appendAssistantMessage({
+                        content: "Done. I updated the selected leads. You can review them from the Leads page."
+                      });
+                    }}
+                  />
+                ) : null}
+                {message.leadListingUpdate ? (
+                  <LeadListingConfirmCard
+                    preview={message.leadListingUpdate}
+                    onUpdated={() => {
+                      appendAssistantMessage({
+                        content: "Done. I updated the lead's primary listing. You can review the latest record from the Leads page."
                       });
                     }}
                   />
@@ -2949,6 +3848,66 @@ export function AgentWorkspace({
         <div className="messages-end-spacer" ref={messagesEndRef} />
       </div>
 
+      {contextPickerMode ? (
+        <div className="agent-context-picker" role="dialog" aria-label={`Choose ${contextPickerMode}`}>
+          <div className="agent-context-picker-header">
+            <strong>{contextPickerMode === "listing" ? "Choose listing" : "Choose lead"}</strong>
+            <button
+              aria-label="Close chooser"
+              className="icon-button compact"
+              type="button"
+              onClick={() => setContextPickerMode(null)}
+            >
+              <X size={15} />
+            </button>
+          </div>
+          <div className="agent-context-picker-list">
+            {contextPickerMode === "listing" ? (
+              recentListings.length ? (
+                recentListings.slice(0, 12).map((listing) => (
+                  <button
+                    className="agent-context-option"
+                    key={listing.id}
+                    type="button"
+                    onClick={() => addListingContext(listing)}
+                  >
+                    <House size={15} />
+                    <span>
+                      <strong>{listing.title || "Untitled listing"}</strong>
+                      <small>
+                        {[listing.area_value, listing.area_unit].filter(Boolean).join(" ") || "Area not set"} ·{" "}
+                        {[listing.location_area, listing.city].filter(Boolean).join(", ") || "Location not set"}
+                      </small>
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <p className="agent-context-empty">No listings available yet.</p>
+              )
+            ) : recentLeads.length ? (
+              recentLeads.slice(0, 20).map((lead) => (
+                <button
+                  className="agent-context-option"
+                  key={lead.id}
+                  type="button"
+                  onClick={() => addLeadContext(lead)}
+                >
+                  <MessageCircle size={15} />
+                  <span>
+                    <strong>{lead.full_name || lead.phone || "Unnamed buyer"}</strong>
+                    <small>
+                      {lead.status} · {getLeadInterestLine(lead)} · {lead.phone || "No phone"}
+                    </small>
+                  </span>
+                </button>
+              ))
+            ) : (
+              <p className="agent-context-empty">No leads available yet.</p>
+            )}
+          </div>
+        </div>
+      ) : null}
+
       <input
         ref={fileInputRef}
         className="media-file-input"
@@ -2957,9 +3916,24 @@ export function AgentWorkspace({
         multiple
         onChange={(event) => handleMediaSelected(event.target.files)}
       />
+      <input
+        ref={documentFileInputRef}
+        className="media-file-input"
+        type="file"
+        accept=".pdf,.doc,.docx,.txt,.rtf,.xls,.xlsx,.csv,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        multiple
+        onChange={(event) => handleDocumentSelected(event.target.files)}
+      />
       <AgentComposer
         actions={!hasStarted ? quickActions : undefined}
+        attachActions={attachActions}
         className="workspace-agent-composer"
+        contextAttachments={composerContextPreviews()}
+        files={composerFiles.map((item) => ({
+          id: item.id,
+          name: item.file.name,
+          sizeLabel: formatFileSize(item.file.size)
+        }))}
         isListening={isListening}
         isTranscribing={isTranscribing}
         media={composerMedia.map((item) => ({
@@ -2970,6 +3944,8 @@ export function AgentWorkspace({
         }))}
         onAttach={openComposerMediaPicker}
         onChange={setInput}
+        onRemoveContext={removeContextAttachment}
+        onRemoveFile={removeComposerFile}
         onRemoveMedia={removeComposerMedia}
         onSubmit={handleSubmit}
         onVoice={handleVoiceInput}

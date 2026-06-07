@@ -1,6 +1,9 @@
 import { env, requireServerEnv } from "@/lib/env";
 import {
   agentActionSchema,
+  leadCreatePayloadSchema,
+  leadDetailsUpdatePayloadSchema,
+  leadListingUpdatePayloadSchema,
   leadOperationPayloadSchema,
   listingDraftPayloadSchema,
   listingUpdatePayloadSchema,
@@ -36,6 +39,7 @@ Your job:
 
 Supported intents:
 - create_listing_draft
+- create_lead
 - update_listing_draft
 - publish_listing
 - create_campaign_links
@@ -44,6 +48,8 @@ Supported intents:
 - create_schedule_event
 - list_schedule_events
 - update_lead_status
+- update_lead_details
+- update_lead_listing
 - show_basic_attribution
 - general_reply
 
@@ -118,12 +124,44 @@ Lead operation output shape:
   }
 }
 
+Lead creation output shape:
+{
+  "intent": "create_lead",
+  "requires_confirmation": true,
+  "response": "I prepared a new lead. Please confirm before I save it.",
+  "payload": {
+    "full_name": "Ahmed Khan",
+    "phone": "03001234567",
+    "email": "ahmed@example.com",
+    "message": "Wants a 10 marla house in DHA Phase 5",
+    "status": "new",
+    "urgency": "normal",
+    "source_channel": "manual"
+  }
+}
+
+Lead-listing relation update output shape:
+{
+  "intent": "update_lead_listing",
+  "requires_confirmation": true,
+  "response": "I prepared a lead listing change. Please confirm before I update the lead.",
+  "payload": {
+    "lead_name": "Ahmed",
+    "listing_query": "DHA Phase 6 10 marla house",
+    "query": "Move Ahmed to the DHA Phase 6 house"
+  }
+}
+
 Lead rules:
+- Use create_lead when the user asks to add, create, record, or save a lead/customer/buyer.
+- Use update_lead_listing when the user asks to link, attach, associate, move, change, or assign a lead/customer/buyer to a listing/property.
 - Use list_leads when the user asks who/which leads/customers/buyers to follow up, new leads, hot leads, or today's leads.
 - Use draft_lead_reply when the user asks to reply to a lead/customer/buyer.
 - Use update_lead_status when the user asks to mark/change/update a lead status.
+- Use update_lead_details when the user asks to edit a lead's phone, email, name, or message.
 - If the user says hot lead, set status to qualified and urgency to high.
 - Never update a lead without confirmation.
+- Never update lead contact details without confirmation.
 - Use update_listing_draft when the user asks to change/edit/update/correct an existing listing or this/current listing.
 - Never save listing edits without confirmation.
 
@@ -175,6 +213,93 @@ function parseLocalLeadStatusUpdate(message: string): AgentAction {
       ...status,
       query: message
     }
+  };
+}
+
+function extractEmail(message: string) {
+  return message.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]?.toLowerCase();
+}
+
+function extractPhone(message: string) {
+  const match =
+    message.match(/(?:phone|mobile|number|contact|电话|手机号|号码)[^+\d]*(\+?\d[\d\s().-]{5,}\d)/i) ??
+    message.match(/(\+?\d[\d\s().-]{7,}\d)/);
+
+  return match?.[1]?.replace(/[^\d+]/g, "");
+}
+
+function parseLocalLeadCreate(message: string): AgentAction {
+  const phone = extractPhone(message);
+  const email = extractEmail(message);
+  const explicitName =
+    message.match(/(?:named|called|name is|客户|线索|买家|客户叫|名字是)\s*([\p{L}\p{N}][\p{L}\p{N} .'’-]{1,60})/iu)?.[1]?.trim() ??
+    message.match(/\b(?:add|create|record|save|new)\s+(?:a\s+)?(?:lead|customer|buyer|client)?\s*([\p{L}][\p{L} .'’-]{1,50})/iu)?.[1]?.trim();
+  const status = /hot|高意向|强意向/i.test(message)
+    ? ({ status: "qualified" as const, urgency: "high" as const })
+    : ({ status: "new" as const, urgency: "normal" as const });
+
+  return {
+    intent: "create_lead",
+    requires_confirmation: true,
+    response: "I prepared a new lead. Please confirm before I save it.",
+    payload: {
+      full_name: explicitName,
+      phone,
+      email,
+      message,
+      source_channel: "manual",
+      ...status
+    }
+  };
+}
+
+function parseLocalLeadListingUpdate(message: string): AgentAction {
+  return {
+    intent: "update_lead_listing",
+    requires_confirmation: true,
+    response: "I prepared a lead listing change. Please confirm before I update the lead.",
+    payload: {
+      lead_name: extractLeadName(message),
+      listing_query: message,
+      query: message
+    }
+  };
+}
+
+function extractLeadDetailsUpdate(message: string) {
+  const payload: Record<string, unknown> = {
+    lead_name: extractLeadName(message),
+    query: message
+  };
+  const emailMatch = extractEmail(message);
+  const phoneMatch =
+    message.match(/(?:phone|mobile|number|contact|电话|手机号|号码)[^+\d]*(\+?\d[\d\s().-]{5,}\d)/i) ??
+    message.match(/(?:to|=|改成|设为|更新为)\s*(\+?\d[\d\s().-]{5,}\d)/i);
+  const nameMatch =
+    message.match(/(?:name|buyer name|client name|姓名|名字)[^,.，。]*(?:to|=|改成|设为|更新为)\s*([\p{L}\p{N}][\p{L}\p{N} .'’-]{1,60})/iu) ??
+    message.match(/(?:rename|重命名为)\s*([\p{L}\p{N}][\p{L}\p{N} .'’-]{1,60})/iu);
+
+  if (phoneMatch) {
+    payload.phone = phoneMatch[1].replace(/[^\d+]/g, "");
+  }
+
+  if (emailMatch) {
+    payload.email = emailMatch;
+  }
+
+  if (nameMatch) {
+    payload.full_name = nameMatch[1].trim();
+  }
+
+  return payload;
+}
+
+function parseLocalLeadDetailsUpdate(message: string): AgentAction {
+  return {
+    intent: "update_lead_details",
+    requires_confirmation: true,
+    response: "I prepared a lead details update. Please confirm before I change the contact record.",
+    payload: extractLeadDetailsUpdate(message)
   };
 }
 
@@ -463,10 +588,62 @@ function normalizeAgentAction(action: AgentAction, message: string): AgentAction
   }
 
   if (
+    action.intent === "create_lead" ||
     action.intent === "list_leads" ||
     action.intent === "draft_lead_reply" ||
-    action.intent === "update_lead_status"
+    action.intent === "update_lead_status" ||
+    action.intent === "update_lead_details" ||
+    action.intent === "update_lead_listing"
   ) {
+    if (action.intent === "update_lead_listing") {
+      const parsedPayload = leadListingUpdatePayloadSchema.safeParse(action.payload);
+      if (!parsedPayload.success) {
+        return parseLocalLeadListingUpdate(message);
+      }
+
+      return {
+        ...action,
+        requires_confirmation: true,
+        payload: {
+          ...parsedPayload.data,
+          query: parsedPayload.data.query ?? message,
+          listing_query: parsedPayload.data.listing_query ?? message
+        }
+      };
+    }
+
+    if (action.intent === "create_lead") {
+      const parsedPayload = leadCreatePayloadSchema.safeParse(action.payload);
+      if (!parsedPayload.success) {
+        return parseLocalLeadCreate(message);
+      }
+
+      return {
+        ...action,
+        requires_confirmation: true,
+        payload: {
+          ...parsedPayload.data,
+          source_channel: parsedPayload.data.source_channel ?? "manual"
+        }
+      };
+    }
+
+    if (action.intent === "update_lead_details") {
+      const parsedPayload = leadDetailsUpdatePayloadSchema.safeParse(action.payload);
+      if (!parsedPayload.success) {
+        return parseLocalLeadDetailsUpdate(message);
+      }
+
+      return {
+        ...action,
+        requires_confirmation: true,
+        payload: {
+          ...parsedPayload.data,
+          query: parsedPayload.data.query ?? message
+        }
+      };
+    }
+
     const parsedPayload = leadOperationPayloadSchema.safeParse(action.payload);
     if (!parsedPayload.success) {
       if (action.intent === "update_lead_status") {
@@ -529,8 +706,14 @@ function parseLocalAgentAction(message: string): AgentAction {
   const intent = classifyLocalIntent(message);
 
   switch (intent) {
+    case "lead_create":
+      return parseLocalLeadCreate(message);
     case "lead_reply":
       return parseLocalLeadReplyRequest(message);
+    case "lead_details_update":
+      return parseLocalLeadDetailsUpdate(message);
+    case "lead_listing_update":
+      return parseLocalLeadListingUpdate(message);
     case "lead_status_update":
       return parseLocalLeadStatusUpdate(message);
     case "schedule_event":
@@ -569,7 +752,9 @@ function formatRecentContext(context?: AgentRoutingContext) {
 }
 
 export async function routeAgentMessage(message: string, context?: AgentRoutingContext): Promise<AgentAction> {
-  if (classifyLocalIntent(message) === "listing_update") {
+  const localIntent = classifyLocalIntent(message);
+
+  if (localIntent === "listing_update" || localIntent === "lead_details_update") {
     return parseLocalAgentAction(message);
   }
 
