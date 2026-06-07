@@ -1,6 +1,6 @@
 "use client";
 
-import { List, LogOut, Sparkles, Users } from "lucide-react";
+import { BarChart3, CalendarClock, List, LogOut, MessageCircle, Users } from "lucide-react";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
@@ -40,7 +40,7 @@ export function AccountMenu({ initials, name, email, agency, city, listingsCount
 
         <nav className="account-menu-links" aria-label="Account workspace links">
           <Link href="/">
-            <Sparkles size={16} /> Agent Workspace
+            <MessageCircle size={16} /> Agent Chat
           </Link>
           <Link href="/listings">
             <List size={16} /> Listings
@@ -49,6 +49,12 @@ export function AccountMenu({ initials, name, email, agency, city, listingsCount
           <Link href="/leads">
             <Users size={16} /> Leads
             {typeof leadsCount === "number" ? <span className="urgent">{leadsCount}</span> : null}
+          </Link>
+          <Link href="#">
+            <BarChart3 size={16} /> Analytics
+          </Link>
+          <Link href="#">
+            <CalendarClock size={16} /> Schedule
           </Link>
         </nav>
 

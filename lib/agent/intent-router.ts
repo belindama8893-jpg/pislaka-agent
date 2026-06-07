@@ -4,7 +4,8 @@ export type LocalIntentKind =
   | "schedule_event"
   | "lead_query"
   | "promotion"
-  | "listing_draft";
+  | "listing_draft"
+  | "general_reply";
 
 export type LeadStatusPatch =
   | { status: "lost" }
@@ -45,6 +46,19 @@ export function isPromotionRequest(message: string) {
   return /promote|promotion|marketing|advertise|campaign|推广|宣传|营销|发布文案|渠道文案/i.test(message);
 }
 
+export function isListingDraftRequest(message: string) {
+  const hasListingAction =
+    /\b(list|listing|create|draft|publish|sell|sale|rent|lease|property|house|home|villa|apartment|flat|plot|shop|commercial)\b|房源|房子|出售|出租|发布|挂牌|公寓|地皮|商铺/u.test(
+      message
+    );
+  const hasPropertyFacts =
+    /\b\d+(?:\.\d+)?\s*(?:kanal|marla|sqft|sqm|bed|beds|bedroom|bedrooms|bath|baths|crore|cr|karor|lakh)\b|DHA\s*Phase\s*\d+|Bahria\s*Town|Lakecity|Lahore|Karachi|Islamabad/i.test(
+      message
+    );
+
+  return hasListingAction && hasPropertyFacts;
+}
+
 export function classifyLocalIntent(message: string): LocalIntentKind {
   if (isLeadReplyRequest(message)) {
     return "lead_reply";
@@ -66,7 +80,11 @@ export function classifyLocalIntent(message: string): LocalIntentKind {
     return "lead_query";
   }
 
-  return "listing_draft";
+  if (isListingDraftRequest(message)) {
+    return "listing_draft";
+  }
+
+  return "general_reply";
 }
 
 export function extractLeadName(message: string) {

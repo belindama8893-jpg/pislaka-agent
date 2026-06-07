@@ -1,20 +1,9 @@
-import {
-  BarChart3,
-  CalendarClock,
-  ChevronRight,
-  List,
-  Sparkles,
-  Users,
-  Zap
-} from "lucide-react";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AgentWorkspace } from "@/components/agent/AgentWorkspace";
 import { ProfileCompletionForm } from "@/components/profile/ProfileCompletionForm";
-import { AccountMenu } from "@/components/workspace/AccountMenu";
-import type { BrokerEventRecord } from "@/lib/events/types";
+import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
+import { getAgentChatMessages } from "@/lib/agent/conversations";
 import { getRecentLeadsForBroker } from "@/lib/leads/queries";
-import type { LeadListItem } from "@/lib/leads/types";
 import type { ListingMediaRecord, ListingRecord } from "@/lib/listings/types";
 import { createServiceClient, createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -37,51 +26,6 @@ type RawListingRecord = Omit<ListingRecord, "media"> & {
 
 function getFirstName(profile: BrokerProfile) {
   return profile.full_name?.trim().split(/\s+/)[0] || "Broker";
-}
-
-function formatLeadAge(createdAt: string) {
-  const minutes = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000));
-
-  if (minutes < 1) {
-    return "just now";
-  }
-
-  if (minutes < 60) {
-    return `${minutes}m ago`;
-  }
-
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return `${hours}h ago`;
-  }
-
-  return `${Math.floor(hours / 24)}d ago`;
-}
-
-function getLeadInterest(lead: LeadListItem) {
-  const listing = [lead.listing_title, lead.listing_area, lead.listing_city].filter(Boolean).join(", ");
-  const channel = lead.campaign_channel ?? lead.source_channel;
-
-  return [listing || "Listing not set", channel ? `via ${channel}` : null].filter(Boolean).join(" · ");
-}
-
-function getEventTimeLabel(event: BrokerEventRecord) {
-  const primaryTime = event.start_at ?? event.reminder_at;
-
-  if (!primaryTime) {
-    return event.recurrence_rule ? "Recurring" : "Time not set";
-  }
-
-  return new Intl.DateTimeFormat("en-PK", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  }).format(new Date(primaryTime));
-}
-
-function getEventContext(event: BrokerEventRecord) {
-  return [event.lead_name, event.listing_reference, event.location_text].filter(Boolean).join(" · ");
 }
 
 function getInitials(profile: BrokerProfile) {
@@ -183,109 +127,33 @@ async function getListingsForBroker(
   );
 }
 
-async function getUpcomingEventsForBroker(
-  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
-  brokerId: string
-) {
-  const { data: events, error } = await supabase
-    .from("broker_events")
-    .select(
-      "id, broker_id, event_category, event_type, title, description, start_at, end_at, reminder_at, recurrence_rule, status, lead_id, listing_id, lead_name, listing_reference, location_text, source_payload, created_from, created_at, updated_at"
-    )
-    .eq("broker_id", brokerId)
-    .eq("status", "scheduled")
-    .order("start_at", { ascending: true, nullsFirst: false })
-    .order("reminder_at", { ascending: true, nullsFirst: false })
-    .limit(5);
-
-  if (error) {
-    return [];
-  }
-
-  return (events ?? []) as BrokerEventRecord[];
-}
-
 export default async function Home() {
   const { supabase, broker } = await getCurrentBrokerContext();
-  const [listings, leads, events] = await Promise.all([
+  const [listings, leads, chatHistory] = await Promise.all([
     getListingsForBroker(supabase, broker.id),
     getRecentLeadsForBroker(supabase, broker.id, 5),
-    getUpcomingEventsForBroker(supabase, broker.id)
+    getAgentChatMessages(supabase, broker.id, { limit: 50 })
   ]);
   const firstName = getFirstName(broker);
   const profileComplete = isProfileComplete(broker);
   const newLeadsCount = leads.filter((lead) => lead.status === "new").length;
 
   return (
-    <main className="dashboard-shell">
-      <aside className="sidebar">
-        <div className="logo">Pislaka Agent</div>
-        <div className="nav-label">Workspace</div>
-        <nav className="nav-menu">
-          <a className="nav-item active" href="#">
-            <span>
-              <Sparkles size={18} /> AI Assistant
-            </span>
-          </a>
-          <div className="nav-label embedded">Structured Data</div>
-          <Link className="nav-item" href="/listings">
-            <span>
-              <List size={18} /> Listings
-            </span>
-            <strong>{listings.length}</strong>
-          </Link>
-          <Link className="nav-item" href="/leads">
-            <span>
-              <Users size={18} /> Leads
-            </span>
-            <strong className="urgent">{newLeadsCount}</strong>
-          </Link>
-          <a className="nav-item" href="#">
-            <span>
-              <BarChart3 size={18} /> Analytics
-            </span>
-          </a>
-        </nav>
-        <div className="profile">
-          <div className="avatar">{getInitials(broker)}</div>
-          <div>
-            <strong>{broker.full_name || broker.email || "Pislaka Broker"}</strong>
-            <small>
-              {broker.agency_name ? `${broker.agency_name}, ` : ""}
-              {broker.city || "Pakistan"}
-            </small>
-          </div>
-        </div>
-      </aside>
-
-      <section className="workspace">
-        <header className="topbar">
-          <div className="greeting">
-            <div>
-              <span className="workspace-eyebrow">Agent workspace</span>
-              <h1>Good afternoon, {firstName}</h1>
-              <p>Create listings, launch campaigns, and follow up with buyers from one flow.</p>
-            </div>
-          </div>
-          <div className="topbar-actions">
-            <AccountMenu
-              initials={getInitials(broker)}
-              name={broker.full_name || broker.email || "Pislaka Broker"}
-              email={broker.email}
-              agency={broker.agency_name}
-              city={broker.city}
-              listingsCount={listings.length}
-              leadsCount={newLeadsCount}
-            />
-          </div>
-        </header>
-
+    <WorkspaceShell
+      active="agent"
+      broker={broker}
+      initials={getInitials(broker)}
+      leadsCount={newLeadsCount}
+      listingsCount={listings.length}
+    >
         {!profileComplete ? <ProfileCompletionForm profile={broker} /> : null}
 
-        <div className="content-grid">
+        <div className="workspace-agent-grid workspace-agent-only">
           <AgentWorkspace
+            conversationId={chatHistory.conversationId}
             firstName={firstName}
-            listingsCount={listings.length}
+            hasOlderMessages={chatHistory.hasMore}
+            initialMessages={chatHistory.messages}
             recentLeads={leads}
             recentListings={listings.map((listing) => ({
               id: listing.id,
@@ -298,115 +166,7 @@ export default async function Home() {
               bedrooms: listing.bedrooms
             }))}
           />
-
-          <aside className="side-widgets focus-rail">
-            <section className="widget focus-widget">
-              <div className="widget-header">
-                <div>
-                  <span className="section-kicker">Priority</span>
-                  <h3>
-                    <Zap size={17} /> Buyer queue
-                  </h3>
-                </div>
-                <Link href="/leads">
-                  View all <ChevronRight size={14} />
-                </Link>
-              </div>
-              {leads.length ? (
-                leads.slice(0, 3).map((lead) => (
-                  <div className={`lead-row ${lead.urgency === "high" ? "urgent-lead" : ""}`} key={lead.id}>
-                    <div>
-                      <strong>{lead.full_name || "Unnamed buyer"}</strong>
-                      <p>{getLeadInterest(lead)}</p>
-                      {lead.ai_summary || lead.message ? <small>{lead.ai_summary || lead.message}</small> : null}
-                      <span className="lead-meta">
-                        {lead.phone || "No phone"} · {formatLeadAge(lead.created_at)}
-                      </span>
-                    </div>
-                    <Link className="ghost-link" href="/leads">
-                      Open
-                    </Link>
-                  </div>
-                ))
-              ) : (
-                <p className="empty-state">
-                  Campaign inquiries will appear here with channel attribution and follow-up context.
-                </p>
-              )}
-            </section>
-
-            <section className="widget focus-widget">
-              <div className="widget-header">
-                <div>
-                  <span className="section-kicker">Today / Upcoming</span>
-                  <h3>
-                    <CalendarClock size={17} /> Schedule
-                  </h3>
-                </div>
-              </div>
-              {events.length ? (
-                <div className="event-mini-list">
-                  {events.slice(0, 4).map((event) => (
-                    <div className="event-mini-row" key={event.id}>
-                      <time>{getEventTimeLabel(event)}</time>
-                      <div>
-                        <strong>{event.title}</strong>
-                        <small>{getEventContext(event) || event.event_type.replace(/_/g, " ")}</small>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="empty-state">
-                  Ask the agent to schedule viewings, follow-up reminders, offer deadlines, or weekly reviews.
-                </p>
-              )}
-            </section>
-
-            <section className="widget focus-widget">
-              <div className="widget-header">
-                <div>
-                  <span className="section-kicker">Workflow</span>
-                  <h3>
-                    <BarChart3 size={17} /> Operating rhythm
-                  </h3>
-                </div>
-              </div>
-              <div className="workflow-steps">
-                <div className="workflow-step active">
-                  <span>1</span>
-                  <div>
-                    <strong>Capture property</strong>
-                    <small>Voice, photos, or chat</small>
-                  </div>
-                </div>
-                <div className="workflow-step">
-                  <span>2</span>
-                  <div>
-                    <strong>Confirm listing</strong>
-                    <small>Edit facts before saving</small>
-                  </div>
-                </div>
-                <div className="workflow-step">
-                  <span>3</span>
-                  <div>
-                    <strong>Promote channels</strong>
-                    <small>Each channel gets a lead page</small>
-                  </div>
-                </div>
-                <div className="workflow-step">
-                  <span>4</span>
-                  <div>
-                    <strong>Follow up</strong>
-                    <small>Draft WhatsApp replies</small>
-                  </div>
-                </div>
-              </div>
-            </section>
-          </aside>
         </div>
-
-      </section>
-    </main>
+    </WorkspaceShell>
   );
 }

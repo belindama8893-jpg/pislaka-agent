@@ -1,8 +1,6 @@
-import { BarChart3, List, Sparkles, Users } from "lucide-react";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { LeadListPanel } from "@/components/leads/LeadListPanel";
-import { AccountMenu } from "@/components/workspace/AccountMenu";
+import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
 import { getRecentLeadsForBroker } from "@/lib/leads/queries";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -57,71 +55,15 @@ export default async function LeadsPage() {
   const newLeadsCount = leads.filter((lead) => lead.status === "new").length;
 
   return (
-    <main className="dashboard-shell">
-      <aside className="sidebar">
-        <div className="logo">Pislaka Agent</div>
-        <div className="nav-label">Workspace</div>
-        <nav className="nav-menu">
-          <Link className="nav-item" href="/">
-            <span>
-              <Sparkles size={18} /> AI Assistant
-            </span>
-          </Link>
-          <div className="nav-label embedded">Structured Data</div>
-          <Link className="nav-item" href="/listings">
-            <span>
-              <List size={18} /> Listings
-            </span>
-          </Link>
-          <Link className="nav-item active" href="/leads">
-            <span>
-              <Users size={18} /> Leads
-            </span>
-            <strong className="urgent">{newLeadsCount}</strong>
-          </Link>
-          <a className="nav-item" href="#">
-            <span>
-              <BarChart3 size={18} /> Analytics
-            </span>
-          </a>
-        </nav>
-        <div className="profile">
-          <div className="avatar">{getInitials(broker)}</div>
-          <div>
-            <strong>{broker.full_name || broker.email || "Pislaka Broker"}</strong>
-            <small>
-              {broker.agency_name ? `${broker.agency_name}, ` : ""}
-              {broker.city || "Pakistan"}
-            </small>
-          </div>
-        </div>
-      </aside>
-
-      <section className="workspace library-page">
-        <header className="topbar library-topbar">
-          <div className="greeting">
-            <div>
-              <h1>Leads</h1>
-              <p>Review buyer inquiries, source channels, and follow-up status.</p>
-            </div>
-          </div>
-          <div className="topbar-actions">
-            <Link className="outline-button" href="/">
-              Back to Agent Workspace
-            </Link>
-            <AccountMenu
-              initials={getInitials(broker)}
-              name={broker.full_name || broker.email || "Pislaka Broker"}
-              email={broker.email}
-              agency={broker.agency_name}
-              city={broker.city}
-              leadsCount={newLeadsCount}
-            />
-          </div>
-        </header>
-
-        <LeadListPanel className="library-page-panel" leads={leads} />
-      </section>
-    </main>
+    <WorkspaceShell
+      active="leads"
+      broker={broker}
+      initials={getInitials(broker)}
+      leadsCount={newLeadsCount}
+      subtitle="Review buyer inquiries, source channels, and follow-up status."
+      title="Leads"
+    >
+      <LeadListPanel className="library-page-panel" leads={leads} />
+    </WorkspaceShell>
   );
 }

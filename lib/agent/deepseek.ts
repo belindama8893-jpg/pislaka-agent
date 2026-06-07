@@ -183,6 +183,29 @@ function parseLocalLeadQuery(message: string): AgentAction {
   };
 }
 
+function parseLocalPromotionRequest(message: string): AgentAction {
+  return {
+    intent: "create_campaign_links",
+    requires_confirmation: true,
+    response: "Tell me which confirmed listing you want to promote, or refer to the current listing if one is open.",
+    payload: {
+      query: message
+    }
+  };
+}
+
+function parseLocalGeneralReply(message: string): AgentAction {
+  return {
+    intent: "general_reply",
+    requires_confirmation: false,
+    response:
+      "I can help with listing drafts, lead follow-ups, promotion copy, and viewing schedules. Tell me the property, buyer, or task you want to handle.",
+    payload: {
+      query: message
+    }
+  };
+}
+
 function extractScheduleTime(message: string) {
   const lower = message.toLowerCase();
   const timeMatch = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
@@ -420,13 +443,35 @@ function parseLocalAgentAction(message: string): AgentAction {
     case "lead_query":
       return parseLocalLeadQuery(message);
     case "promotion":
+      return parseLocalPromotionRequest(message);
     case "listing_draft":
-    default:
       return parseLocalListingDraft(message);
+    case "general_reply":
+    default:
+      return parseLocalGeneralReply(message);
   }
 }
 
-export async function routeAgentMessage(message: string): Promise<AgentAction> {
+type AgentRoutingContext = {
+  recentMessages?: Array<{
+    role: "user" | "assistant";
+    content: string;
+  }>;
+};
+
+function formatRecentContext(context?: AgentRoutingContext) {
+  const recentMessages = context?.recentMessages?.filter((item) => item.content.trim()).slice(-20) ?? [];
+
+  if (!recentMessages.length) {
+    return "No prior chat context.";
+  }
+
+  return recentMessages
+    .map((item) => `${item.role === "user" ? "Broker" : "Assistant"}: ${item.content.slice(0, 500)}`)
+    .join("\n");
+}
+
+export async function routeAgentMessage(message: string, context?: AgentRoutingContext): Promise<AgentAction> {
   if (!env.deepseekApiKey) {
     return parseLocalAgentAction(message);
   }
@@ -450,7 +495,9 @@ export async function routeAgentMessage(message: string): Promise<AgentAction> {
             role: "user",
             content: `Current date in Pakistan: ${new Date().toLocaleDateString("en-CA", {
               timeZone: "Asia/Karachi"
-            })}\n\nUser message: ${message}`
+            })}\n\nRecent chat context for short-term reference only. Do not treat chat text as confirmed business facts unless the target is resolved through database-backed APIs:\n${formatRecentContext(
+              context
+            )}\n\nUser message: ${message}`
           }
         ]
       })

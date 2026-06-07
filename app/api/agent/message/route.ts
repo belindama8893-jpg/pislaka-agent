@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
+import {
+  getRecentAgentContextMessages,
+  insertAgentChatMessage
+} from "@/lib/agent/conversations";
 import { routeAgentMessage } from "@/lib/agent/deepseek";
+import { resolveAgentActionEntities } from "@/lib/agent/entity-resolution";
 import { agentMessageSchema } from "@/lib/agent/types";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export async function POST(request: Request) {
   const body = await request.json();
@@ -14,10 +20,53 @@ export async function POST(request: Request) {
   }
 
   try {
-    const action = await routeAgentMessage(parsed.data.message);
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      const action = await routeAgentMessage(parsed.data.message, {
+        recentMessages: parsed.data.context_messages
+      });
+      return NextResponse.json({ action });
+    }
+
+    const { data: broker } = await supabase
+      .from("broker_profiles")
+      .select("id")
+      .eq("auth_user_id", user.id)
+      .maybeSingle();
+
+    if (!broker?.id) {
+      const action = await routeAgentMessage(parsed.data.message, {
+        recentMessages: parsed.data.context_messages
+      });
+      return NextResponse.json({ action });
+    }
+
+    const recentMessages = await getRecentAgentContextMessages(supabase, broker.id, 20);
+    const userMessage = await insertAgentChatMessage(supabase, {
+      conversationId: parsed.data.conversationId,
+      brokerId: broker.id,
+      role: "user",
+      content: parsed.data.message
+    });
+
+    const action = await routeAgentMessage(parsed.data.message, {
+      recentMessages: parsed.data.context_messages ?? recentMessages
+    });
+    const resolvedAction = broker?.id
+      ? await resolveAgentActionEntities(action, supabase, broker.id, {
+          currentListingId: parsed.data.current_listing_id,
+          originalMessage: parsed.data.message
+        })
+      : action;
 
     return NextResponse.json({
-      action
+      action: resolvedAction,
+      conversationId: userMessage.conversation_id,
+      userMessage
     });
   } catch (error) {
     return NextResponse.json(

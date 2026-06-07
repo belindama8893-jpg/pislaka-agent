@@ -17,16 +17,21 @@ type CampaignLookup = {
 export async function getRecentLeadsForBroker(
   supabase: SupabaseClient,
   brokerId: string,
-  limit = 6
+  limit = 6,
+  options: { includeClosed?: boolean } = {}
 ): Promise<LeadListItem[]> {
-  const { data: leads, error } = await supabase
+  let query = supabase
     .from("leads")
     .select(
       "id, broker_id, listing_id, campaign_link_id, source_channel, full_name, phone, email, message, status, urgency, ai_summary, created_at, updated_at"
     )
-    .eq("broker_id", brokerId)
-    .neq("status", "closed")
-    .neq("status", "lost")
+    .eq("broker_id", brokerId);
+
+  if (!options.includeClosed) {
+    query = query.neq("status", "closed").neq("status", "lost");
+  }
+
+  const { data: leads, error } = await query
     .order("created_at", { ascending: false })
     .limit(limit);
 

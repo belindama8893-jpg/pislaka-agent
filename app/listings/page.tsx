@@ -1,8 +1,6 @@
-import { BarChart3, List, Sparkles, Users } from "lucide-react";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ListingDraftsPanel } from "@/components/listings/ListingDraftsPanel";
-import { AccountMenu } from "@/components/workspace/AccountMenu";
+import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
 import { getRecentLeadsForBroker } from "@/lib/leads/queries";
 import type { ListingMediaRecord, ListingRecord } from "@/lib/listings/types";
 import { createServiceClient, createSupabaseServerClient } from "@/lib/supabase/server";
@@ -108,73 +106,16 @@ export default async function ListingsPage() {
   const newLeadsCount = leads.filter((lead) => lead.status === "new").length;
 
   return (
-    <main className="dashboard-shell">
-      <aside className="sidebar">
-        <div className="logo">Pislaka Agent</div>
-        <div className="nav-label">Workspace</div>
-        <nav className="nav-menu">
-          <Link className="nav-item" href="/">
-            <span>
-              <Sparkles size={18} /> AI Assistant
-            </span>
-          </Link>
-          <div className="nav-label embedded">Structured Data</div>
-          <Link className="nav-item active" href="/listings">
-            <span>
-              <List size={18} /> Listings
-            </span>
-            <strong>{listings.length}</strong>
-          </Link>
-          <Link className="nav-item" href="/leads">
-            <span>
-              <Users size={18} /> Leads
-            </span>
-            <strong className="urgent">{newLeadsCount}</strong>
-          </Link>
-          <a className="nav-item" href="#">
-            <span>
-              <BarChart3 size={18} /> Analytics
-            </span>
-          </a>
-        </nav>
-        <div className="profile">
-          <div className="avatar">{getInitials(broker)}</div>
-          <div>
-            <strong>{broker.full_name || broker.email || "Pislaka Broker"}</strong>
-            <small>
-              {broker.agency_name ? `${broker.agency_name}, ` : ""}
-              {broker.city || "Pakistan"}
-            </small>
-          </div>
-        </div>
-      </aside>
-
-      <section className="workspace library-page">
-        <header className="topbar library-topbar">
-          <div className="greeting">
-            <div>
-              <h1>Listings</h1>
-              <p>Review confirmed drafts, edit details, and attach property media.</p>
-            </div>
-          </div>
-          <div className="topbar-actions">
-            <Link className="outline-button" href="/">
-              Back to Agent Workspace
-            </Link>
-            <AccountMenu
-              initials={getInitials(broker)}
-              name={broker.full_name || broker.email || "Pislaka Broker"}
-              email={broker.email}
-              agency={broker.agency_name}
-              city={broker.city}
-              listingsCount={listings.length}
-              leadsCount={newLeadsCount}
-            />
-          </div>
-        </header>
-
-        <ListingDraftsPanel className="library-page-panel" listings={listings} />
-      </section>
-    </main>
+    <WorkspaceShell
+      active="listings"
+      broker={broker}
+      initials={getInitials(broker)}
+      leadsCount={newLeadsCount}
+      listingsCount={listings.length}
+      subtitle="Review confirmed drafts, edit property facts, and attach photos or video."
+      title="Listings"
+    >
+      <ListingDraftsPanel className="library-page-panel" listings={listings} />
+    </WorkspaceShell>
   );
 }

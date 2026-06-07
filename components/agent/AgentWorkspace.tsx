@@ -2,29 +2,27 @@
 
 import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Bot,
   CalendarClock,
-  Camera,
   CheckCircle2,
   Copy,
   Globe2,
-  LoaderCircle,
+  House,
   Megaphone,
   MessageCircle,
-  Mic,
-  Paperclip,
   Phone,
   Pencil,
-  Send,
   Sparkles,
-  Square
+  Upload,
+  X,
+  UserPlus
 } from "lucide-react";
+import { AgentComposer } from "@/components/agent/AgentComposer";
 import { useRouter } from "next/navigation";
-import { isPromotionRequest } from "@/lib/agent/intent-router";
+import type { AgentChatMessageRecord } from "@/lib/agent/conversations";
 import type { BrokerEventDraftInput } from "@/lib/events/types";
 import type { LeadListItem, LeadRecord } from "@/lib/leads/types";
 import type { LeadReplyDraft } from "@/lib/leads/reply-types";
-import type { LeadOperationPayload } from "@/lib/agent/types";
+import type { AgentAction, LeadOperationPayload } from "@/lib/agent/types";
 import type { ListingDraftInput } from "@/lib/listings/types";
 import type { ListingPromotion, PromotionChannel } from "@/lib/promotions/types";
 
@@ -40,16 +38,21 @@ type RecentListingSummary = {
 };
 
 type AgentWorkspaceProps = {
+  conversationId: string;
   firstName: string;
-  listingsCount: number;
+  hasOlderMessages: boolean;
+  initialMessages: AgentChatMessageRecord[];
   recentListings: RecentListingSummary[];
   recentLeads: LeadListItem[];
 };
 
 type ChatMessage = {
   id: string;
+  createdAt?: string;
   role: "user" | "assistant";
   content: string;
+  isStreaming?: boolean;
+  attachments?: PendingMedia[];
   draft?: ListingDraftInput;
   scheduleEvent?: BrokerEventDraftInput;
   leadResults?: LeadListItem[];
@@ -70,6 +73,70 @@ type LeadStatusUpdatePreview = {
 type LeadReplyDraftWithLink = LeadReplyDraft & {
   whatsapp_url: string;
 };
+
+type AgentResolution = NonNullable<AgentAction["resolution"]>;
+type AgentResolutionCandidate = NonNullable<AgentResolution["matched"]>;
+
+type ListingResolutionCandidate = AgentResolutionCandidate;
+
+type ChatMessageUiPayload = Partial<
+  Pick<
+    ChatMessage,
+    | "draft"
+    | "scheduleEvent"
+    | "leadResults"
+    | "leadLatestOffer"
+    | "leadStatusUpdate"
+    | "leadReply"
+    | "promotion"
+    | "promotionTarget"
+    | "promotionInstruction"
+  >
+>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function getMessageUiPayload(payload: AgentChatMessageRecord["structured_payload"]) {
+  if (!isRecord(payload) || !isRecord(payload.ui)) {
+    return {};
+  }
+
+  return payload.ui as ChatMessageUiPayload;
+}
+
+function chatMessageFromRecord(record: AgentChatMessageRecord): ChatMessage {
+  return {
+    id: record.id,
+    createdAt: record.created_at,
+    role: record.role,
+    content: record.content,
+    ...getMessageUiPayload(record.structured_payload)
+  };
+}
+
+function structuredPayloadForMessage(message: ChatMessage): Record<string, unknown> {
+  const ui: Record<string, unknown> = {};
+
+  for (const key of [
+    "draft",
+    "scheduleEvent",
+    "leadResults",
+    "leadLatestOffer",
+    "leadStatusUpdate",
+    "leadReply",
+    "promotion",
+    "promotionTarget",
+    "promotionInstruction"
+  ] as const) {
+    if (message[key] !== undefined) {
+      ui[key] = message[key];
+    }
+  }
+
+  return Object.keys(ui).length ? { ui } : {};
+}
 
 const promotionChannels: Array<{ channel: PromotionChannel; label: string }> = [
   { channel: "whatsapp", label: "WhatsApp" },
@@ -801,10 +868,14 @@ function LeadReplyCard({ draft }: { draft: LeadReplyDraftWithLink }) {
 
 function DraftPreviewCard({
   draft,
+  onAttachMedia,
+  onRemoveMedia,
   pendingMedia,
   onSaved
 }: {
   draft: ListingDraftInput;
+  onAttachMedia: () => void;
+  onRemoveMedia: (mediaId: string) => void;
   pendingMedia: PendingMedia[];
   onSaved: (uploadedCount: number, listingId: string) => void;
 }) {
@@ -995,21 +1066,39 @@ function DraftPreviewCard({
         </div>
       )}
 
-      {pendingMedia.length ? (
-        <div className="agent-media-preview" aria-label="Attached media">
-          {pendingMedia.map((item) => (
-            <div className="agent-media-thumb" key={item.id}>
-              {item.mediaType === "image" ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={item.previewUrl} alt={item.file.name} />
-              ) : (
-                <video src={item.previewUrl} muted playsInline />
-              )}
-            </div>
-          ))}
-          <span>{pendingMedia.length} media ready</span>
+      <div className="agent-media-panel" aria-label="Listing photos and video">
+        <div className="agent-media-panel-header">
+          <span>Photos & video</span>
+          <small>{pendingMedia.length ? `${pendingMedia.length} media ready` : "Optional before saving"}</small>
         </div>
-      ) : null}
+        {pendingMedia.length ? (
+          <div className="agent-media-preview">
+            {pendingMedia.map((item) => (
+              <div className="agent-media-thumb" key={item.id}>
+                {item.mediaType === "image" ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={item.previewUrl} alt={item.file.name} />
+                ) : (
+                  <video src={item.previewUrl} muted playsInline />
+                )}
+                <button
+                  aria-label={`Remove ${item.file.name}`}
+                  className="agent-media-remove"
+                  type="button"
+                  onClick={() => onRemoveMedia(item.id)}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p>Add listing photos or a walkthrough video here before confirming the listing.</p>
+        )}
+        <button className="outline-button small agent-media-add" type="button" onClick={onAttachMedia}>
+          <Upload size={14} /> Add photos/video
+        </button>
+      </div>
 
       <div className="card-actions">
         <button className="primary-button small" type="button" onClick={handleConfirm} disabled={isSaving}>
@@ -1183,17 +1272,32 @@ function SchedulePreviewCard({
   );
 }
 
-export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentListings }: AgentWorkspaceProps) {
+export function AgentWorkspace({
+  conversationId: initialConversationId,
+  firstName,
+  hasOlderMessages,
+  initialMessages,
+  recentLeads,
+  recentListings
+}: AgentWorkspaceProps) {
   const [input, setInput] = useState("");
+  const [composerMedia, setComposerMedia] = useState<PendingMedia[]>([]);
   const [pendingMedia, setPendingMedia] = useState<PendingMedia[]>([]);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [activeListingId, setActiveListingId] = useState<string | null>(recentListings[0]?.id ?? null);
+  const [conversationId, setConversationId] = useState(initialConversationId);
+  const [canLoadOlder, setCanLoadOlder] = useState(hasOlderMessages);
+  const [oldestMessageCreatedAt, setOldestMessageCreatedAt] = useState<string | null>(
+    initialMessages[0]?.created_at ?? null
+  );
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: createId(),
       role: "assistant",
       content: `Good morning, ${firstName}. Tell me the property details in English, Urdu, or Roman Urdu. I will draft a listing preview for you to edit and confirm.`
-    }
+    },
+    ...initialMessages.map(chatMessageFromRecord)
   ]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -1202,7 +1306,10 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
   const [voiceLevels, setVoiceLevels] = useState(idleVoiceLevels);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const assistantStreamTimersRef = useRef<Map<string, number>>(new Map());
+  const composerMediaRef = useRef<PendingMedia[]>([]);
   const pendingMediaRef = useRef<PendingMedia[]>([]);
+  const mediaSelectionTargetRef = useRef<"composer" | "draft">("composer");
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const voiceChunksRef = useRef<Blob[]>([]);
   const voiceStreamRef = useRef<MediaStream | null>(null);
@@ -1210,17 +1317,55 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
   const voiceAnimationFrameRef = useRef<number | null>(null);
   const voiceTimerRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const hasStarted = messages.length > 1;
+  const quickActions = [
+    {
+      icon: House,
+      label: "List a Property",
+      onClick: () =>
+        void submitMessage("Create a listing for 1 Kanal house in DHA Phase 6, price 8.5 crore.")
+    },
+    {
+      icon: Megaphone,
+      label: "Promote Listing",
+      onClick: () =>
+        void submitMessage("Promote my latest listing for WhatsApp, Facebook, Instagram, and portals.")
+    },
+    {
+      icon: UserPlus,
+      label: "Add a Lead",
+      onClick: () =>
+        void submitMessage(
+          "Record a new lead named Ahmed. He wants a 5 marla house in DHA Phase 5 with a budget around 1 crore."
+        )
+    },
+    {
+      icon: CalendarClock,
+      label: "Schedule Viewing",
+      onClick: () =>
+        void submitMessage("Schedule a viewing with Ahmed tomorrow at 3pm for my DHA Phase 5 villa.")
+    }
+  ];
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);
 
   useEffect(() => {
+    composerMediaRef.current = composerMedia;
+  }, [composerMedia]);
+
+  useEffect(() => {
     pendingMediaRef.current = pendingMedia;
   }, [pendingMedia]);
 
   useEffect(() => {
+    const assistantStreamTimers = assistantStreamTimersRef.current;
+
     return () => {
+      assistantStreamTimers.forEach((timer) => window.clearInterval(timer));
+      assistantStreamTimers.clear();
+      composerMediaRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl));
       pendingMediaRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl));
       voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
       if (voiceAnimationFrameRef.current) {
@@ -1232,6 +1377,200 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
       void audioContextRef.current?.close();
     };
   }, []);
+
+  function recentContextMessages() {
+    return messages
+      .filter((message) => message.content.trim())
+      .slice(-20)
+      .map((message) => ({
+        role: message.role,
+        content: message.content
+      }));
+  }
+
+  async function persistAssistantMessage(message: ChatMessage) {
+    try {
+      const response = await fetch("/api/agent/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          conversationId,
+          role: "assistant",
+          content: message.content,
+          structured_payload: structuredPayloadForMessage(message)
+        })
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = (await response.json()) as { conversationId?: string };
+      if (payload.conversationId) {
+        setConversationId(payload.conversationId);
+      }
+    } catch {
+      // Persistence should not block the broker's current workflow.
+    }
+  }
+
+  async function persistUserMessage(message: ChatMessage) {
+    try {
+      const response = await fetch("/api/agent/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          conversationId,
+          role: "user",
+          content: message.content
+        })
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = (await response.json()) as { conversationId?: string };
+      if (payload.conversationId) {
+        setConversationId(payload.conversationId);
+      }
+    } catch {
+      // Persistence should not block the broker's current workflow.
+    }
+  }
+
+  function appendUserMessage(
+    content: string,
+    options: { attachments?: PendingMedia[]; persist?: boolean } = {}
+  ) {
+    const nextMessage: ChatMessage = {
+      id: createId(),
+      role: "user",
+      content,
+      attachments: options.attachments
+    };
+
+    setMessages((current) => [...current, nextMessage]);
+
+    if (options.persist !== false) {
+      void persistUserMessage(nextMessage);
+    }
+
+    return nextMessage;
+  }
+
+  function animateAssistantMessage(messageId: string, content: string) {
+    const characters = Array.from(content);
+
+    if (!characters.length) {
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === messageId ? { ...message, content, isStreaming: false } : message
+        )
+      );
+      return;
+    }
+
+    const existingTimer = assistantStreamTimersRef.current.get(messageId);
+    if (existingTimer) {
+      window.clearInterval(existingTimer);
+    }
+
+    let cursor = 0;
+    const charactersPerTick = characters.length > 180 ? 3 : 2;
+    const timer = window.setInterval(() => {
+      cursor = Math.min(characters.length, cursor + charactersPerTick);
+      const visibleContent = characters.slice(0, cursor).join("");
+      const isDone = cursor >= characters.length;
+
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === messageId
+            ? { ...message, content: visibleContent, isStreaming: !isDone }
+            : message
+        )
+      );
+
+      if (isDone) {
+        window.clearInterval(timer);
+        assistantStreamTimersRef.current.delete(messageId);
+      }
+    }, 18);
+
+    assistantStreamTimersRef.current.set(messageId, timer);
+  }
+
+  function appendAssistantMessage(message: Omit<ChatMessage, "id" | "role"> & { id?: string }) {
+    const nextMessage: ChatMessage = {
+      ...message,
+      id: message.id ?? createId(),
+      role: "assistant"
+    };
+    const streamingMessage: ChatMessage = {
+      ...nextMessage,
+      content: "",
+      isStreaming: true
+    };
+
+    setMessages((current) => [...current, streamingMessage]);
+    window.setTimeout(() => animateAssistantMessage(nextMessage.id, nextMessage.content), 80);
+    void persistAssistantMessage(nextMessage);
+
+    return nextMessage;
+  }
+
+  async function loadEarlierMessages() {
+    if (!oldestMessageCreatedAt || isLoadingOlder) {
+      return;
+    }
+
+    setIsLoadingOlder(true);
+
+    try {
+      const params = new URLSearchParams({
+        before: oldestMessageCreatedAt,
+        limit: "50"
+      });
+      const response = await fetch(`/api/agent/messages?${params.toString()}`);
+
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = (await response.json()) as {
+        conversationId?: string;
+        messages?: AgentChatMessageRecord[];
+        hasMore?: boolean;
+      };
+      const olderMessages = payload.messages ?? [];
+
+      if (payload.conversationId) {
+        setConversationId(payload.conversationId);
+      }
+
+      setCanLoadOlder(Boolean(payload.hasMore));
+      setOldestMessageCreatedAt(olderMessages[0]?.created_at ?? oldestMessageCreatedAt);
+
+      if (!olderMessages.length) {
+        return;
+      }
+
+      const parsedMessages = olderMessages.map(chatMessageFromRecord);
+      setMessages((current) => {
+        const [welcomeMessage, ...currentHistory] = current;
+        const seenIds = new Set(current.map((message) => message.id));
+        const newOlderMessages = parsedMessages.filter((message) => !seenIds.has(message.id));
+
+        return [welcomeMessage, ...newOlderMessages, ...currentHistory];
+      });
+    } finally {
+      setIsLoadingOlder(false);
+    }
+  }
 
   function stopVoiceVisualization() {
     if (voiceAnimationFrameRef.current) {
@@ -1318,11 +1657,56 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
     }
   }
 
-  function getPromotionTarget(messageText: string) {
+  function candidateToListing(candidate: ListingResolutionCandidate): RecentListingSummary {
+    return {
+      id: candidate.id,
+      title: candidate.listing_title ?? candidate.label,
+      location_area: candidate.location_area ?? candidate.listing_area ?? null,
+      city: candidate.city ?? candidate.listing_city ?? null,
+      property_type: candidate.property_type ?? null,
+      area_value: candidate.area_value ?? null,
+      area_unit: candidate.area_unit ?? null,
+      bedrooms: candidate.bedrooms ?? null
+    };
+  }
+
+  function formatListingCandidates(candidates: ListingResolutionCandidate[]) {
+    return candidates
+      .map((candidate) =>
+        [
+          candidate.label,
+          [candidate.area_value, candidate.area_unit].filter(Boolean).join(" "),
+          candidate.location_area ?? candidate.listing_area
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      )
+      .filter(Boolean)
+      .join(", ");
+  }
+
+  function getPromotionTarget(messageText: string, resolution?: AgentResolution) {
+    if (resolution?.status === "ambiguous") {
+      return { listing: null, ambiguous: true, candidates: resolution.candidates ?? [] };
+    }
+
+    if (resolution?.status === "no_match" || resolution?.status === "needs_clarification") {
+      return { listing: null, ambiguous: false, candidates: [] };
+    }
+
+    if (resolution?.status === "matched") {
+      const matchedListing =
+        recentListings.find((listing) => listing.id === resolution.target_id) ??
+        (resolution.matched ? candidateToListing(resolution.matched) : null);
+
+      return { listing: matchedListing, ambiguous: false, candidates: [] };
+    }
+
     if (messageMentionsCurrentListing(messageText) && activeListingId) {
       return {
         listing: recentListings.find((listing) => listing.id === activeListingId) ?? null,
-        ambiguous: false
+        ambiguous: false,
+        candidates: []
       };
     }
 
@@ -1332,66 +1716,112 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
       .sort((left, right) => right.score - left.score);
 
     if (scoredListings.length > 1 && scoredListings[0].score === scoredListings[1].score) {
-      return { listing: null, ambiguous: true };
+      return {
+        listing: null,
+        ambiguous: true,
+        candidates: scoredListings.slice(0, 5).map((item) => ({
+          id: item.listing.id,
+          label: item.listing.title || "Untitled listing",
+          listing_title: item.listing.title,
+          listing_area: item.listing.location_area,
+          listing_city: item.listing.city,
+          city: item.listing.city,
+          location_area: item.listing.location_area,
+          property_type: item.listing.property_type,
+          area_value: item.listing.area_value,
+          area_unit: item.listing.area_unit,
+          bedrooms: item.listing.bedrooms
+        }))
+      };
     }
 
     if (scoredListings[0]) {
-      return { listing: scoredListings[0].listing, ambiguous: false };
+      return { listing: scoredListings[0].listing, ambiguous: false, candidates: [] };
     }
 
     return {
       listing: recentListings.find((listing) => listing.id === activeListingId) ?? recentListings[0] ?? null,
-      ambiguous: false
+      ambiguous: false,
+      candidates: []
     };
   }
 
-  function proposePromotionFromMessage(messageText: string) {
-    const target = getPromotionTarget(messageText);
+  function proposePromotionFromMessage(messageText: string, resolution?: AgentResolution) {
+    const target = getPromotionTarget(messageText, resolution);
 
     if (target.ambiguous) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: createId(),
-          role: "assistant",
-          content: "I found more than one matching listing. Please add one more detail, like phase, exact area size, price, or bedrooms."
-        }
-      ]);
+      const candidateText = formatListingCandidates(target.candidates);
+      appendAssistantMessage({
+        content: candidateText
+          ? `I found more than one matching listing: ${candidateText}. Please add one more detail, like phase, exact area size, price, or bedrooms.`
+          : "I found more than one matching listing. Please add one more detail, like phase, exact area size, price, or bedrooms."
+      });
       return;
     }
 
     if (!target.listing) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: createId(),
-          role: "assistant",
-          content: "I need a confirmed listing before I can create a promotion pack. Describe a property first, confirm it, then ask me to promote it."
-        }
-      ]);
+      appendAssistantMessage({
+        content: "I need a confirmed listing before I can create a promotion pack. Describe a property first, confirm it, then ask me to promote it."
+      });
       return;
     }
 
     const selectedListing = target.listing;
 
     setActiveListingId(selectedListing.id);
-    setMessages((current) => [
-      ...current,
-      {
-        id: createId(),
-        role: "assistant",
-        content: "I found a matching listing. Please confirm the property and choose channels before I generate campaign links.",
-        promotionTarget: selectedListing,
-        promotionInstruction: messageText
-      }
-    ]);
+    appendAssistantMessage({
+      content: "I found a matching listing. Please confirm the property and choose channels before I generate campaign links.",
+      promotionTarget: selectedListing,
+      promotionInstruction: messageText
+    });
   }
 
-  function getLeadTarget(payload: LeadOperationPayload) {
+  function candidateToLead(candidate: AgentResolutionCandidate): LeadListItem {
+    return {
+      id: candidate.id,
+      broker_id: "",
+      listing_id: null,
+      campaign_link_id: null,
+      source_channel: null,
+      full_name: candidate.label === "Unnamed buyer" ? null : candidate.label,
+      phone: candidate.phone ?? null,
+      email: candidate.email ?? null,
+      message: null,
+      status: (candidate.status as LeadRecord["status"] | undefined) ?? "new",
+      urgency: null,
+      ai_summary: null,
+      created_at: new Date().toISOString(),
+      updated_at: null,
+      listing_title: candidate.listing_title ?? null,
+      listing_area: candidate.listing_area ?? null,
+      listing_city: candidate.listing_city ?? null,
+      campaign_code: null,
+      campaign_channel: null
+    };
+  }
+
+  function getLeadTarget(payload: LeadOperationPayload, resolution?: AgentResolution) {
+    if (resolution?.status === "ambiguous") {
+      return { lead: null, ambiguous: true, candidates: resolution.candidates ?? [] };
+    }
+
+    if (resolution?.status === "no_match" || resolution?.status === "needs_clarification") {
+      return { lead: null, ambiguous: false, candidates: [] };
+    }
+
+    if (resolution?.status === "matched") {
+      const matchedLead =
+        recentLeads.find((lead) => lead.id === resolution.target_id) ??
+        (resolution.matched ? candidateToLead(resolution.matched) : null);
+
+      return { lead: matchedLead, ambiguous: false, candidates: [] };
+    }
+
     if (payload.lead_id) {
       return {
         lead: recentLeads.find((lead) => lead.id === payload.lead_id) ?? null,
-        ambiguous: false
+        ambiguous: false,
+        candidates: []
       };
     }
 
@@ -1405,127 +1835,149 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
       scoredLeads.length > 1 &&
       (scoredLeads[0].score === scoredLeads[1].score || scoredLeads[0].score - scoredLeads[1].score < 3)
     ) {
-      return { lead: null, ambiguous: true };
+      return {
+        lead: null,
+        ambiguous: true,
+        candidates: scoredLeads.slice(0, 5).map((item) => ({
+          id: item.lead.id,
+          label: item.lead.full_name || item.lead.phone || item.lead.email || "Unnamed buyer",
+          phone: item.lead.phone,
+          email: item.lead.email,
+          status: item.lead.status,
+          listing_title: item.lead.listing_title,
+          listing_area: item.lead.listing_area,
+          listing_city: item.lead.listing_city
+        }))
+      };
     }
 
     if (scoredLeads[0]) {
-      return { lead: scoredLeads[0].lead, ambiguous: false };
+      return { lead: scoredLeads[0].lead, ambiguous: false, candidates: [] };
     }
 
-    return { lead: null, ambiguous: false };
+    return { lead: null, ambiguous: false, candidates: [] };
   }
 
   function showLeadResults(actionResponse: string, payload: LeadOperationPayload) {
     const matchedLeads = filterLeadsByPayload(recentLeads, payload);
 
     if (!matchedLeads.length) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: createId(),
-          role: "assistant",
-          content:
-            "I could not find a lead matching that request. I will not show unrelated records unless you confirm.",
-          leadLatestOffer: recentLeads.length > 0
-        }
-      ]);
+      appendAssistantMessage({
+        content:
+          "I could not find a lead matching that request. I will not show unrelated records unless you confirm.",
+        leadLatestOffer: recentLeads.length > 0
+      });
       return;
     }
 
-    setMessages((current) => [
-      ...current,
-      {
-        id: createId(),
-        role: "assistant",
-        content: actionResponse,
-        leadResults: matchedLeads
-      }
-    ]);
+    appendAssistantMessage({
+      content: actionResponse,
+      leadResults: matchedLeads
+    });
   }
 
-  function proposeLeadStatusUpdate(actionResponse: string, payload: LeadOperationPayload) {
-    const target = getLeadTarget(payload);
+  function formatResolutionCandidates(candidates: AgentResolutionCandidate[]) {
+    return candidates
+      .map((candidate) => [candidate.label, candidate.phone].filter(Boolean).join(" · "))
+      .filter(Boolean)
+      .join(", ");
+  }
+
+  function showScheduleResolutionMessage(resolution?: AgentResolution) {
+    if (!resolution || resolution.status === "matched") {
+      return false;
+    }
+
+    const isListingTarget = resolution.target_type === "listing";
+    const candidateText = isListingTarget
+      ? formatListingCandidates(resolution.candidates ?? [])
+      : formatResolutionCandidates(resolution.candidates ?? []);
+
+    const content =
+      resolution.status === "ambiguous"
+        ? candidateText
+          ? `I found more than one matching ${isListingTarget ? "listing" : "lead"}: ${candidateText}. Please add one more detail before I schedule it.`
+          : `I found more than one matching ${isListingTarget ? "listing" : "lead"}. Please add one more detail before I schedule it.`
+        : resolution.status === "needs_clarification"
+          ? isListingTarget
+            ? "I need to know which listing this schedule item is for before I can prepare it."
+            : "I need to know which lead or client this schedule item is for before I can prepare it."
+          : isListingTarget
+            ? "I could not find the listing for this schedule item. Please add the exact area, title, size, or use the listing card."
+            : "I could not find the lead for this schedule item. Please add the buyer name, phone number, or open Leads to choose the exact record.";
+
+    appendAssistantMessage({ content });
+
+    return true;
+  }
+
+  function proposeLeadStatusUpdate(
+    actionResponse: string,
+    payload: LeadOperationPayload,
+    resolution?: AgentResolution
+  ) {
+    const target = getLeadTarget(payload, resolution);
 
     if (target.ambiguous) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: createId(),
-          role: "assistant",
-          content: "I found more than one matching lead. Please add the buyer phone, full name, or listing detail."
-        }
-      ]);
+      const candidateText = formatResolutionCandidates(target.candidates);
+      appendAssistantMessage({
+        content: candidateText
+          ? `I found more than one matching lead: ${candidateText}. Please add the buyer phone, full name, or listing detail.`
+          : "I found more than one matching lead. Please add the buyer phone, full name, or listing detail."
+      });
       return;
     }
 
     if (!target.lead) {
       const requestedLead = payload.lead_name ? ` "${payload.lead_name}"` : "";
-      setMessages((current) => [
-        ...current,
-        {
-          id: createId(),
-          role: "assistant",
-          content: `I could not find a matching recent lead${requestedLead}. Please check the buyer name, phone number, or open Leads to choose the exact record.`
-        }
-      ]);
+      appendAssistantMessage({
+        content: `I could not find a matching recent lead${requestedLead}. Please check the buyer name, phone number, or open Leads to choose the exact record.`
+      });
       return;
     }
 
     const matchedLead = target.lead;
 
-    setMessages((current) => [
-      ...current,
-      {
-        id: createId(),
-        role: "assistant",
-        content: actionResponse,
-        leadStatusUpdate: {
-          lead: matchedLead,
-          status: payload.status,
-          urgency: payload.urgency
-        }
+    appendAssistantMessage({
+      content: actionResponse,
+      leadStatusUpdate: {
+        lead: matchedLead,
+        status: payload.status,
+        urgency: payload.urgency
       }
-    ]);
+    });
   }
 
-  async function draftReplyForLead(actionResponse: string, payload: LeadOperationPayload) {
-    const target = getLeadTarget(payload);
+  async function draftReplyForLead(
+    actionResponse: string,
+    payload: LeadOperationPayload,
+    resolution?: AgentResolution
+  ) {
+    const target = getLeadTarget(payload, resolution);
 
     if (target.ambiguous) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: createId(),
-          role: "assistant",
-          content: "I found more than one matching lead. Please add the buyer phone, full name, or listing detail."
-        }
-      ]);
+      const candidateText = formatResolutionCandidates(target.candidates);
+      appendAssistantMessage({
+        content: candidateText
+          ? `I found more than one matching lead: ${candidateText}. Please add the buyer phone, full name, or listing detail.`
+          : "I found more than one matching lead. Please add the buyer phone, full name, or listing detail."
+      });
       return;
     }
 
     if (!target.lead) {
       const requestedLead = payload.lead_name ? ` "${payload.lead_name}"` : "";
-      setMessages((current) => [
-        ...current,
-        {
-          id: createId(),
-          role: "assistant",
-          content: `I could not find a matching recent lead${requestedLead} to reply to. Please check the buyer name, phone number, or open Leads to choose the exact record.`
-        }
-      ]);
+      appendAssistantMessage({
+        content: `I could not find a matching recent lead${requestedLead} to reply to. Please check the buyer name, phone number, or open Leads to choose the exact record.`
+      });
       return;
     }
 
     const matchedLead = target.lead;
 
-    setMessages((current) => [
-      ...current,
-      {
-        id: createId(),
-        role: "assistant",
-        content: `I found ${matchedLead.full_name || "the buyer"}. Drafting a WhatsApp reply now...`
-      }
-    ]);
+    appendAssistantMessage({
+      content: `I found ${matchedLead.full_name || "the buyer"}. Drafting a WhatsApp reply now...`
+    });
 
     const response = await fetch("/api/leads/reply-draft", {
       method: "POST",
@@ -1537,27 +1989,17 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
 
     if (!response.ok) {
       const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null;
-      setMessages((current) => [
-        ...current,
-        {
-          id: createId(),
-          role: "assistant",
-          content: errorPayload?.error ?? "I could not draft a reply for that lead yet."
-        }
-      ]);
+      appendAssistantMessage({
+        content: errorPayload?.error ?? "I could not draft a reply for that lead yet."
+      });
       return;
     }
 
     const replyPayload = (await response.json()) as { draft: LeadReplyDraftWithLink };
-    setMessages((current) => [
-      ...current,
-      {
-        id: createId(),
-        role: "assistant",
-        content: actionResponse,
-        leadReply: replyPayload.draft
-      }
-    ]);
+    appendAssistantMessage({
+      content: actionResponse,
+      leadReply: replyPayload.draft
+    });
   }
 
   async function generatePromotionForListing(
@@ -1566,14 +2008,9 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
     channels: PromotionChannel[]
   ) {
     setActiveListingId(listing.id);
-    setMessages((current) => [
-      ...current,
-      {
-        id: createId(),
-        role: "assistant",
-        content: `Confirmed. I am creating ${channels.length} channel campaign link${channels.length === 1 ? "" : "s"} and promotion copy for ${listing.title || "this listing"}...`
-      }
-    ]);
+    appendAssistantMessage({
+      content: `Confirmed. I am creating ${channels.length} channel campaign link${channels.length === 1 ? "" : "s"} and promotion copy for ${listing.title || "this listing"}...`
+    });
 
     const response = await fetch("/api/agent/promote-listing", {
       method: "POST",
@@ -1585,68 +2022,83 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      setMessages((current) => [
-        ...current,
-        {
-          id: createId(),
-          role: "assistant",
-          content: payload?.error ?? "I could not generate the promotion pack yet. Please try again."
-        }
-      ]);
+      appendAssistantMessage({
+        content: payload?.error ?? "I could not generate the promotion pack yet. Please try again."
+      });
       return;
     }
 
     const payload = (await response.json()) as { promotion: ListingPromotion };
-    setMessages((current) => [
-      ...current,
-      {
-        id: createId(),
-        role: "assistant",
-        content: "Here is the promotion pack. Each channel has its own lead page, so later we can attribute leads by listing and channel.",
-        promotion: payload.promotion
-      }
-    ]);
+    appendAssistantMessage({
+      content: "Here is the promotion pack. Each channel has its own lead page, so later we can attribute leads by listing and channel.",
+      promotion: payload.promotion
+    });
   }
 
   async function submitMessage(messageText: string) {
     const trimmed = messageText.trim();
-    if (!trimmed || isSubmitting) {
+    const outgoingMedia = composerMedia;
+    const hasOutgoingMedia = outgoingMedia.length > 0;
+
+    if ((!trimmed && !hasOutgoingMedia) || isSubmitting) {
       return;
     }
 
+    const mediaSummary = hasOutgoingMedia
+      ? `Attached ${outgoingMedia.length} listing media file${outgoingMedia.length === 1 ? "" : "s"}.`
+      : "";
+    const userMessageContent = trimmed || mediaSummary;
+    const agentMessageContent = hasOutgoingMedia
+      ? [trimmed, mediaSummary].filter(Boolean).join("\n\n")
+      : trimmed;
+
     setInput("");
+    setComposerMedia([]);
     setIsSubmitting(true);
-    setMessages((current) => [...current, { id: createId(), role: "user", content: trimmed }]);
+    if (hasOutgoingMedia) {
+      setPendingMedia((current) => [...current, ...outgoingMedia]);
+    }
+    appendUserMessage(userMessageContent, { attachments: outgoingMedia, persist: false });
+
+    if (!trimmed) {
+      appendAssistantMessage({
+        content: activeDraftId
+          ? "I added these media files to the current listing preview. They will upload when you confirm the listing."
+          : "I can use these as listing media. Please add the property details, and I will draft the listing with these files attached."
+      });
+      setIsSubmitting(false);
+      return;
+    }
 
     try {
-      if (isPromotionRequest(trimmed)) {
-        proposePromotionFromMessage(trimmed);
-        return;
-      }
-
       const response = await fetch("/api/agent/message", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ message: trimmed })
+        body: JSON.stringify({
+          conversationId,
+          message: agentMessageContent,
+          current_listing_id: activeListingId ?? undefined,
+          context_messages: recentContextMessages()
+        })
       });
 
       if (!response.ok) {
-        setMessages((current) => [
-          ...current,
-          {
-            id: createId(),
-            role: "assistant",
-            content: "I could not draft that listing yet. Please try again with location, size, and price."
-          }
-        ]);
+        appendAssistantMessage({
+          content: "I could not draft that listing yet. Please try again with location, size, and price."
+        });
         return;
       }
 
       const payload = (await response.json()) as {
-        action: { intent: string; response: string; payload?: Record<string, unknown> };
+        action: AgentAction;
+        conversationId?: string;
       };
+      if (payload.conversationId) {
+        setConversationId(payload.conversationId);
+      }
+
       const draft =
         payload.action.intent === "create_listing_draft"
           ? (payload.action.payload as ListingDraftInput)
@@ -1663,12 +2115,24 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
       }
 
       if (payload.action.intent === "update_lead_status" && leadPayload) {
-        proposeLeadStatusUpdate(payload.action.response, leadPayload);
+        proposeLeadStatusUpdate(payload.action.response, leadPayload, payload.action.resolution);
         return;
       }
 
       if (payload.action.intent === "draft_lead_reply" && leadPayload) {
-        await draftReplyForLead(payload.action.response, leadPayload);
+        await draftReplyForLead(payload.action.response, leadPayload, payload.action.resolution);
+        return;
+      }
+
+      if (payload.action.intent === "create_campaign_links") {
+        proposePromotionFromMessage(agentMessageContent, payload.action.resolution);
+        return;
+      }
+
+      if (
+        payload.action.intent === "create_schedule_event" &&
+        showScheduleResolutionMessage(payload.action.resolution)
+      ) {
         return;
       }
 
@@ -1678,25 +2142,16 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
         setActiveDraftId(assistantMessageId);
       }
 
-      setMessages((current) => [
-        ...current,
-        {
-          id: assistantMessageId,
-          role: "assistant",
-          content: payload.action.response,
-          draft,
-          scheduleEvent
-        }
-      ]);
+      appendAssistantMessage({
+        id: assistantMessageId,
+        content: payload.action.response,
+        draft,
+        scheduleEvent
+      });
     } catch {
-      setMessages((current) => [
-        ...current,
-        {
-          id: createId(),
-          role: "assistant",
-          content: "I could not reach the agent service. Please try again in a moment."
-        }
-      ]);
+      appendAssistantMessage({
+        content: "I could not reach the agent service. Please try again in a moment."
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -1728,30 +2183,20 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
       } | null;
 
       if (!response.ok || !payload?.transcript) {
-        setMessages((current) => [
-          ...current,
-          {
-            id: createId(),
-            role: "assistant",
-            content:
-              payload?.error ??
-              "I could not transcribe that voice note yet. Please try again or type the property details."
-          }
-        ]);
+        appendAssistantMessage({
+          content:
+            payload?.error ??
+            "I could not transcribe that voice note yet. Please try again or type the property details."
+        });
         return;
       }
 
       setInput(payload.transcript);
       await submitMessage(payload.transcript);
     } catch {
-      setMessages((current) => [
-        ...current,
-        {
-          id: createId(),
-          role: "assistant",
-          content: "I could not reach the voice transcription service. Please try again in a moment."
-        }
-      ]);
+      appendAssistantMessage({
+        content: "I could not reach the voice transcription service. Please try again in a moment."
+      });
     } finally {
       setIsTranscribing(false);
     }
@@ -1759,14 +2204,9 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
 
   async function startVoiceRecording() {
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-      setMessages((current) => [
-        ...current,
-        {
-          id: createId(),
-          role: "assistant",
-          content: "Voice recording is not available in this browser. You can type the listing details for now."
-        }
-      ]);
+      appendAssistantMessage({
+        content: "Voice recording is not available in this browser. You can type the listing details for now."
+      });
       return;
     }
 
@@ -1805,14 +2245,9 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
         setIsListening(false);
 
         if (audioBlob.size === 0) {
-          setMessages((current) => [
-            ...current,
-            {
-              id: createId(),
-              role: "assistant",
-              content: "I did not capture any audio. Please try recording again."
-            }
-          ]);
+          appendAssistantMessage({
+            content: "I did not capture any audio. Please try recording again."
+          });
           return;
         }
 
@@ -1824,14 +2259,9 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
     } catch {
       stopVoiceVisualization();
       setIsListening(false);
-      setMessages((current) => [
-        ...current,
-        {
-          id: createId(),
-          role: "assistant",
-          content: "I could not access the microphone. Please allow microphone permission and try again."
-        }
-      ]);
+      appendAssistantMessage({
+        content: "I could not access the microphone. Please allow microphone permission and try again."
+      });
     }
   }
 
@@ -1870,234 +2300,227 @@ export function AgentWorkspace({ firstName, listingsCount, recentLeads, recentLi
       }));
 
     if (!accepted.length) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: createId(),
-          role: "assistant",
-          content: "I can attach images or videos to a listing. Please choose media files."
-        }
-      ]);
+      appendAssistantMessage({
+        content: "I can attach images or videos to a listing. Please choose media files."
+      });
+      mediaSelectionTargetRef.current = "composer";
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
       return;
     }
 
-    setPendingMedia((current) => [...current, ...accepted]);
-    setMessages((current) => [
-      ...current,
-      {
-        id: createId(),
-        role: "user",
-        content: `Attached ${accepted.length} media file${accepted.length === 1 ? "" : "s"} for this listing.`
-      },
-      {
-        id: createId(),
-        role: "assistant",
-        content: activeDraftId
-          ? "I attached the media to the current listing preview. It will upload when you confirm the listing."
-          : "I attached the media. Now describe the property, and I will include these files when you confirm the listing."
-      }
-    ]);
+    if (mediaSelectionTargetRef.current === "draft" && activeDraftId) {
+      setPendingMedia((current) => [...current, ...accepted]);
+      appendAssistantMessage({
+        content:
+          "I added these media files to the current listing preview. They will upload when you confirm the listing."
+      });
+    } else {
+      setComposerMedia((current) => [...current, ...accepted]);
+    }
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+    mediaSelectionTargetRef.current = "composer";
+  }
+
+  function openComposerMediaPicker() {
+    mediaSelectionTargetRef.current = "composer";
+    fileInputRef.current?.click();
+  }
+
+  function openDraftMediaPicker() {
+    mediaSelectionTargetRef.current = "draft";
+    fileInputRef.current?.click();
+  }
+
+  function removeComposerMedia(mediaId: string) {
+    setComposerMedia((current) => {
+      const item = current.find((media) => media.id === mediaId);
+      if (item) {
+        URL.revokeObjectURL(item.previewUrl);
+      }
+      return current.filter((media) => media.id !== mediaId);
+    });
+  }
+
+  function removePendingMedia(mediaId: string) {
+    setPendingMedia((current) => {
+      return current.filter((media) => media.id !== mediaId);
+    });
   }
 
   function clearPendingMedia() {
-    pendingMedia.forEach((item) => URL.revokeObjectURL(item.previewUrl));
     setPendingMedia([]);
   }
 
   return (
-    <section className={`chat-panel glass-panel ${messages.length === 1 ? "is-empty" : "has-thread"}`}>
-      <div className="panel-header">
-        <h2>
-          <Bot size={20} /> Agent Workspace
-        </h2>
-        <span className="status-pill">Online</span>
-      </div>
-
+    <section className={`chat-panel ${hasStarted ? "has-thread" : "is-empty"}`}>
       <div className="messages">
-        {messages.length === 1 ? (
+        {!hasStarted ? (
           <div className="agent-start">
-            <span>Pislaka Agent</span>
             <h2>What should we handle today?</h2>
-            <p>
-              Publish listings, capture leads, schedule viewings, or draft WhatsApp follow-ups in one conversation.
-            </p>
+            <p>Built for Pakistan&apos;s Property Agents</p>
           </div>
         ) : null}
 
+        {hasStarted && canLoadOlder ? (
+          <button
+            className="load-earlier-messages"
+            disabled={isLoadingOlder}
+            type="button"
+            onClick={() => void loadEarlierMessages()}
+          >
+            {isLoadingOlder ? "Loading earlier messages..." : "View earlier messages"}
+          </button>
+        ) : null}
+
         {messages.map((message, index) => (
-          messages.length === 1 && index === 0 ? null : (
+          index === 0 ? null : (
           <article className={`message ${message.role}`} key={message.id}>
             <p>{message.content}</p>
-            {message.draft ? (
-              <DraftPreviewCard
-                draft={message.draft}
-                pendingMedia={message.id === activeDraftId ? pendingMedia : []}
-                onSaved={(uploadedCount, listingId) => {
-                  clearPendingMedia();
-                  setActiveDraftId(null);
-                  setActiveListingId(listingId);
-                  setMessages((current) => [
-                    ...current,
-                    {
-                      id: createId(),
-                      role: "assistant",
-                      content: uploadedCount
-                        ? `Done. I added it to your listing library with ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}. You can open Listings from the sidebar to review and edit.`
-                        : "Done. I added it to your listing library. You can open Listings from the sidebar to review media and edit details."
-                    }
-                  ]);
-                }}
-              />
+            {message.attachments?.length ? (
+              <div className="message-media-preview" aria-label="Sent media">
+                {message.attachments.map((item) => (
+                  <div className="message-media-thumb" key={item.id}>
+                    {item.mediaType === "image" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img alt={item.file.name} src={item.previewUrl} />
+                    ) : (
+                      <video muted playsInline src={item.previewUrl} />
+                    )}
+                  </div>
+                ))}
+              </div>
             ) : null}
-            {message.scheduleEvent ? (
-              <SchedulePreviewCard
-                event={message.scheduleEvent}
-                onSaved={() => {
-                  setMessages((current) => [
-                    ...current,
-                    {
-                      id: createId(),
-                      role: "assistant",
-                      content:
-                        "Done. I added it to Schedule. Next, I can show today's appointments and reminders from the workspace."
+            {!message.isStreaming ? (
+              <>
+                {message.draft ? (
+                  <DraftPreviewCard
+                    draft={message.draft}
+                    onAttachMedia={openDraftMediaPicker}
+                    onRemoveMedia={removePendingMedia}
+                    pendingMedia={message.id === activeDraftId ? pendingMedia : []}
+                    onSaved={(uploadedCount, listingId) => {
+                      clearPendingMedia();
+                      setActiveDraftId(null);
+                      setActiveListingId(listingId);
+                      appendAssistantMessage({
+                        content: uploadedCount
+                          ? `Done. I added it to your listing library with ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}. You can open Listings from the sidebar to review and edit.`
+                          : "Done. I added it to your listing library. You can open Listings from the sidebar to review media and edit details."
+                      });
+                    }}
+                  />
+                ) : null}
+                {message.scheduleEvent ? (
+                  <SchedulePreviewCard
+                    event={message.scheduleEvent}
+                    onSaved={() => {
+                      appendAssistantMessage({
+                        content:
+                          "Done. I added it to Schedule. Next, I can show today's appointments and reminders from the workspace."
+                      });
+                    }}
+                  />
+                ) : null}
+                {message.leadResults ? <LeadResultsCard leads={message.leadResults} /> : null}
+                {message.leadLatestOffer ? (
+                  <LeadLatestOfferCard
+                    onConfirm={() => {
+                      const latestLead = recentLeads[0] ? [recentLeads[0]] : [];
+                      appendAssistantMessage({
+                        content: latestLead.length
+                          ? "Confirmed. Here is the latest lead from your inbox."
+                          : "There are no leads in your recent inbox yet.",
+                        leadResults: latestLead
+                      });
+                    }}
+                  />
+                ) : null}
+                {message.leadStatusUpdate ? (
+                  <LeadStatusConfirmCard
+                    preview={message.leadStatusUpdate}
+                    onUpdated={() => {
+                      appendAssistantMessage({
+                        content: "Done. I updated the lead status. You can review all lead activity from the Leads page."
+                      });
+                    }}
+                  />
+                ) : null}
+                {message.leadReply ? <LeadReplyCard draft={message.leadReply} /> : null}
+                {message.promotion ? <PromotionPack promotion={message.promotion} /> : null}
+                {message.promotionTarget ? (
+                  <PromotionConfirmCard
+                    listing={message.promotionTarget}
+                    onGenerate={(channels) =>
+                      void generatePromotionForListing(
+                        message.promotionTarget as RecentListingSummary,
+                        message.promotionInstruction ?? "",
+                        channels
+                      )
                     }
-                  ]);
-                }}
-              />
-            ) : null}
-            {message.leadResults ? <LeadResultsCard leads={message.leadResults} /> : null}
-            {message.leadLatestOffer ? (
-              <LeadLatestOfferCard
-                onConfirm={() => {
-                  const latestLead = recentLeads[0] ? [recentLeads[0]] : [];
-                  setMessages((current) => [
-                    ...current,
-                    {
-                      id: createId(),
-                      role: "assistant",
-                      content: latestLead.length
-                        ? "Confirmed. Here is the latest lead from your inbox."
-                        : "There are no leads in your recent inbox yet.",
-                      leadResults: latestLead
-                    }
-                  ]);
-                }}
-              />
-            ) : null}
-            {message.leadStatusUpdate ? (
-              <LeadStatusConfirmCard
-                preview={message.leadStatusUpdate}
-                onUpdated={() => {
-                  setMessages((current) => [
-                    ...current,
-                    {
-                      id: createId(),
-                      role: "assistant",
-                      content: "Done. I updated the lead status. You can review all lead activity from the Leads page."
-                    }
-                  ]);
-                }}
-              />
-            ) : null}
-            {message.leadReply ? <LeadReplyCard draft={message.leadReply} /> : null}
-            {message.promotion ? <PromotionPack promotion={message.promotion} /> : null}
-            {message.promotionTarget ? (
-              <PromotionConfirmCard
-                listing={message.promotionTarget}
-                onGenerate={(channels) =>
-                  void generatePromotionForListing(
-                    message.promotionTarget as RecentListingSummary,
-                    message.promotionInstruction ?? "",
-                    channels
-                  )
-                }
-              />
+                  />
+                ) : null}
+              </>
             ) : null}
           </article>
           )
         ))}
 
-        <div ref={messagesEndRef} />
+        {isSubmitting ? (
+          <div className="message assistant thinking-message" role="status" aria-live="polite">
+            <span>Thinking</span>
+            <span className="thinking-dots" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+            </span>
+          </div>
+        ) : null}
+
+        <div className="messages-end-spacer" ref={messagesEndRef} />
       </div>
 
-      <form className="composer" onSubmit={handleSubmit}>
-        <div className="composer-row">
-          <input
-            ref={fileInputRef}
-            className="media-file-input"
-            type="file"
-            accept="image/*,video/*"
-            multiple
-            onChange={(event) => handleMediaSelected(event.target.files)}
-          />
-          <button type="button" aria-label="Attach listing media" onClick={() => fileInputRef.current?.click()}>
-            <Paperclip size={20} />
-          </button>
-          {isListening || isTranscribing ? (
+      <input
+        ref={fileInputRef}
+        className="media-file-input"
+        type="file"
+        accept="image/*,video/*"
+        multiple
+        onChange={(event) => handleMediaSelected(event.target.files)}
+      />
+      <AgentComposer
+        actions={!hasStarted ? quickActions : undefined}
+        className="workspace-agent-composer"
+        isListening={isListening}
+        isTranscribing={isTranscribing}
+        media={composerMedia.map((item) => ({
+          id: item.id,
+          mediaType: item.mediaType,
+          name: item.file.name,
+          previewUrl: item.previewUrl
+        }))}
+        onAttach={openComposerMediaPicker}
+        onChange={setInput}
+        onRemoveMedia={removeComposerMedia}
+        onSubmit={handleSubmit}
+        onVoice={handleVoiceInput}
+        placeholder="Ask Pislaka Agent to help..."
+        sendDisabled={isSubmitting || isListening || isTranscribing}
+        value={input}
+        voiceSlot={
+          isListening || isTranscribing ? (
             <VoiceWaveform
               isTranscribing={isTranscribing}
               levels={voiceLevels}
               seconds={recordingSeconds}
             />
-          ) : (
-            <input
-              placeholder="Ask Pislaka Agent to publish, follow up, or schedule..."
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-            />
-          )}
-          <button
-            type="button"
-            className={`voice-button ${isListening ? "recording" : ""}`}
-            aria-label={isListening ? "Stop recording" : "Record voice"}
-            aria-pressed={isListening}
-            disabled={isTranscribing}
-            onClick={handleVoiceInput}
-          >
-            {isTranscribing ? <LoaderCircle className="spin-icon" size={18} /> : isListening ? <Square size={15} /> : <Mic size={20} />}
-          </button>
-          <button
-            type="submit"
-            className="send-button"
-            aria-label="Send message"
-            disabled={isSubmitting || isListening || isTranscribing}
-          >
-            <Send size={19} />
-          </button>
-        </div>
-
-        {messages.length === 1 ? (
-          <div className="prompt-suggestions" aria-label="Common agent actions">
-            <button
-              type="button"
-              onClick={() =>
-                void submitMessage("Create a listing for 1 Kanal house in DHA Phase 6, price 8.5 crore.")
-              }
-            >
-              <Sparkles size={15} /> Publish a listing
-            </button>
-            <button type="button" onClick={() => fileInputRef.current?.click()}>
-              <Camera size={15} /> Add property media
-            </button>
-            <button type="button" onClick={() => void submitMessage("Record a new lead named Ahmed. He wants a 5 marla house in DHA Phase 5 with a budget around 1 crore.")}>
-              <MessageCircle size={15} /> Capture a lead
-            </button>
-            <button type="button" onClick={() => void submitMessage("Schedule a viewing with Ahmed tomorrow at 3pm for my DHA Phase 5 villa.")}>
-              <CalendarClock size={15} /> Create a schedule
-            </button>
-            <button type="button" onClick={() => void submitMessage("Promote my latest listing for WhatsApp, Facebook, Instagram, and portals.")}>
-              <Megaphone size={15} /> Promote latest listing
-            </button>
-            <button type="button" onClick={() => void submitMessage("Which new leads should I follow up today?")}>
-              <MessageCircle size={15} /> Review leads
-            </button>
-          </div>
-        ) : null}
-      </form>
+          ) : undefined
+        }
+      />
     </section>
   );
 }

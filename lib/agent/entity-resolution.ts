@@ -1,0 +1,546 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { AgentAction, LeadOperationPayload } from "@/lib/agent/types";
+import { leadOperationPayloadSchema, scheduleEventActionPayloadSchema } from "@/lib/agent/types";
+import type { BrokerEventDraftInput } from "@/lib/events/types";
+import { getRecentLeadsForBroker } from "@/lib/leads/queries";
+import type { LeadListItem } from "@/lib/leads/types";
+import type { ListingRecord } from "@/lib/listings/types";
+
+type ResolveAgentActionEntitiesOptions = {
+  currentListingId?: string;
+  originalMessage?: string;
+};
+
+function normalizeText(value: string | null | undefined) {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}@+.]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizePhone(value: string | null | undefined) {
+  return (value ?? "").replace(/\D/g, "");
+}
+
+function leadLabel(lead: LeadListItem) {
+  return lead.full_name || lead.phone || lead.email || "Unnamed buyer";
+}
+
+function toResolutionCandidate(lead: LeadListItem) {
+  return {
+    id: lead.id,
+    label: leadLabel(lead),
+    phone: lead.phone,
+    email: lead.email,
+    status: lead.status,
+    listing_title: lead.listing_title,
+    listing_area: lead.listing_area,
+    listing_city: lead.listing_city
+  };
+}
+
+function listingLabel(listing: ListingRecord) {
+  return (
+    listing.title ||
+    [listing.area_value, listing.area_unit, listing.property_type].filter(Boolean).join(" ") ||
+    "Untitled listing"
+  );
+}
+
+function toListingResolutionCandidate(listing: ListingRecord) {
+  return {
+    id: listing.id,
+    label: listingLabel(listing),
+    status: listing.status,
+    listing_title: listing.title,
+    listing_area: listing.location_area,
+    listing_city: listing.city,
+    city: listing.city,
+    location_area: listing.location_area,
+    property_type: listing.property_type,
+    area_value: listing.area_value,
+    area_unit: listing.area_unit,
+    bedrooms: listing.bedrooms
+  };
+}
+
+function scoreLead(query: string, lead: LeadListItem) {
+  const normalizedQuery = normalizeText(query);
+  const queryPhone = normalizePhone(query);
+  const leadPhone = normalizePhone(lead.phone);
+  const leadName = normalizeText(lead.full_name);
+  const searchable = normalizeText(
+    [
+      lead.full_name,
+      lead.phone,
+      lead.email,
+      lead.message,
+      lead.ai_summary,
+      lead.listing_title,
+      lead.listing_area,
+      lead.listing_city,
+      lead.campaign_code,
+      lead.campaign_channel,
+      lead.source_channel
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+
+  let score = 0;
+
+  if (queryPhone && leadPhone && leadPhone.includes(queryPhone)) {
+    score += queryPhone.length >= 7 ? 30 : 14;
+  }
+
+  if (lead.email && normalizedQuery.includes(normalizeText(lead.email))) {
+    score += 28;
+  }
+
+  if (leadName && normalizedQuery.includes(leadName)) {
+    score += 20;
+  }
+
+  if (leadName && normalizedQuery.length > 2 && leadName.includes(normalizedQuery)) {
+    score += normalizedQuery.length >= 5 ? 14 : 8;
+  }
+
+  for (const token of new Set(normalizedQuery.split(" ").filter((part) => part.length > 2))) {
+    if (searchable.includes(token)) {
+      score += token.length >= 5 ? 4 : 2;
+    }
+  }
+
+  return score;
+}
+
+function leadQueryFromPayload(payload: LeadOperationPayload) {
+  return [payload.lead_name, payload.query].filter(Boolean).join(" ").trim();
+}
+
+function scheduleLeadQueryFromPayload(payload: BrokerEventDraftInput) {
+  return [payload.lead_name].filter(Boolean).join(" ").trim();
+}
+
+function scheduleListingQueryFromPayload(payload: BrokerEventDraftInput, originalMessage?: string) {
+  return [payload.listing_reference, payload.location_text, originalMessage].filter(Boolean).join(" ").trim();
+}
+
+function scheduleEventNeedsParticipant(payload: BrokerEventDraftInput) {
+  return (
+    payload.event_type === "viewing" ||
+    payload.event_type === "contract_signing" ||
+    payload.event_type === "handover" ||
+    payload.event_type === "follow_up"
+  );
+}
+
+function queryMentionsCurrentListing(query: string) {
+  return /\b(this|current|latest confirmed|just confirmed)\b|这套|这个|刚才|刚刚/i.test(query);
+}
+
+function queryMentionsLatestListing(query: string) {
+  return /\b(latest|most recent|newest|last listing)\b|最新|最近/i.test(query);
+}
+
+function scoreListing(query: string, listing: ListingRecord) {
+  const normalizedQuery = normalizeText(query);
+  const searchable = normalizeText(
+    [
+      listing.title,
+      listing.description,
+      listing.city,
+      listing.location_area,
+      listing.property_type,
+      listing.listing_type,
+      listing.area_value && listing.area_unit ? `${listing.area_value} ${listing.area_unit}` : null,
+      listing.bedrooms !== null && listing.bedrooms !== undefined ? `${listing.bedrooms} beds` : null
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+
+  let score = 0;
+  for (const token of new Set(normalizedQuery.split(" ").filter((part) => part.length > 2))) {
+    if (searchable.includes(token)) {
+      score += token.length >= 5 ? 4 : 2;
+    }
+  }
+
+  if (listing.location_area && normalizedQuery.includes(normalizeText(listing.location_area))) {
+    score += 12;
+  }
+
+  if (
+    listing.area_value &&
+    listing.area_unit &&
+    normalizedQuery.includes(`${listing.area_value} ${listing.area_unit}`)
+  ) {
+    score += 14;
+  }
+
+  if (listing.property_type && normalizedQuery.includes(normalizeText(listing.property_type))) {
+    score += 6;
+  }
+
+  return score;
+}
+
+async function getListingsForResolution(supabase: SupabaseClient, brokerId: string) {
+  const { data, error } = await supabase
+    .from("listings")
+    .select(
+      "id, status, title, description, city, location_area, property_type, listing_type, price_amount, price_currency, area_value, area_unit, bedrooms, bathrooms, features, created_at, updated_at"
+    )
+    .eq("broker_id", brokerId)
+    .neq("status", "archived")
+    .order("updated_at", { ascending: false })
+    .limit(100);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as ListingRecord[];
+}
+
+async function resolveScheduleEventEntities(
+  action: AgentAction,
+  supabase: SupabaseClient,
+  brokerId: string,
+  options: ResolveAgentActionEntitiesOptions
+): Promise<AgentAction> {
+  const parsedPayload = scheduleEventActionPayloadSchema.safeParse(action.payload);
+  if (!parsedPayload.success) {
+    return action;
+  }
+
+  const payload = parsedPayload.data;
+  const nextPayload: BrokerEventDraftInput = { ...payload };
+  const sourcePayload = {
+    ...(typeof payload.source_payload === "object" && payload.source_payload ? payload.source_payload : {})
+  };
+
+  const leads = await getRecentLeadsForBroker(supabase, brokerId, 100, { includeClosed: true });
+
+  if (payload.lead_id) {
+    const matchedLead = leads.find((lead) => lead.id === payload.lead_id);
+    if (!matchedLead) {
+      return {
+        ...action,
+        resolution: {
+          status: "no_match",
+          target_type: "lead"
+        }
+      };
+    }
+
+    nextPayload.lead_name = payload.lead_name ?? leadLabel(matchedLead);
+    sourcePayload.resolved_lead = toResolutionCandidate(matchedLead);
+  } else {
+    const leadQuery = scheduleLeadQueryFromPayload(payload);
+
+    if (!leadQuery && scheduleEventNeedsParticipant(payload)) {
+      return {
+        ...action,
+        resolution: {
+          status: "needs_clarification",
+          target_type: "lead"
+        }
+      };
+    }
+
+    if (leadQuery) {
+      const scoredLeads = leads
+        .map((lead) => ({ lead, score: scoreLead(leadQuery, lead) }))
+        .filter((item) => item.score >= 8)
+        .sort((left, right) => right.score - left.score);
+
+      if (!scoredLeads.length) {
+        return {
+          ...action,
+          resolution: {
+            status: "no_match",
+            target_type: "lead"
+          }
+        };
+      }
+
+      const [best, second] = scoredLeads;
+      if (second && (best.score === second.score || best.score - second.score < 5)) {
+        return {
+          ...action,
+          resolution: {
+            status: "ambiguous",
+            target_type: "lead",
+            candidates: scoredLeads.slice(0, 5).map((item) => toResolutionCandidate(item.lead))
+          }
+        };
+      }
+
+      nextPayload.lead_id = best.lead.id;
+      nextPayload.lead_name = payload.lead_name ?? leadLabel(best.lead);
+      sourcePayload.resolved_lead = toResolutionCandidate(best.lead);
+    }
+  }
+
+  const listings = await getListingsForResolution(supabase, brokerId);
+  const listingQuery = scheduleListingQueryFromPayload(payload, options.originalMessage);
+  const mentionsCurrentListing = queryMentionsCurrentListing(listingQuery);
+
+  if (payload.listing_id) {
+    const matchedListing = listings.find((listing) => listing.id === payload.listing_id);
+    if (!matchedListing) {
+      return {
+        ...action,
+        resolution: {
+          status: "no_match",
+          target_type: "listing"
+        }
+      };
+    }
+
+    nextPayload.listing_reference = payload.listing_reference ?? listingLabel(matchedListing);
+    sourcePayload.resolved_listing = toListingResolutionCandidate(matchedListing);
+  } else if (options.currentListingId && mentionsCurrentListing) {
+    const matchedListing = listings.find((listing) => listing.id === options.currentListingId);
+    if (!matchedListing) {
+      return {
+        ...action,
+        resolution: {
+          status: "no_match",
+          target_type: "listing"
+        }
+      };
+    }
+
+    nextPayload.listing_id = matchedListing.id;
+    nextPayload.listing_reference = payload.listing_reference ?? listingLabel(matchedListing);
+    sourcePayload.resolved_listing = toListingResolutionCandidate(matchedListing);
+  } else if (payload.listing_reference || payload.location_text) {
+    const scoredListings = listings
+      .map((listing) => ({ listing, score: scoreListing(listingQuery, listing) }))
+      .filter((item) => item.score >= 8)
+      .sort((left, right) => right.score - left.score);
+
+    if (!scoredListings.length) {
+      return {
+        ...action,
+        resolution: {
+          status: "no_match",
+          target_type: "listing"
+        }
+      };
+    }
+
+    const [best, second] = scoredListings;
+    if (second && (best.score === second.score || best.score - second.score < 5)) {
+      return {
+        ...action,
+        resolution: {
+          status: "ambiguous",
+          target_type: "listing",
+          candidates: scoredListings.slice(0, 5).map((item) => toListingResolutionCandidate(item.listing))
+        }
+      };
+    }
+
+    nextPayload.listing_id = best.listing.id;
+    nextPayload.listing_reference = payload.listing_reference ?? listingLabel(best.listing);
+    sourcePayload.resolved_listing = toListingResolutionCandidate(best.listing);
+  }
+
+  return {
+    ...action,
+    payload: {
+      ...nextPayload,
+      source_payload: sourcePayload
+    },
+    resolution: {
+      status: "matched",
+      target_type: "schedule_event"
+    }
+  };
+}
+
+export async function resolveAgentActionEntities(
+  action: AgentAction,
+  supabase: SupabaseClient,
+  brokerId: string,
+  options: ResolveAgentActionEntitiesOptions = {}
+): Promise<AgentAction> {
+  if (
+    action.intent !== "draft_lead_reply" &&
+    action.intent !== "update_lead_status" &&
+    action.intent !== "create_campaign_links" &&
+    action.intent !== "create_schedule_event"
+  ) {
+    return action;
+  }
+
+  if (action.intent === "create_schedule_event") {
+    return resolveScheduleEventEntities(action, supabase, brokerId, options);
+  }
+
+  if (action.intent === "create_campaign_links") {
+    const query = typeof action.payload.query === "string" ? action.payload.query : options.originalMessage ?? "";
+    const listings = await getListingsForResolution(supabase, brokerId);
+
+    if (options.currentListingId && queryMentionsCurrentListing(query)) {
+      const matchedListing = listings.find((listing) => listing.id === options.currentListingId);
+
+      return {
+        ...action,
+        payload: matchedListing ? { ...action.payload, listing_id: matchedListing.id } : action.payload,
+        resolution: matchedListing
+          ? {
+              status: "matched",
+              target_type: "listing",
+              target_id: matchedListing.id,
+              matched: toListingResolutionCandidate(matchedListing)
+            }
+          : {
+              status: "no_match",
+              target_type: "listing"
+            }
+      };
+    }
+
+    if (queryMentionsLatestListing(query) && listings[0]) {
+      return {
+        ...action,
+        payload: {
+          ...action.payload,
+          listing_id: listings[0].id
+        },
+        resolution: {
+          status: "matched",
+          target_type: "listing",
+          target_id: listings[0].id,
+          matched: toListingResolutionCandidate(listings[0])
+        }
+      };
+    }
+
+    const scoredListings = listings
+      .map((listing) => ({ listing, score: scoreListing(query, listing) }))
+      .filter((item) => item.score >= 8)
+      .sort((left, right) => right.score - left.score);
+
+    if (!scoredListings.length) {
+      return {
+        ...action,
+        resolution: {
+          status: "no_match",
+          target_type: "listing"
+        }
+      };
+    }
+
+    const [best, second] = scoredListings;
+    if (second && (best.score === second.score || best.score - second.score < 5)) {
+      return {
+        ...action,
+        resolution: {
+          status: "ambiguous",
+          target_type: "listing",
+          candidates: scoredListings.slice(0, 5).map((item) => toListingResolutionCandidate(item.listing))
+        }
+      };
+    }
+
+    return {
+      ...action,
+      payload: {
+        ...action.payload,
+        listing_id: best.listing.id
+      },
+      resolution: {
+        status: "matched",
+        target_type: "listing",
+        target_id: best.listing.id,
+        matched: toListingResolutionCandidate(best.listing)
+      }
+    };
+  }
+
+  const parsedPayload = leadOperationPayloadSchema.safeParse(action.payload);
+  if (!parsedPayload.success) {
+    return action;
+  }
+
+  const payload = parsedPayload.data;
+  const leads = await getRecentLeadsForBroker(supabase, brokerId, 100, { includeClosed: true });
+
+  if (payload.lead_id) {
+    const matchedLead = leads.find((lead) => lead.id === payload.lead_id);
+
+    return {
+      ...action,
+      resolution: matchedLead
+        ? {
+            status: "matched",
+            target_type: "lead",
+            target_id: matchedLead.id,
+            matched: toResolutionCandidate(matchedLead)
+          }
+        : {
+            status: "no_match",
+            target_type: "lead"
+          }
+    };
+  }
+
+  const query = leadQueryFromPayload(payload);
+  if (!query) {
+    return {
+      ...action,
+      resolution: {
+        status: "needs_clarification",
+        target_type: "lead"
+      }
+    };
+  }
+
+  const scoredLeads = leads
+    .map((lead) => ({ lead, score: scoreLead(query, lead) }))
+    .filter((item) => item.score >= 8)
+    .sort((left, right) => right.score - left.score);
+
+  if (!scoredLeads.length) {
+    return {
+      ...action,
+      resolution: {
+        status: "no_match",
+        target_type: "lead"
+      }
+    };
+  }
+
+  const [best, second] = scoredLeads;
+  if (second && (best.score === second.score || best.score - second.score < 5)) {
+    return {
+      ...action,
+      resolution: {
+        status: "ambiguous",
+        target_type: "lead",
+        candidates: scoredLeads.slice(0, 5).map((item) => toResolutionCandidate(item.lead))
+      }
+    };
+  }
+
+  return {
+    ...action,
+    payload: {
+      ...payload,
+      lead_id: best.lead.id
+    },
+    resolution: {
+      status: "matched",
+      target_type: "lead",
+      target_id: best.lead.id,
+      matched: toResolutionCandidate(best.lead)
+    }
+  };
+}

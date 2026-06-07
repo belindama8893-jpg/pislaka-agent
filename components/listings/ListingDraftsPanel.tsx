@@ -260,6 +260,46 @@ export function ListingDraftsPanel({ className = "", collapsed = false, listings
                     />
                   </label>
                 </div>
+                <div className="listing-edit-media" aria-label="Listing media">
+                  <div className="listing-edit-media-header">
+                    <span>Photos & video</span>
+                    <small>{mediaCount ? `${mediaCount} media` : "No media yet"}</small>
+                  </div>
+                  {mediaCount ? (
+                    <div className="listing-media-strip listing-edit-media-strip">
+                      {mediaItems.slice(0, 6).map((media) => (
+                        <div className="listing-media-thumb" key={media.id}>
+                          {media.signed_url && media.media_type === "image" ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img alt="" src={media.signed_url} />
+                          ) : media.signed_url && media.media_type === "video" ? (
+                            <video muted playsInline preload="metadata" src={media.signed_url} />
+                          ) : media.media_type === "video" ? (
+                            <Video size={16} />
+                          ) : (
+                            <ImageIcon size={16} />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="listing-media-empty">
+                      Add listing photos or a walkthrough video while editing this property.
+                    </span>
+                  )}
+                  <label className="outline-button small listing-upload-button">
+                    <Upload size={14} /> {uploadingId === listing.id ? "Uploading..." : "Add photos/video"}
+                    <input
+                      accept="image/*,video/*"
+                      disabled={uploadingId === listing.id}
+                      type="file"
+                      onChange={(event) => {
+                        void handleMediaUpload(listing.id, event.target.files?.[0]);
+                        event.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
                 <div className="card-actions">
                   <button className="primary-button small" type="submit">
                     <Save size={15} /> Save
@@ -329,18 +369,6 @@ export function ListingDraftsPanel({ className = "", collapsed = false, listings
                   >
                     <Megaphone size={14} /> {promotingId === listing.id ? "Generating..." : "Promote"}
                   </button>
-                  <label className="outline-button small listing-upload-button">
-                    <Upload size={14} /> {uploadingId === listing.id ? "Uploading..." : "Add media"}
-                    <input
-                      accept="image/*,video/*"
-                      disabled={uploadingId === listing.id}
-                      type="file"
-                      onChange={(event) => {
-                        void handleMediaUpload(listing.id, event.target.files?.[0]);
-                        event.target.value = "";
-                      }}
-                    />
-                  </label>
                 </div>
 
                 {promotions[listing.id] ? (
