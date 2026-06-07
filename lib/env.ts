@@ -8,7 +8,7 @@ export const env = {
   supabaseServiceRoleKey: readEnv("SUPABASE_SERVICE_ROLE_KEY"),
   deepseekApiKey: readEnv("DEEPSEEK_API_KEY"),
   deepseekBaseUrl: readEnv("DEEPSEEK_BASE_URL") || "https://api.deepseek.com",
-  deepseekModel: readEnv("DEEPSEEK_MODEL") || "deepseek-chat",
+  deepseekModel: readEnv("DEEPSEEK_MODEL") || "deepseek-v4-flash",
   sttProvider: readEnv("STT_PROVIDER") || "openai",
   openaiApiKey: readEnv("OPENAI_API_KEY"),
   openaiTranscriptionModel: readEnv("OPENAI_TRANSCRIPTION_MODEL") || "whisper-1",
