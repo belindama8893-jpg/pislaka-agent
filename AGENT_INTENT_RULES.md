@@ -157,6 +157,7 @@ If multiple targets match:
 | "Show hot leads" | `list_leads` | Read-only |
 | "Promote my DHA 5 10 marla villa on WhatsApp and Facebook" | `create_campaign_links` | Requires listing confirmation and channel selection |
 | "Create a listing for 1 kanal DHA Phase 6 8.5 crore" | `create_listing_draft` | Editable preview before save |
+| "Change this listing price to 1.2 crore" | `update_listing_draft` | Resolve the current listing and confirm before update |
 | "Schedule viewing with Ahmed tomorrow at 3pm" | `create_schedule_event` | Calendar preview before save |
 | "Which leads should I follow up today?" | `analyze_leads` or `list_leads` | Read-only, can rank urgent leads |
 | "How is this listing performing?" | `analyze_listings` | Requires current listing or explicit target |
@@ -170,6 +171,7 @@ Examples:
 - "Promote it" but no current listing: ask which listing.
 - "Reply to him" but no active lead context: ask which lead.
 - "Schedule tomorrow" but no time or target: ask who and when.
+- "Change my DHA 5 villa price" with multiple matching listings: ask which listing before updating.
 - Weak or unsupported messages must return `general_reply`, not a forced listing draft.
 - Local fallback may create a listing draft only when the message contains both a listing action/property type and concrete property facts such as location, area, price, beds, or sale/rent terms.
 
@@ -221,13 +223,14 @@ Implemented now:
 - Backend lead resolution runs for `draft_lead_reply` and `update_lead_status` after the action proposal.
 - Backend lead resolution can return `matched`, `ambiguous`, `no_match`, or `needs_clarification`.
 - Backend listing resolution runs for `create_campaign_links` and can use an explicit/current listing id, the latest listing when explicitly requested, or strong listing details.
+- Backend listing resolution runs for `update_listing_draft` before showing a listing update confirmation.
 - Backend schedule event resolution runs for `create_schedule_event` and can resolve the participant lead, the associated listing, or both before showing the calendar preview.
+- Frontend shows listing candidate cards when `update_listing_draft` returns ambiguous listing matches.
 - Frontend sends `current_listing_id` when the broker has an active listing context.
 - Frontend still has local lead scoring as a compatibility fallback when `resolution` is missing.
 - Frontend still has local listing scoring as a compatibility fallback when `resolution` is missing.
 
 Not implemented yet:
 
-- Backend listing resolution for listing update flows.
 - Confidence scoring in the response contract.
-- Full candidate selection UI for ambiguous resolution beyond asking the user to clarify.
+- Candidate selection UI for ambiguous lead, schedule, and promotion flows beyond asking the user to clarify.

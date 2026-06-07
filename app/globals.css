@@ -831,10 +831,15 @@ a {
   width: 100%;
   min-height: 0;
   margin: 0;
-  padding: clamp(64px, 10vh, 120px) max(28px, calc((100% - 760px) / 2)) 156px;
+  padding: clamp(40px, 7vh, 80px) max(28px, calc((100% - 760px) / 2)) 142px;
   overflow: auto;
   scrollbar-color: rgba(100, 112, 132, 0.24) transparent;
   scrollbar-width: thin;
+}
+
+.chat-panel.has-thread .messages::before {
+  content: "";
+  flex: 0 0 clamp(72px, 22vh, 220px);
 }
 
 .messages::-webkit-scrollbar {
@@ -920,9 +925,13 @@ a {
 }
 
 .messages-end-spacer {
-  flex: 0 0 124px;
+  flex: 0 0 24px;
   width: 100%;
   pointer-events: none;
+}
+
+.chat-panel.has-active-turn .messages-end-spacer {
+  flex-basis: clamp(360px, 62vh, 720px);
 }
 
 .message-media-preview {
@@ -1041,7 +1050,8 @@ a {
 }
 
 .agent-draft-card,
-.schedule-preview-card {
+.schedule-preview-card,
+.listing-update-card {
   width: min(100%, 620px);
   padding: 12px;
   margin-top: 8px;
@@ -1141,6 +1151,86 @@ a {
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   font-size: 0.75rem;
+}
+
+.listing-update-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.listing-update-row {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.listing-update-row:last-child {
+  border-bottom: 0;
+}
+
+.listing-update-row > span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 520;
+}
+
+.listing-update-row div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.listing-update-row small {
+  color: var(--subtle);
+  font-size: 0.72rem;
+  text-decoration: line-through;
+}
+
+.listing-update-row strong {
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 560;
+  overflow-wrap: anywhere;
+}
+
+.listing-choice-grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.listing-choice-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+
+.listing-choice-card strong {
+  display: block;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 560;
+}
+
+.listing-choice-card p {
+  margin: 3px 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.listing-choice-card small {
+  color: var(--subtle);
+  font-size: 0.74rem;
+  line-height: 1.4;
 }
 
 .lead-chat-card {
@@ -4109,9 +4199,14 @@ a {
     flex-basis: 144px;
   }
 
+  .chat-panel.has-active-turn .messages-end-spacer {
+    flex-basis: 144px;
+  }
+
   .chat-card,
   .agent-draft-card,
   .schedule-preview-card,
+  .listing-update-card,
   .promotion-confirm-card,
   .lead-chat-card,
   .chat-promotion-pack {
@@ -4174,6 +4269,16 @@ a {
   .lead-detail-grid,
   .promotion-grid {
     grid-template-columns: 1fr;
+  }
+
+  .listing-update-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .listing-choice-card {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 
   .agent-draft-form input,

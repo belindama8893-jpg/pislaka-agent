@@ -33,6 +33,16 @@ export const listingDraftPayloadSchema = z.object({
   features: z.array(z.string()).optional()
 });
 
+export const listingUpdatePayloadSchema = listingDraftPayloadSchema
+  .partial()
+  .extend({
+    listing_id: z.string().uuid().optional(),
+    query: z.string().optional(),
+    status: z.enum(["draft", "published", "archived"]).optional()
+  });
+
+export type ListingUpdatePayload = z.infer<typeof listingUpdatePayloadSchema>;
+
 export const agentResolutionCandidateSchema = z.object({
   id: z.string().uuid(),
   label: z.string(),
@@ -40,14 +50,20 @@ export const agentResolutionCandidateSchema = z.object({
   email: z.string().nullable().optional(),
   status: z.string().optional(),
   listing_title: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
   listing_area: z.string().nullable().optional(),
   listing_city: z.string().nullable().optional(),
   city: z.string().nullable().optional(),
   location_area: z.string().nullable().optional(),
   property_type: z.string().nullable().optional(),
+  listing_type: z.enum(["sale", "rent"]).nullable().optional(),
+  price_amount: z.number().nullable().optional(),
+  price_currency: z.string().nullable().optional(),
   area_value: z.number().nullable().optional(),
   area_unit: z.enum(["kanal", "marla", "sqft", "sqm"]).nullable().optional(),
-  bedrooms: z.number().nullable().optional()
+  bedrooms: z.number().nullable().optional(),
+  bathrooms: z.number().nullable().optional(),
+  features: z.array(z.string()).nullable().optional()
 });
 
 export const agentResolutionSchema = z.object({

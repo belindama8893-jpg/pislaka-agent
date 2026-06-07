@@ -1,6 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AgentAction, LeadOperationPayload } from "@/lib/agent/types";
-import { leadOperationPayloadSchema, scheduleEventActionPayloadSchema } from "@/lib/agent/types";
+import {
+  leadOperationPayloadSchema,
+  listingUpdatePayloadSchema,
+  scheduleEventActionPayloadSchema
+} from "@/lib/agent/types";
 import type { BrokerEventDraftInput } from "@/lib/events/types";
 import { getRecentLeadsForBroker } from "@/lib/leads/queries";
 import type { LeadListItem } from "@/lib/leads/types";
@@ -54,14 +58,20 @@ function toListingResolutionCandidate(listing: ListingRecord) {
     label: listingLabel(listing),
     status: listing.status,
     listing_title: listing.title,
+    description: listing.description,
     listing_area: listing.location_area,
     listing_city: listing.city,
     city: listing.city,
     location_area: listing.location_area,
     property_type: listing.property_type,
+    listing_type: listing.listing_type,
+    price_amount: listing.price_amount,
+    price_currency: listing.price_currency,
     area_value: listing.area_value,
     area_unit: listing.area_unit,
-    bedrooms: listing.bedrooms
+    bedrooms: listing.bedrooms,
+    bathrooms: listing.bathrooms,
+    features: listing.features
   };
 }
 
@@ -144,9 +154,8 @@ function queryMentionsLatestListing(query: string) {
   return /\b(latest|most recent|newest|last listing)\b|最新|最近/i.test(query);
 }
 
-function scoreListing(query: string, listing: ListingRecord) {
-  const normalizedQuery = normalizeText(query);
-  const searchable = normalizeText(
+function listingSearchText(listing: ListingRecord) {
+  return normalizeText(
     [
       listing.title,
       listing.description,
@@ -160,6 +169,62 @@ function scoreListing(query: string, listing: ListingRecord) {
       .filter(Boolean)
       .join(" ")
   );
+}
+
+function extractRequiredListingLocations(query: string) {
+  const locations: string[] = [];
+  const normalizedQuery = normalizeText(query);
+  const dhaMatch = query.match(/DHA\s*Phase\s*\d+/i);
+
+  if (dhaMatch) {
+    locations.push(normalizeText(dhaMatch[0]));
+  }
+
+  for (const location of ["gulberg", "bahria town", "lakecity"]) {
+    if (normalizedQuery.includes(location)) {
+      locations.push(location);
+    }
+  }
+
+  return Array.from(new Set(locations));
+}
+
+function extractRequiredListingTypeTerms(query: string) {
+  const normalizedQuery = normalizeText(query);
+  const groups: string[][] = [];
+
+  if (/\bpenthouse\b/.test(normalizedQuery)) {
+    groups.push(["penthouse"]);
+  } else if (/\b(villa|bungalow)\b/.test(normalizedQuery)) {
+    groups.push(["villa", "house"]);
+  } else if (/\bhouse\b/.test(normalizedQuery)) {
+    groups.push(["house", "villa"]);
+  } else if (/\b(apartment|flat)\b/.test(normalizedQuery)) {
+    groups.push(["apartment", "flat", "penthouse"]);
+  } else if (/\bplot\b/.test(normalizedQuery)) {
+    groups.push(["plot"]);
+  } else if (/\b(shop|commercial)\b/.test(normalizedQuery)) {
+    groups.push(["shop", "commercial"]);
+  }
+
+  return groups;
+}
+
+function listingSatisfiesHardQueryTerms(query: string, listing: ListingRecord) {
+  const searchable = listingSearchText(listing);
+  const requiredLocations = extractRequiredListingLocations(query);
+
+  if (requiredLocations.some((location) => !searchable.includes(location))) {
+    return false;
+  }
+
+  const requiredTypeGroups = extractRequiredListingTypeTerms(query);
+  return requiredTypeGroups.every((group) => group.some((term) => searchable.includes(term)));
+}
+
+function scoreListing(query: string, listing: ListingRecord) {
+  const normalizedQuery = normalizeText(query);
+  const searchable = listingSearchText(listing);
 
   let score = 0;
   for (const token of new Set(normalizedQuery.split(" ").filter((part) => part.length > 2))) {
@@ -374,6 +439,7 @@ export async function resolveAgentActionEntities(
     action.intent !== "draft_lead_reply" &&
     action.intent !== "update_lead_status" &&
     action.intent !== "create_campaign_links" &&
+    action.intent !== "update_listing_draft" &&
     action.intent !== "create_schedule_event"
   ) {
     return action;
@@ -383,16 +449,27 @@ export async function resolveAgentActionEntities(
     return resolveScheduleEventEntities(action, supabase, brokerId, options);
   }
 
-  if (action.intent === "create_campaign_links") {
-    const query = typeof action.payload.query === "string" ? action.payload.query : options.originalMessage ?? "";
-    const listings = await getListingsForResolution(supabase, brokerId);
+  if (action.intent === "create_campaign_links" || action.intent === "update_listing_draft") {
+    const parsedListingUpdate =
+      action.intent === "update_listing_draft" ? listingUpdatePayloadSchema.safeParse(action.payload) : null;
+    if (parsedListingUpdate && !parsedListingUpdate.success) {
+      return action;
+    }
 
-    if (options.currentListingId && queryMentionsCurrentListing(query)) {
-      const matchedListing = listings.find((listing) => listing.id === options.currentListingId);
+    const payload = parsedListingUpdate?.success ? parsedListingUpdate.data : action.payload;
+    const payloadQuery = typeof payload.query === "string" ? payload.query : "";
+    const originalQuery = options.originalMessage ?? "";
+    const query = [payloadQuery, originalQuery].filter(Boolean).join(" ").trim();
+    const contextQuery = originalQuery || payloadQuery;
+    const listings = await getListingsForResolution(supabase, brokerId);
+    const payloadListingId = typeof payload.listing_id === "string" ? payload.listing_id : undefined;
+
+    if (payloadListingId) {
+      const matchedListing = listings.find((listing) => listing.id === payloadListingId);
 
       return {
         ...action,
-        payload: matchedListing ? { ...action.payload, listing_id: matchedListing.id } : action.payload,
+        payload: matchedListing ? { ...payload, listing_id: matchedListing.id } : payload,
         resolution: matchedListing
           ? {
               status: "matched",
@@ -407,11 +484,31 @@ export async function resolveAgentActionEntities(
       };
     }
 
-    if (queryMentionsLatestListing(query) && listings[0]) {
+    if (options.currentListingId && queryMentionsCurrentListing(contextQuery)) {
+      const matchedListing = listings.find((listing) => listing.id === options.currentListingId);
+
+      return {
+        ...action,
+        payload: matchedListing ? { ...payload, listing_id: matchedListing.id } : payload,
+        resolution: matchedListing
+          ? {
+              status: "matched",
+              target_type: "listing",
+              target_id: matchedListing.id,
+              matched: toListingResolutionCandidate(matchedListing)
+            }
+          : {
+              status: "no_match",
+              target_type: "listing"
+            }
+      };
+    }
+
+    if (queryMentionsLatestListing(contextQuery) && listings[0]) {
       return {
         ...action,
         payload: {
-          ...action.payload,
+          ...payload,
           listing_id: listings[0].id
         },
         resolution: {
@@ -424,6 +521,7 @@ export async function resolveAgentActionEntities(
     }
 
     const scoredListings = listings
+      .filter((listing) => listingSatisfiesHardQueryTerms(query, listing))
       .map((listing) => ({ listing, score: scoreListing(query, listing) }))
       .filter((item) => item.score >= 8)
       .sort((left, right) => right.score - left.score);
@@ -453,7 +551,7 @@ export async function resolveAgentActionEntities(
     return {
       ...action,
       payload: {
-        ...action.payload,
+        ...payload,
         listing_id: best.listing.id
       },
       resolution: {

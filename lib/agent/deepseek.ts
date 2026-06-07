@@ -3,6 +3,7 @@ import {
   agentActionSchema,
   leadOperationPayloadSchema,
   listingDraftPayloadSchema,
+  listingUpdatePayloadSchema,
   scheduleEventActionPayloadSchema,
   type AgentAction
 } from "@/lib/agent/types";
@@ -12,6 +13,8 @@ import {
   extractLeadStatus,
   extractLeadStatusFilter
 } from "@/lib/agent/intent-router";
+
+const deepseekRequestTimeoutMs = 8000;
 
 const systemPrompt = `
 You are Pislaka Agent, an AI assistant for real estate brokers in Pakistan.
@@ -23,6 +26,7 @@ Your job:
 - Never claim a listing is saved, published, shared, or sent unless a backend tool result says so.
 - High-risk actions must require user confirmation.
 - For listing drafts, extract only facts present in the user message or obvious Pakistan real estate defaults.
+- For listing updates, extract the target words into payload.query and only include fields the user explicitly changed.
 - For schedule events, extract appointment/reminder/recurring details. Use ISO 8601 timestamps with timezone offset when the user gives a clear date/time.
 - Pakistan brokers usually operate in Asia/Karachi time. If the user says tomorrow/next week, interpret it from the current date provided by the user message context.
 - Convert prices into numeric PKR. Examples: 8.5 crore = 85000000, 2 lakh = 200000.
@@ -62,6 +66,19 @@ Listing output shape:
     "bedrooms": 5,
     "bathrooms": 6,
     "features": ["corner", "near park"]
+  }
+}
+
+Listing update output shape:
+{
+  "intent": "update_listing_draft",
+  "requires_confirmation": true,
+  "response": "I found a listing edit request. Please confirm before I update the listing.",
+  "payload": {
+    "query": "this listing DHA Phase 5 10 marla villa",
+    "price_amount": 12000000,
+    "bedrooms": 4,
+    "status": "published"
   }
 }
 
@@ -107,6 +124,8 @@ Lead rules:
 - Use update_lead_status when the user asks to mark/change/update a lead status.
 - If the user says hot lead, set status to qualified and urgency to high.
 - Never update a lead without confirmation.
+- Use update_listing_draft when the user asks to change/edit/update/correct an existing listing or this/current listing.
+- Never save listing edits without confirmation.
 
 Rules:
 - Return only one JSON object.
@@ -191,6 +210,64 @@ function parseLocalPromotionRequest(message: string): AgentAction {
     payload: {
       query: message
     }
+  };
+}
+
+function parseLocalListingUpdate(message: string): AgentAction {
+  const lower = message.toLowerCase();
+  const croreMatches = Array.from(lower.matchAll(/(\d+(?:\.\d+)?)\s*(?:crore|cr|karor)/g));
+  const lakhMatches = Array.from(lower.matchAll(/(\d+(?:\.\d+)?)\s*lakh/g));
+  const croreMatch = croreMatches.at(-1);
+  const lakhMatch = lakhMatches.at(-1);
+  const areaChangeMatch = lower.match(/(?:area|size|面积)[^,.，。]*(\d+(?:\.\d+)?)\s*(kanal|marla|sqft|sqm)/);
+  const bedChangeMatch =
+    lower.match(/(?:bed|beds|bedroom|bedrooms|卧室)[^,.，。]*(?:to|=|改成|成|为)\s*(\d+)/) ??
+    lower.match(/(?:to|make|set|改成|成|为)\s*(\d+)\s*(?:bed|beds|bedroom|bedrooms|卧室)/);
+  const bathChangeMatch =
+    lower.match(/(?:bath|baths|bathroom|bathrooms|卫生间)[^,.，。]*(?:to|=|改成|成|为)\s*(\d+)/) ??
+    lower.match(/(?:to|make|set|改成|成|为)\s*(\d+)\s*(?:bath|baths|bathroom|bathrooms|卫生间)/);
+  const payload: Record<string, unknown> = {
+    query: message
+  };
+
+  if (croreMatch) {
+    payload.price_amount = Math.round(Number(croreMatch[1]) * 10000000);
+  } else if (lakhMatch) {
+    payload.price_amount = Math.round(Number(lakhMatch[1]) * 100000);
+  }
+
+  if (areaChangeMatch) {
+    payload.area_value = Number(areaChangeMatch[1]);
+    payload.area_unit = areaChangeMatch[2];
+  }
+
+  if (bedChangeMatch) {
+    payload.bedrooms = Number(bedChangeMatch[1]);
+  }
+
+  if (bathChangeMatch) {
+    payload.bathrooms = Number(bathChangeMatch[1]);
+  }
+
+  if (/\b(?:to|make|set|change|update|改成|设为|成|为)\b[^,.，。]*(?:rent|rental|lease)\b|改成出租|设为出租/u.test(lower)) {
+    payload.listing_type = "rent";
+  } else if (/\b(?:to|make|set|change|update|改成|设为|成|为)\b[^,.，。]*(?:sale|sell)\b|改成出售|设为出售/u.test(lower)) {
+    payload.listing_type = "sale";
+  }
+
+  if (/\bpublish|published\b|发布/u.test(message)) {
+    payload.status = "published";
+  } else if (/\bdraft\b|草稿/u.test(message)) {
+    payload.status = "draft";
+  } else if (/\barchive|archived\b|归档/u.test(message)) {
+    payload.status = "archived";
+  }
+
+  return {
+    intent: "update_listing_draft",
+    requires_confirmation: true,
+    response: "I prepared a listing update preview. Please confirm before I change the listing.",
+    payload
   };
 }
 
@@ -411,6 +488,24 @@ function normalizeAgentAction(action: AgentAction, message: string): AgentAction
   }
 
   if (action.intent !== "create_listing_draft") {
+    if (action.intent === "update_listing_draft") {
+      const parsedPayload = listingUpdatePayloadSchema.safeParse(action.payload);
+      if (!parsedPayload.success) {
+        return parseLocalListingUpdate(message);
+      }
+
+      return {
+        ...action,
+        requires_confirmation: true,
+        payload: {
+          ...parsedPayload.data,
+          query: parsedPayload.data.query ?? message,
+          price_currency: parsedPayload.data.price_currency ?? undefined,
+          features: parsedPayload.data.features ?? undefined
+        }
+      };
+    }
+
     return action;
   }
 
@@ -444,6 +539,8 @@ function parseLocalAgentAction(message: string): AgentAction {
       return parseLocalLeadQuery(message);
     case "promotion":
       return parseLocalPromotionRequest(message);
+    case "listing_update":
+      return parseLocalListingUpdate(message);
     case "listing_draft":
       return parseLocalListingDraft(message);
     case "general_reply":
@@ -472,15 +569,23 @@ function formatRecentContext(context?: AgentRoutingContext) {
 }
 
 export async function routeAgentMessage(message: string, context?: AgentRoutingContext): Promise<AgentAction> {
+  if (classifyLocalIntent(message) === "listing_update") {
+    return parseLocalAgentAction(message);
+  }
+
   if (!env.deepseekApiKey) {
     return parseLocalAgentAction(message);
   }
 
   const apiKey = requireServerEnv("deepseekApiKey");
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), deepseekRequestTimeoutMs);
+
   try {
     const response = await fetch(`${env.deepseekBaseUrl}/chat/completions`, {
       method: "POST",
+      signal: controller.signal,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
@@ -502,6 +607,7 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
         ]
       })
     });
+    clearTimeout(timeout);
 
     if (!response.ok) {
       return parseLocalAgentAction(message);
@@ -519,5 +625,7 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
     return normalizeAgentAction(action, message);
   } catch {
     return parseLocalAgentAction(message);
+  } finally {
+    clearTimeout(timeout);
   }
 }

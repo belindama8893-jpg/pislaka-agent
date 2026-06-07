@@ -22,19 +22,26 @@ import type { AgentChatMessageRecord } from "@/lib/agent/conversations";
 import type { BrokerEventDraftInput } from "@/lib/events/types";
 import type { LeadListItem, LeadRecord } from "@/lib/leads/types";
 import type { LeadReplyDraft } from "@/lib/leads/reply-types";
-import type { AgentAction, LeadOperationPayload } from "@/lib/agent/types";
-import type { ListingDraftInput } from "@/lib/listings/types";
+import type { AgentAction, LeadOperationPayload, ListingUpdatePayload } from "@/lib/agent/types";
+import type { ListingDraftInput, ListingDraftUpdateInput } from "@/lib/listings/types";
 import type { ListingPromotion, PromotionChannel } from "@/lib/promotions/types";
 
 type RecentListingSummary = {
   id: string;
+  status?: "draft" | "published" | "archived";
   title: string | null;
+  description?: string | null;
   location_area: string | null;
   city: string | null;
   property_type: string | null;
+  listing_type?: "sale" | "rent" | null;
+  price_amount?: number | null;
+  price_currency?: string | null;
   area_value: number | null;
   area_unit: "kanal" | "marla" | "sqft" | "sqm" | null;
   bedrooms: number | null;
+  bathrooms?: number | null;
+  features?: string[] | null;
 };
 
 type AgentWorkspaceProps = {
@@ -59,6 +66,8 @@ type ChatMessage = {
   leadLatestOffer?: boolean;
   leadStatusUpdate?: LeadStatusUpdatePreview;
   leadReply?: LeadReplyDraftWithLink;
+  listingUpdate?: ListingUpdatePreview;
+  listingUpdateChoices?: ListingUpdateChoicePreview;
   promotion?: ListingPromotion;
   promotionTarget?: RecentListingSummary;
   promotionInstruction?: string;
@@ -69,6 +78,19 @@ type LeadStatusUpdatePreview = {
   lead: LeadListItem;
   status?: LeadRecord["status"];
   urgency?: LeadRecord["urgency"];
+};
+
+type ListingUpdateChanges = Partial<Omit<ListingDraftUpdateInput, "id">>;
+
+type ListingUpdatePreview = {
+  listing: RecentListingSummary;
+  changes: ListingUpdateChanges;
+};
+
+type ListingUpdateChoicePreview = {
+  candidates: RecentListingSummary[];
+  changes: ListingUpdateChanges;
+  actionResponse: string;
 };
 
 type LeadReplyDraftWithLink = LeadReplyDraft & {
@@ -89,6 +111,8 @@ type ChatMessageUiPayload = Partial<
     | "leadLatestOffer"
     | "leadStatusUpdate"
     | "leadReply"
+    | "listingUpdate"
+    | "listingUpdateChoices"
     | "promotion"
     | "promotionTarget"
     | "promotionInstruction"
@@ -128,6 +152,8 @@ function structuredPayloadForMessage(message: ChatMessage): Record<string, unkno
     "leadLatestOffer",
     "leadStatusUpdate",
     "leadReply",
+    "listingUpdate",
+    "listingUpdateChoices",
     "promotion",
     "promotionTarget",
     "promotionInstruction",
@@ -288,6 +314,37 @@ function formStateToDraft(form: DraftFormState): ListingDraftInput {
   };
 }
 
+function listingUpdatePayloadToChanges(payload: ListingUpdatePayload): ListingUpdateChanges {
+  const changes: ListingUpdateChanges = {};
+
+  for (const key of [
+    "title",
+    "description",
+    "city",
+    "location_area",
+    "property_type",
+    "listing_type",
+    "price_amount",
+    "price_currency",
+    "area_value",
+    "area_unit",
+    "bedrooms",
+    "bathrooms",
+    "features",
+    "status"
+  ] as const) {
+    if (payload[key] !== undefined) {
+      changes[key] = payload[key] as never;
+    }
+  }
+
+  return changes;
+}
+
+function hasListingUpdateChanges(changes: ListingUpdateChanges) {
+  return Object.keys(changes).length > 0;
+}
+
 function toDatetimeLocal(value: string | undefined) {
   if (!value) {
     return "";
@@ -380,6 +437,39 @@ function formatPrice(amount: string) {
   }
 
   return `PKR ${value.toLocaleString("en-PK")}`;
+}
+
+function formatListingCurrency(amount: number | null | undefined, currency = "PKR") {
+  if (!amount) {
+    return "Not set";
+  }
+
+  const crore = amount / 10000000;
+  if (crore >= 1) {
+    return `${currency} ${crore.toFixed(crore % 1 === 0 ? 0 : 1)} Crore`;
+  }
+
+  return `${currency} ${amount.toLocaleString("en-PK")}`;
+}
+
+function formatListingUpdateValue(value: unknown, field: string) {
+  if (value === null || value === undefined || value === "") {
+    return "Not set";
+  }
+
+  if (field === "price_amount" && typeof value === "number") {
+    return formatListingCurrency(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.length ? value.join(", ") : "None";
+  }
+
+  return String(value);
+}
+
+function getListingValue(listing: RecentListingSummary, field: keyof ListingUpdateChanges) {
+  return listing[field as keyof RecentListingSummary];
 }
 
 async function uploadListingMedia(listingId: string, media: PendingMedia[]) {
@@ -863,6 +953,139 @@ function LeadStatusConfirmCard({
   );
 }
 
+const listingUpdateFieldLabels: Record<string, string> = {
+  title: "Title",
+  description: "Description",
+  city: "City",
+  location_area: "Area",
+  property_type: "Property type",
+  listing_type: "Intent",
+  price_amount: "Price",
+  price_currency: "Currency",
+  area_value: "Area size",
+  area_unit: "Area unit",
+  bedrooms: "Beds",
+  bathrooms: "Baths",
+  features: "Features",
+  status: "Status"
+};
+
+function ListingUpdateConfirmCard({
+  preview,
+  onUpdated
+}: {
+  preview: ListingUpdatePreview;
+  onUpdated: () => void;
+}) {
+  const router = useRouter();
+  const [isSaving, setIsSaving] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const entries = Object.entries(preview.changes).filter(([, value]) => value !== undefined);
+
+  async function handleConfirm() {
+    if (isSaving) {
+      return;
+    }
+
+    setIsSaving(true);
+    setStatus("Updating listing...");
+    const response = await fetch("/api/listings/draft", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        id: preview.listing.id,
+        ...preview.changes
+      })
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      setStatus(payload?.error ?? "Unable to update listing");
+      setIsSaving(false);
+      return;
+    }
+
+    setStatus("Listing updated.");
+    onUpdated();
+    router.refresh();
+    setIsSaving(false);
+  }
+
+  return (
+    <div className="listing-update-card">
+      <div className="card-title">
+        <Pencil size={16} /> Confirm listing update
+      </div>
+      <div className="promotion-target-card">
+        <strong>{preview.listing.title || "Untitled listing"}</strong>
+        <span>
+          {[preview.listing.area_value, preview.listing.area_unit].filter(Boolean).join(" ") || "Area not set"} ·{" "}
+          {[preview.listing.location_area, preview.listing.city].filter(Boolean).join(", ") || "Location not set"}
+        </span>
+      </div>
+      <div className="listing-update-list">
+        {entries.map(([field, nextValue]) => (
+          <div className="listing-update-row" key={field}>
+            <span>{listingUpdateFieldLabels[field] ?? field}</span>
+            <div>
+              <small>{formatListingUpdateValue(getListingValue(preview.listing, field as keyof ListingUpdateChanges), field)}</small>
+              <strong>{formatListingUpdateValue(nextValue, field)}</strong>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="card-actions">
+        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
+          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm update"}
+        </button>
+      </div>
+      {status ? <p className="agent-draft-status">{status}</p> : null}
+    </div>
+  );
+}
+
+function ListingUpdateSelectionCard({
+  preview,
+  onSelect
+}: {
+  preview: ListingUpdateChoicePreview;
+  onSelect: (listing: RecentListingSummary) => void;
+}) {
+  return (
+    <div className="listing-update-card">
+      <div className="card-title">
+        <House size={16} /> Choose listing to update
+      </div>
+      <p className="agent-draft-status">
+        I found multiple matching listings. Select the exact property, then I will show the update for confirmation.
+      </p>
+      <div className="listing-choice-grid">
+        {preview.candidates.map((listing) => (
+          <article className="listing-choice-card" key={listing.id}>
+            <div>
+              <strong>{listing.title || "Untitled listing"}</strong>
+              <p>
+                {[listing.area_value, listing.area_unit].filter(Boolean).join(" ") || "Area not set"} ·{" "}
+                {[listing.location_area, listing.city].filter(Boolean).join(", ") || "Location not set"}
+              </p>
+              <small>
+                {formatListingCurrency(listing.price_amount, listing.price_currency ?? "PKR")} ·{" "}
+                {listing.bedrooms ?? "-"} beds / {listing.bathrooms ?? "-"} baths
+                {listing.status ? ` · ${listing.status}` : ""}
+              </small>
+            </div>
+            <button className="primary-button small" type="button" onClick={() => onSelect(listing)}>
+              <CheckCircle2 size={15} /> Select
+            </button>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function LeadReplyCard({ draft }: { draft: LeadReplyDraftWithLink }) {
   const [copied, setCopied] = useState(false);
 
@@ -1324,12 +1547,18 @@ export function AgentWorkspace({
     ...initialMessages.map(chatMessageFromRecord)
   ]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeTurnAnchorId, setActiveTurnAnchorId] = useState<string | null>(null);
+  const [activeOutputId, setActiveOutputId] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [voiceLevels, setVoiceLevels] = useState(idleVoiceLevels);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const activeTurnAnchorRef = useRef<string | null>(null);
+  const activeOutputRef = useRef<string | null>(null);
+  const hasPositionedInitialThreadRef = useRef(false);
   const assistantStreamTimersRef = useRef<Map<string, number>>(new Map());
   const composerMediaRef = useRef<PendingMedia[]>([]);
   const pendingMediaRef = useRef<PendingMedia[]>([]);
@@ -1371,9 +1600,81 @@ export function AgentWorkspace({
     }
   ];
 
+  function positionTurnAnchor(messageId: string) {
+    const container = messagesContainerRef.current;
+    const messageElement = container?.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
+
+    if (!container || !messageElement) {
+      return;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const messageRect = messageElement.getBoundingClientRect();
+    const isDesktop = window.matchMedia("(min-width: 900px)").matches;
+    const anchorOffset = isDesktop ? containerRect.height * 0.2 : containerRect.height * 0.42;
+    const currentMessageTop = messageRect.top - containerRect.top;
+    const nextScrollTop = container.scrollTop + currentMessageTop - anchorOffset;
+
+    container.scrollTo({
+      top: Math.max(0, nextScrollTop),
+      behavior: "smooth"
+    });
+  }
+
+  function keepOutputVisible(messageId: string) {
+    const container = messagesContainerRef.current;
+    const messageElement = container?.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
+
+    if (!container || !messageElement) {
+      return;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const messageRect = messageElement.getBoundingClientRect();
+    const isDesktop = window.matchMedia("(min-width: 900px)").matches;
+    const composerElement = document.querySelector<HTMLElement>(".workspace-agent-composer");
+    const composerRect = composerElement?.getBoundingClientRect();
+    const composerOverlap =
+      composerRect && composerRect.top < containerRect.bottom ? containerRect.bottom - composerRect.top : 0;
+    const bottomReserve = Math.max(isDesktop ? 160 : 112, composerOverlap + 28);
+    const visibleBottom = containerRect.height - bottomReserve;
+    const messageBottom = messageRect.bottom - containerRect.top;
+
+    if (messageBottom > visibleBottom) {
+      container.scrollTo({
+        top: container.scrollTop + messageBottom - visibleBottom,
+        behavior: "smooth"
+      });
+    }
+  }
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ block: "end" });
-  }, [messages]);
+    if (!hasStarted) {
+      hasPositionedInitialThreadRef.current = false;
+      activeTurnAnchorRef.current = null;
+      setActiveTurnAnchorId(null);
+      activeOutputRef.current = null;
+      setActiveOutputId(null);
+      return;
+    }
+
+    const activeOutput = activeOutputRef.current;
+    if (activeOutput) {
+      window.requestAnimationFrame(() => keepOutputVisible(activeOutput));
+      return;
+    }
+
+    const activeTurnAnchor = activeTurnAnchorRef.current;
+    if (activeTurnAnchor) {
+      window.requestAnimationFrame(() => positionTurnAnchor(activeTurnAnchor));
+      return;
+    }
+
+    if (!hasPositionedInitialThreadRef.current) {
+      hasPositionedInitialThreadRef.current = true;
+      window.requestAnimationFrame(() => messagesEndRef.current?.scrollIntoView({ block: "end" }));
+    }
+  }, [messages, hasStarted]);
 
   useEffect(() => {
     composerMediaRef.current = composerMedia;
@@ -1540,6 +1841,8 @@ export function AgentWorkspace({
       isStreaming: true
     };
 
+    activeOutputRef.current = nextMessage.id;
+    setActiveOutputId(nextMessage.id);
     setMessages((current) => [...current, streamingMessage]);
     window.setTimeout(() => animateAssistantMessage(nextMessage.id, nextMessage.content), 80);
     void persistAssistantMessage(nextMessage);
@@ -1684,13 +1987,20 @@ export function AgentWorkspace({
   function candidateToListing(candidate: ListingResolutionCandidate): RecentListingSummary {
     return {
       id: candidate.id,
+      status: candidate.status as RecentListingSummary["status"],
       title: candidate.listing_title ?? candidate.label,
+      description: candidate.description ?? null,
       location_area: candidate.location_area ?? candidate.listing_area ?? null,
       city: candidate.city ?? candidate.listing_city ?? null,
       property_type: candidate.property_type ?? null,
+      listing_type: candidate.listing_type ?? null,
+      price_amount: candidate.price_amount ?? null,
+      price_currency: candidate.price_currency ?? null,
       area_value: candidate.area_value ?? null,
       area_unit: candidate.area_unit ?? null,
-      bedrooms: candidate.bedrooms ?? null
+      bedrooms: candidate.bedrooms ?? null,
+      bathrooms: candidate.bathrooms ?? null,
+      features: candidate.features ?? null
     };
   }
 
@@ -1798,6 +2108,89 @@ export function AgentWorkspace({
       promotionTarget: selectedListing,
       promotionInstruction: messageText,
       promotionChannels: extractPromotionChannels(messageText)
+    });
+  }
+
+  function getListingUpdateTarget(messageText: string, payload: ListingUpdatePayload, resolution?: AgentResolution) {
+    if (resolution?.status === "ambiguous") {
+      return { listing: null, ambiguous: true, candidates: resolution.candidates ?? [] };
+    }
+
+    if (resolution?.status === "no_match" || resolution?.status === "needs_clarification") {
+      return { listing: null, ambiguous: false, candidates: [] };
+    }
+
+    if (resolution?.status === "matched") {
+      const matchedListing =
+        recentListings.find((listing) => listing.id === resolution.target_id) ??
+        (resolution.matched ? candidateToListing(resolution.matched) : null);
+
+      return { listing: matchedListing, ambiguous: false, candidates: [] };
+    }
+
+    if (payload.listing_id) {
+      return {
+        listing: recentListings.find((listing) => listing.id === payload.listing_id) ?? null,
+        ambiguous: false,
+        candidates: []
+      };
+    }
+
+    if (messageMentionsCurrentListing(messageText) && activeListingId) {
+      return {
+        listing: recentListings.find((listing) => listing.id === activeListingId) ?? null,
+        ambiguous: false,
+        candidates: []
+      };
+    }
+
+    return { listing: null, ambiguous: false, candidates: [] };
+  }
+
+  function proposeListingUpdateFromMessage(
+    actionResponse: string,
+    messageText: string,
+    payload: ListingUpdatePayload,
+    resolution?: AgentResolution
+  ) {
+    const changes = listingUpdatePayloadToChanges(payload);
+    const target = getListingUpdateTarget(messageText, payload, resolution);
+
+    if (!hasListingUpdateChanges(changes)) {
+      appendAssistantMessage({
+        content:
+          "I found the listing request, but I could not identify which field to change. Tell me the new price, title, area, beds, baths, status, or description."
+      });
+      return;
+    }
+
+    if (target.ambiguous) {
+      appendAssistantMessage({
+        content: "I found multiple matching listings. Choose the exact property before I update anything.",
+        listingUpdateChoices: {
+          candidates: target.candidates.map((candidate) => candidateToListing(candidate)),
+          changes,
+          actionResponse
+        }
+      });
+      return;
+    }
+
+    if (!target.listing) {
+      appendAssistantMessage({
+        content:
+          "I could not find the listing to update. Please add the exact title, area, size, bedrooms, or use the listing card before changing it."
+      });
+      return;
+    }
+
+    setActiveListingId(target.listing.id);
+    appendAssistantMessage({
+      content: actionResponse,
+      listingUpdate: {
+        listing: target.listing,
+        changes
+      }
     });
   }
 
@@ -2083,7 +2476,12 @@ export function AgentWorkspace({
     if (hasOutgoingMedia) {
       setPendingMedia((current) => [...current, ...outgoingMedia]);
     }
-    appendUserMessage(userMessageContent, { attachments: outgoingMedia, persist: false });
+    const userMessage = appendUserMessage(userMessageContent, { attachments: outgoingMedia, persist: false });
+    activeTurnAnchorRef.current = userMessage.id;
+    activeOutputRef.current = null;
+    setActiveTurnAnchorId(userMessage.id);
+    setActiveOutputId(null);
+    window.requestAnimationFrame(() => positionTurnAnchor(userMessage.id));
 
     if (!trimmed) {
       appendAssistantMessage({
@@ -2095,9 +2493,13 @@ export function AgentWorkspace({
       return;
     }
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
     try {
       const response = await fetch("/api/agent/message", {
         method: "POST",
+        signal: controller.signal,
         headers: {
           "Content-Type": "application/json"
         },
@@ -2108,6 +2510,7 @@ export function AgentWorkspace({
           context_messages: recentContextMessages()
         })
       });
+      clearTimeout(timeout);
 
       if (!response.ok) {
         appendAssistantMessage({
@@ -2154,6 +2557,16 @@ export function AgentWorkspace({
         return;
       }
 
+      if (payload.action.intent === "update_listing_draft") {
+        proposeListingUpdateFromMessage(
+          payload.action.response,
+          agentMessageContent,
+          payload.action.payload as ListingUpdatePayload,
+          payload.action.resolution
+        );
+        return;
+      }
+
       if (
         payload.action.intent === "create_schedule_event" &&
         showScheduleResolutionMessage(payload.action.resolution)
@@ -2178,6 +2591,7 @@ export function AgentWorkspace({
         content: "I could not reach the agent service. Please try again in a moment."
       });
     } finally {
+      clearTimeout(timeout);
       setIsSubmitting(false);
     }
   }
@@ -2382,8 +2796,8 @@ export function AgentWorkspace({
   }
 
   return (
-    <section className={`chat-panel ${hasStarted ? "has-thread" : "is-empty"}`}>
-      <div className="messages">
+    <section className={`chat-panel ${hasStarted ? "has-thread" : "is-empty"} ${activeTurnAnchorId || activeOutputId ? "has-active-turn" : ""}`}>
+      <div className="messages" ref={messagesContainerRef}>
         {!hasStarted ? (
           <div className="agent-start">
             <h2>What should we handle today?</h2>
@@ -2404,7 +2818,7 @@ export function AgentWorkspace({
 
         {messages.map((message, index) => (
           index === 0 ? null : (
-          <article className={`message ${message.role}`} key={message.id}>
+          <article className={`message ${message.role}`} data-message-id={message.id} key={message.id}>
             <p>{message.content}</p>
             {message.attachments?.length ? (
               <div className="message-media-preview" aria-label="Sent media">
@@ -2471,6 +2885,31 @@ export function AgentWorkspace({
                     onUpdated={() => {
                       appendAssistantMessage({
                         content: "Done. I updated the lead status. You can review all lead activity from the Leads page."
+                      });
+                    }}
+                  />
+                ) : null}
+                {message.listingUpdate ? (
+                  <ListingUpdateConfirmCard
+                    preview={message.listingUpdate}
+                    onUpdated={() => {
+                      appendAssistantMessage({
+                        content: "Done. I updated the listing. You can open Listings from the sidebar to review it."
+                      });
+                    }}
+                  />
+                ) : null}
+                {message.listingUpdateChoices ? (
+                  <ListingUpdateSelectionCard
+                    preview={message.listingUpdateChoices}
+                    onSelect={(listing) => {
+                      setActiveListingId(listing.id);
+                      appendAssistantMessage({
+                        content: message.listingUpdateChoices?.actionResponse ?? "Please confirm this listing update.",
+                        listingUpdate: {
+                          listing,
+                          changes: message.listingUpdateChoices?.changes ?? {}
+                        }
                       });
                     }}
                   />

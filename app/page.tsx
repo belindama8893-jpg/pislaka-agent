@@ -157,13 +157,20 @@ export default async function Home() {
             recentLeads={leads}
             recentListings={listings.map((listing) => ({
               id: listing.id,
+              status: listing.status,
               title: listing.title,
+              description: listing.description,
               location_area: listing.location_area,
               city: listing.city,
               property_type: listing.property_type,
+              listing_type: listing.listing_type,
+              price_amount: listing.price_amount,
+              price_currency: listing.price_currency,
               area_value: listing.area_value,
               area_unit: listing.area_unit,
-              bedrooms: listing.bedrooms
+              bedrooms: listing.bedrooms,
+              bathrooms: listing.bathrooms,
+              features: listing.features
             }))}
           />
         </div>
