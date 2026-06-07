@@ -1428,7 +1428,7 @@ a {
   border: 0;
   outline: 0;
   font-size: 0.98rem;
-  font-weight: 300;
+  font-weight: 400;
   line-height: 1.35;
   resize: none;
   text-align: left;
@@ -4588,9 +4588,24 @@ a {
   }
 
   .agent-composer-row {
-    min-height: 58px;
-    padding: 8px 8px 8px 12px;
-    border-radius: 30px;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "input input input input"
+      "attach spacer voice send";
+    row-gap: 2px;
+    column-gap: 8px;
+    min-height: 86px;
+    padding: 10px 8px 8px;
+    align-items: end;
+    background: rgba(255, 255, 255, 0.96);
+    border-color: rgba(15, 23, 42, 0.08);
+    border-radius: 24px;
+    box-shadow: 0 14px 52px rgba(15, 23, 42, 0.1);
+  }
+
+  .agent-composer-row:focus-within {
+    border-color: rgba(15, 23, 42, 0.1);
+    box-shadow: 0 14px 52px rgba(15, 23, 42, 0.12);
   }
 
   .agent-composer-media {
@@ -4606,10 +4621,31 @@ a {
   }
 
   .agent-composer-input {
+    grid-area: input;
     max-height: 132px;
-    min-height: 42px;
-    padding: 10px 14px;
-    font-size: 16px;
+    min-height: 34px;
+    padding: 4px 16px 6px;
+    color: #111827;
+    font-size: 18px;
+    font-weight: 400;
+    line-height: 1.42;
+  }
+
+  .agent-composer-row > .voice-waveform-panel {
+    grid-area: input;
+    min-width: 0;
+  }
+
+  .agent-composer-icon {
+    grid-area: attach;
+  }
+
+  .agent-composer-voice {
+    grid-area: voice;
+  }
+
+  .agent-composer-send {
+    grid-area: send;
   }
 
   .agent-composer-icon,
