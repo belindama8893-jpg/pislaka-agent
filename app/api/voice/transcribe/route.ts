@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCurrentBroker } from "@/lib/auth/current-user";
+import { normalizePakistanLocationTerms } from "@/lib/agent/location-normalization";
 import { env, requireServerEnv } from "@/lib/env";
 import { createServiceClient } from "@/lib/supabase/server";
 
@@ -302,6 +303,7 @@ export async function POST(request: Request) {
         : null;
     const fileBuffer = Buffer.from(await file.arrayBuffer());
     const transcription = await transcribeVoice(file, fileBuffer, contentType);
+    const locationContext = await normalizePakistanLocationTerms(transcription.transcript);
     const storage = await trySaveVoiceAudio({
       brokerId: broker.id,
       contentType,
@@ -323,6 +325,7 @@ export async function POST(request: Request) {
         transcript: transcription.transcript,
         language: transcription.language,
         provider: transcription.provider,
+        location_context: locationContext,
         storage_path: storage.storagePath,
         storage_error: storage.storageError
       },
@@ -338,6 +341,7 @@ export async function POST(request: Request) {
       language: transcription.language,
       confidence: transcription.confidence,
       provider: transcription.provider,
+      location_context: locationContext,
       voice_message_id: storage.voiceMessageId,
       storage_saved: Boolean(storage.voiceMessageId),
       storage_error: storage.storageError

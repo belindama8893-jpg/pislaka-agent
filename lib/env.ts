@@ -16,6 +16,8 @@ export const env = {
   deepgramModel: readEnv("DEEPGRAM_MODEL") || "nova-3-general",
   deepgramLanguage: readEnv("DEEPGRAM_LANGUAGE") || "multi",
   googleSttApiKey: readEnv("GOOGLE_STT_API_KEY"),
+  pakistanHierarchyCheckUrl: readEnv("PAKISTAN_HIERARCHY_CHECK_URL"),
+  pakistanHierarchyCheckTimeoutMs: readEnv("PAKISTAN_HIERARCHY_CHECK_TIMEOUT_MS") || "900",
   appUrl: readEnv("NEXT_PUBLIC_APP_URL") || "http://localhost:3000"
 };
 

@@ -5,6 +5,7 @@ import {
 } from "@/lib/agent/conversations";
 import { routeAgentMessage } from "@/lib/agent/deepseek";
 import { resolveAgentActionEntities } from "@/lib/agent/entity-resolution";
+import { normalizePakistanLocationTerms } from "@/lib/agent/location-normalization";
 import { agentMessageSchema } from "@/lib/agent/types";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -20,6 +21,7 @@ export async function POST(request: Request) {
   }
 
   try {
+    const locationContext = await normalizePakistanLocationTerms(parsed.data.message);
     const supabase = await createSupabaseServerClient();
     const {
       data: { user }
@@ -28,9 +30,10 @@ export async function POST(request: Request) {
     if (!user) {
       const action = await routeAgentMessage(parsed.data.message, {
         timeZone: parsed.data.time_zone,
+        locationContext,
         recentMessages: parsed.data.context_messages
       });
-      return NextResponse.json({ action });
+      return NextResponse.json({ action, location_context: locationContext });
     }
 
     const { data: broker } = await supabase
@@ -42,9 +45,10 @@ export async function POST(request: Request) {
     if (!broker?.id) {
       const action = await routeAgentMessage(parsed.data.message, {
         timeZone: parsed.data.time_zone,
+        locationContext,
         recentMessages: parsed.data.context_messages
       });
-      return NextResponse.json({ action });
+      return NextResponse.json({ action, location_context: locationContext });
     }
 
     const userMessage = await insertAgentChatMessage(supabase, {
@@ -60,6 +64,7 @@ export async function POST(request: Request) {
 
     const action = await routeAgentMessage(parsed.data.message, {
       timeZone: parsed.data.time_zone,
+      locationContext,
       recentMessages
     });
     const resolvedAction = broker?.id
@@ -73,6 +78,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       action: resolvedAction,
+      location_context: locationContext,
       conversationId: userMessage.conversation_id,
       userMessage
     });

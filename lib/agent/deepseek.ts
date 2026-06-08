@@ -18,6 +18,12 @@ import {
   extractLeadStatusFilter
 } from "@/lib/agent/intent-router";
 import {
+  buildLocationEnhancedRoutingMessage,
+  formatLocationContextForPrompt,
+  stripLocationEnhancedRoutingContext,
+  type PakistanLocationNormalizationResult
+} from "@/lib/agent/location-normalization";
+import {
   fromBrokerDatetimeLocal,
   getBrokerDayRange,
   getResolvedTimeZone,
@@ -746,6 +752,32 @@ function normalizeAgentAction(action: AgentAction, message: string, context?: Ag
   };
 }
 
+function stripInternalLocationContextFromPayload(value: unknown): unknown {
+  if (typeof value === "string") {
+    return stripLocationEnhancedRoutingContext(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => stripInternalLocationContextFromPayload(item));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, stripInternalLocationContextFromPayload(item)])
+    );
+  }
+
+  return value;
+}
+
+function stripInternalLocationContextFromAction(action: AgentAction): AgentAction {
+  return {
+    ...action,
+    response: stripLocationEnhancedRoutingContext(action.response),
+    payload: stripInternalLocationContextFromPayload(action.payload) as Record<string, unknown>
+  };
+}
+
 function parseLocalAgentAction(message: string, context?: AgentRoutingContext): AgentAction {
   const intent = classifyLocalIntent(message);
 
@@ -780,6 +812,7 @@ function parseLocalAgentAction(message: string, context?: AgentRoutingContext): 
 
 type AgentRoutingContext = {
   timeZone?: string;
+  locationContext?: PakistanLocationNormalizationResult;
   recentMessages?: Array<{
     role: "user" | "assistant";
     content: string;
@@ -799,18 +832,19 @@ function formatRecentContext(context?: AgentRoutingContext) {
 }
 
 export async function routeAgentMessage(message: string, context?: AgentRoutingContext): Promise<AgentAction> {
-  const localIntent = classifyLocalIntent(message);
+  const routingMessage = buildLocationEnhancedRoutingMessage(message, context?.locationContext);
+  const localIntent = classifyLocalIntent(routingMessage);
 
   if (
     localIntent === "listing_draft" ||
     localIntent === "listing_update" ||
     localIntent === "lead_details_update"
   ) {
-    return parseLocalAgentAction(message, context);
+    return stripInternalLocationContextFromAction(parseLocalAgentAction(routingMessage, context));
   }
 
   if (!env.deepseekApiKey) {
-    return parseLocalAgentAction(message, context);
+    return stripInternalLocationContextFromAction(parseLocalAgentAction(routingMessage, context));
   }
 
   const apiKey = requireServerEnv("deepseekApiKey");
@@ -836,7 +870,9 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
             role: "user",
             content: `User time zone: ${getResolvedTimeZone(context?.timeZone)}\nCurrent date in user time zone: ${new Date().toLocaleDateString("en-CA", {
               timeZone: getResolvedTimeZone(context?.timeZone)
-            })}\n\nRecent chat context for short-term reference only. Do not treat chat text as confirmed business facts unless the target is resolved through database-backed APIs:\n${formatRecentContext(
+            })}\n\nVerified Pakistan real estate location terms from the hierarchy API. Use these only to normalize location names and improve entity extraction; do not treat them as saved listings or leads:\n${formatLocationContextForPrompt(
+              context?.locationContext
+            )}\n\nRecent chat context for short-term reference only. Do not treat chat text as confirmed business facts unless the target is resolved through database-backed APIs:\n${formatRecentContext(
               context
             )}\n\nUser message: ${message}`
           }
@@ -846,30 +882,30 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
     clearTimeout(timeout);
 
     if (!response.ok) {
-      return parseLocalAgentAction(message, context);
+      return stripInternalLocationContextFromAction(parseLocalAgentAction(routingMessage, context));
     }
 
     const json = await response.json();
     const content = json?.choices?.[0]?.message?.content;
 
     if (typeof content !== "string") {
-      return parseLocalAgentAction(message, context);
+      return stripInternalLocationContextFromAction(parseLocalAgentAction(routingMessage, context));
     }
 
     const action = agentActionSchema.parse(JSON.parse(extractJsonObject(content)));
-    const normalizedAction = normalizeAgentAction(action, message, context);
+    const normalizedAction = normalizeAgentAction(action, routingMessage, context);
 
     if (normalizedAction.intent === "general_reply" && localIntent !== "general_reply") {
-      return parseLocalAgentAction(message, context);
+      return stripInternalLocationContextFromAction(parseLocalAgentAction(routingMessage, context));
     }
 
     if (localIntent === "promotion" && normalizedAction.intent !== "create_campaign_links") {
-      return parseLocalAgentAction(message, context);
+      return stripInternalLocationContextFromAction(parseLocalAgentAction(routingMessage, context));
     }
 
-    return normalizedAction;
+    return stripInternalLocationContextFromAction(normalizedAction);
   } catch {
-    return parseLocalAgentAction(message, context);
+    return stripInternalLocationContextFromAction(parseLocalAgentAction(routingMessage, context));
   } finally {
     clearTimeout(timeout);
   }
