@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
-import { LeadListPanel } from "@/components/leads/LeadListPanel";
+import { SchedulePanel } from "@/components/schedule/SchedulePanel";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
+import { getBrokerEventsForBroker } from "@/lib/events/queries";
 import { getRecentLeadsForBroker } from "@/lib/leads/queries";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -49,21 +50,53 @@ async function getCurrentBrokerContext() {
   return { supabase, broker: broker as BrokerProfile };
 }
 
-export default async function LeadsPage() {
+async function getListingsCount(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  brokerId: string
+) {
+  const { count, error } = await supabase
+    .from("listings")
+    .select("id", { count: "exact", head: true })
+    .eq("broker_id", brokerId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return count ?? 0;
+}
+
+export default async function SchedulePage() {
   const { supabase, broker } = await getCurrentBrokerContext();
-  const leads = await getRecentLeadsForBroker(supabase, broker.id, 30);
+  const [leads, listingsCount, eventsResult] = await Promise.all([
+    getRecentLeadsForBroker(supabase, broker.id, 30),
+    getListingsCount(supabase, broker.id),
+    getBrokerEventsForBroker(supabase, broker.id, { status: "all", limit: 40 }).then(
+      (events) => ({ events, migrationRequired: false }),
+      (error) => ({
+        events: [],
+        migrationRequired:
+          error instanceof Error && /broker_events|does not exist|schema cache/i.test(error.message)
+      })
+    )
+  ]);
   const newLeadsCount = leads.filter((lead) => lead.status === "new").length;
 
   return (
     <WorkspaceShell
-      active="leads"
+      active="schedule"
       broker={broker}
       initials={getInitials(broker)}
       leadsCount={newLeadsCount}
-      subtitle="Review buyer inquiries, source channels, and follow-up status."
-      title="Leads"
+      listingsCount={listingsCount}
+      subtitle="Manage viewings, follow-ups, signing dates, handovers, and reminders."
+      title="Schedule"
     >
-      <LeadListPanel className="library-page-panel" leads={leads} />
+      <SchedulePanel
+        className="library-page-panel"
+        events={eventsResult.events}
+        migrationRequired={eventsResult.migrationRequired}
+      />
     </WorkspaceShell>
   );
 }

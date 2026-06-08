@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import { requireCurrentBroker } from "@/lib/auth/current-user";
 import {
   brokerEventCreateSchema,
+  brokerEventStatusSchema,
+  brokerEventTypeSchema,
   brokerEventUpdateSchema,
   type BrokerEventRecord
 } from "@/lib/events/types";
-
-const eventSelect =
-  "id, broker_id, event_category, event_type, title, description, start_at, end_at, reminder_at, recurrence_rule, status, lead_id, listing_id, lead_name, listing_reference, location_text, source_payload, created_from, created_at, updated_at";
+import { brokerEventSelect } from "@/lib/events/queries";
 
 function isMissingBrokerEventsTable(error: { message?: string; code?: string } | null) {
   return error?.code === "42P01" || /broker_events/i.test(error?.message ?? "");
@@ -18,11 +18,23 @@ export async function GET(request: Request) {
     const { supabase, broker } = await requireCurrentBroker();
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status") ?? "scheduled";
-    const limit = Math.min(Number(searchParams.get("limit") ?? 20), 100);
+    const eventType = searchParams.get("event_type") ?? "all";
+    const from = searchParams.get("from");
+    const to = searchParams.get("to");
+    const parsedLimit = Number(searchParams.get("limit") ?? 20);
+    const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 20;
+
+    if (status !== "all" && !brokerEventStatusSchema.safeParse(status).success) {
+      return NextResponse.json({ error: "Invalid event status filter" }, { status: 400 });
+    }
+
+    if (eventType !== "all" && !brokerEventTypeSchema.safeParse(eventType).success) {
+      return NextResponse.json({ error: "Invalid event type filter" }, { status: 400 });
+    }
 
     let query = supabase
       .from("broker_events")
-      .select(eventSelect)
+      .select(brokerEventSelect)
       .eq("broker_id", broker.id)
       .order("start_at", { ascending: true, nullsFirst: false })
       .order("reminder_at", { ascending: true, nullsFirst: false })
@@ -30,6 +42,18 @@ export async function GET(request: Request) {
 
     if (status !== "all") {
       query = query.eq("status", status);
+    }
+
+    if (eventType !== "all") {
+      query = query.eq("event_type", eventType);
+    }
+
+    if (from) {
+      query = query.or(`start_at.gte.${from},reminder_at.gte.${from}`);
+    }
+
+    if (to) {
+      query = query.or(`start_at.lte.${to},reminder_at.lte.${to}`);
     }
 
     const { data: events, error } = await query;
@@ -70,7 +94,7 @@ export async function POST(request: Request) {
         broker_id: broker.id,
         created_from: "agent"
       })
-      .select(eventSelect)
+      .select(brokerEventSelect)
       .single();
 
     if (error || !event) {
@@ -121,7 +145,7 @@ export async function PATCH(request: Request) {
 
     const { data: existingEvent, error: readError } = await supabase
       .from("broker_events")
-      .select(eventSelect)
+      .select(brokerEventSelect)
       .eq("id", id)
       .eq("broker_id", broker.id)
       .single();
@@ -146,7 +170,7 @@ export async function PATCH(request: Request) {
       })
       .eq("id", id)
       .eq("broker_id", broker.id)
-      .select(eventSelect)
+      .select(brokerEventSelect)
       .single();
 
     if (error || !event) {

@@ -65,7 +65,7 @@ async function getListingsForBroker(
     )
     .eq("broker_id", brokerId)
     .order("updated_at", { ascending: false })
-    .limit(50);
+    .limit(20);
 
   if (error) {
     throw new Error(error.message);
@@ -76,8 +76,9 @@ async function getListingsForBroker(
 
   return Promise.all(
     rawListings.map(async ({ listing_media: mediaRows, ...listing }) => {
-      const media = await Promise.all(
-        (mediaRows ?? []).map(async (mediaRow) => {
+      const sortedMediaRows = [...(mediaRows ?? [])].sort((left, right) => left.sort_order - right.sort_order);
+      const signedPreviewMedia = await Promise.all(
+        sortedMediaRows.slice(0, 6).map(async (mediaRow) => {
           const { data: signedUrlData } = await service.storage
             .from("listing-media")
             .createSignedUrl(mediaRow.storage_url, 60 * 60);
@@ -88,10 +89,12 @@ async function getListingsForBroker(
           };
         })
       );
+      const signedPreviewById = new Map(signedPreviewMedia.map((mediaRow) => [mediaRow.id, mediaRow]));
+      const media = sortedMediaRows.map((mediaRow) => signedPreviewById.get(mediaRow.id) ?? mediaRow);
 
       return {
         ...listing,
-        media: media.sort((left, right) => left.sort_order - right.sort_order)
+        media
       } as ListingRecord;
     })
   );
@@ -101,7 +104,7 @@ export default async function ListingsPage() {
   const { supabase, broker } = await getCurrentBrokerContext();
   const [listings, leads] = await Promise.all([
     getListingsForBroker(supabase, broker.id),
-    getRecentLeadsForBroker(supabase, broker.id, 100)
+    getRecentLeadsForBroker(supabase, broker.id, 30)
   ]);
   const newLeadsCount = leads.filter((lead) => lead.status === "new").length;
 

@@ -2,6 +2,7 @@
 
 import { BarChart3, CalendarClock, List, LogOut, MessageCircle, Users } from "lucide-react";
 import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type AccountMenuProps = {
@@ -15,6 +16,43 @@ type AccountMenuProps = {
 };
 
 export function AccountMenu({ initials, name, email, agency, city, listingsCount, leadsCount }: AccountMenuProps) {
+  const menuRef = useRef<HTMLDetailsElement | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    function closeMenu() {
+      menuRef.current?.removeAttribute("open");
+      setIsOpen(false);
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node) || menuRef.current?.contains(target)) {
+        return;
+      }
+
+      closeMenu();
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeMenu();
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
   async function handleSignOut() {
     const supabase = createSupabaseBrowserClient();
     await supabase.auth.signOut();
@@ -22,7 +60,11 @@ export function AccountMenu({ initials, name, email, agency, city, listingsCount
   }
 
   return (
-    <details className="account-menu">
+    <details
+      className="account-menu"
+      ref={menuRef}
+      onToggle={(event) => setIsOpen(event.currentTarget.open)}
+    >
       <summary aria-label="Open account menu">
         <span className="account-avatar">{initials || "P"}</span>
       </summary>
@@ -53,7 +95,7 @@ export function AccountMenu({ initials, name, email, agency, city, listingsCount
           <Link href="#">
             <BarChart3 size={16} /> Analytics
           </Link>
-          <Link href="#">
+          <Link href="/schedule">
             <CalendarClock size={16} /> Schedule
           </Link>
         </nav>

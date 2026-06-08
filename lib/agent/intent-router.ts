@@ -5,6 +5,7 @@ export type LocalIntentKind =
   | "lead_details_update"
   | "lead_listing_update"
   | "schedule_event"
+  | "schedule_query"
   | "lead_query"
   | "promotion"
   | "listing_update"
@@ -22,6 +23,27 @@ export function isScheduleRequest(message: string) {
   return /schedule|appointment|viewing|visit|showing|remind|follow up|callback|call back|deadline|sign|contract|handover|delivery|weekly|monthly|calendar|日程|预约|看房|提醒|跟进|回访|报价截止|合同|签约|交房|每周|每月/i.test(
     message
   );
+}
+
+export function isScheduleQueryRequest(message: string) {
+  const hasReadVerb =
+    /\b(show|list|view|check|what|what's|whats|do i have|anything|agenda|calendar)\b|查看|显示|列出|有什么|安排|日程/u.test(
+      message
+    );
+  const hasScheduleNoun =
+    /\b(schedule|calendar|appointment|appointments|viewings|reminders|agenda)\b|日程|安排|预约|看房|提醒/u.test(
+      message
+    );
+  const hasDateOnlyAgenda =
+    /\b(?:what(?:'s| is)?|what do i have|do i have anything).*\b(today|tomorrow|this week|next week)\b|\b(today|tomorrow|this week|next week)\b.*\b(anything|plan|plans|appointment|appointments|viewing|viewings|reminder|reminders)\b|今天.*安排|今天.*日程|明天.*安排|本周.*安排/u.test(
+      message
+    );
+  const hasCreateVerb =
+    /\b(schedule\s+(?:a|an|the|viewing|visit|showing|appointment|follow|call|reminder)|create|add|book|set up|arrange|remind me|follow up|call back)\b|创建|新增|安排看房|预约看房|提醒我|跟进/u.test(
+      message
+    );
+
+  return (hasDateOnlyAgenda || (hasReadVerb && hasScheduleNoun)) && !hasCreateVerb;
 }
 
 export function isLeadReplyRequest(message: string) {
@@ -128,6 +150,10 @@ export function classifyLocalIntent(message: string): LocalIntentKind {
 
   if (isLeadStatusRequest(message)) {
     return "lead_status_update";
+  }
+
+  if (isScheduleQueryRequest(message)) {
+    return "schedule_query";
   }
 
   if (isScheduleRequest(message)) {

@@ -8,6 +8,7 @@ import {
   listingDraftPayloadSchema,
   listingUpdatePayloadSchema,
   scheduleEventActionPayloadSchema,
+  scheduleEventListPayloadSchema,
   type AgentAction
 } from "@/lib/agent/types";
 import {
@@ -111,6 +112,19 @@ Schedule classification:
 - appointment: viewing, contract_signing, handover
 - reminder: follow_up, offer_deadline, document_expiry
 - recurring: weekly_review, monthly_client_review
+
+Schedule query output shape:
+{
+  "intent": "list_schedule_events",
+  "requires_confirmation": false,
+  "response": "Here are your schedule items.",
+  "payload": {
+    "date_filter": "today",
+    "status": "scheduled",
+    "event_type": "all",
+    "limit": 10
+  }
+}
 
 Lead operation output shape:
 {
@@ -503,6 +517,37 @@ function parseLocalScheduleEvent(message: string): AgentAction {
   };
 }
 
+function parseLocalScheduleQuery(message: string): AgentAction {
+  const dateFilter = /tomorrow|明天/i.test(message)
+    ? "tomorrow"
+    : /week|本周|下周/i.test(message)
+      ? "week"
+      : /all|全部|所有/i.test(message)
+        ? "all"
+        : "today";
+  const eventType = /viewing|visit|showing|看房/i.test(message)
+    ? "viewing"
+    : /follow|跟进|回访/i.test(message)
+      ? "follow_up"
+      : /contract|sign|合同|签约/i.test(message)
+        ? "contract_signing"
+        : /handover|delivery|交房/i.test(message)
+          ? "handover"
+          : "all";
+
+  return {
+    intent: "list_schedule_events",
+    requires_confirmation: false,
+    response: "Here are your schedule items.",
+    payload: {
+      date_filter: dateFilter,
+      status: "scheduled",
+      event_type: eventType,
+      limit: 10
+    }
+  };
+}
+
 function parseLocalListingDraft(message: string): AgentAction {
   const lower = message.toLowerCase();
   const croreMatch = lower.match(/(\d+(?:\.\d+)?)\s*(?:crore|cr|karor)/);
@@ -568,6 +613,16 @@ function extractJsonObject(content: string) {
 }
 
 function normalizeAgentAction(action: AgentAction, message: string): AgentAction {
+  if (action.intent === "list_schedule_events") {
+    const parsedPayload = scheduleEventListPayloadSchema.safeParse(action.payload);
+
+    return {
+      ...action,
+      requires_confirmation: false,
+      payload: parsedPayload.success ? parsedPayload.data : parseLocalScheduleQuery(message).payload
+    };
+  }
+
   if (action.intent === "create_schedule_event") {
     const parsedPayload = scheduleEventActionPayloadSchema.safeParse(action.payload);
     if (!parsedPayload.success) {
@@ -718,6 +773,8 @@ function parseLocalAgentAction(message: string): AgentAction {
       return parseLocalLeadStatusUpdate(message);
     case "schedule_event":
       return parseLocalScheduleEvent(message);
+    case "schedule_query":
+      return parseLocalScheduleQuery(message);
     case "lead_query":
       return parseLocalLeadQuery(message);
     case "promotion":
@@ -754,7 +811,11 @@ function formatRecentContext(context?: AgentRoutingContext) {
 export async function routeAgentMessage(message: string, context?: AgentRoutingContext): Promise<AgentAction> {
   const localIntent = classifyLocalIntent(message);
 
-  if (localIntent === "listing_update" || localIntent === "lead_details_update") {
+  if (
+    localIntent === "listing_draft" ||
+    localIntent === "listing_update" ||
+    localIntent === "lead_details_update"
+  ) {
     return parseLocalAgentAction(message);
   }
 

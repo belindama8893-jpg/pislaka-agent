@@ -76,6 +76,7 @@ export function AgentComposer({
   voiceSlot
 }: AgentComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const attachWrapRef = useRef<HTMLDivElement | null>(null);
   const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -87,6 +88,35 @@ export function AgentComposer({
     textarea.style.height = "0px";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 144)}px`;
   }, [value]);
+
+  useEffect(() => {
+    if (!isAttachMenuOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node) || attachWrapRef.current?.contains(target)) {
+        return;
+      }
+
+      setIsAttachMenuOpen(false);
+    }
+
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsAttachMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isAttachMenuOpen]);
 
   function handleTextareaKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -164,7 +194,7 @@ export function AgentComposer({
       ) : null}
 
       <div className="agent-composer-row">
-        <div className="agent-composer-attach-wrap">
+        <div className="agent-composer-attach-wrap" ref={attachWrapRef}>
           <button
             aria-expanded={isAttachMenuOpen}
             aria-label="Add attachment"

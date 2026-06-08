@@ -4,8 +4,8 @@ import { ProfileCompletionForm } from "@/components/profile/ProfileCompletionFor
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
 import { getAgentChatMessages } from "@/lib/agent/conversations";
 import { getRecentLeadsForBroker } from "@/lib/leads/queries";
-import type { ListingMediaRecord, ListingRecord } from "@/lib/listings/types";
-import { createServiceClient, createSupabaseServerClient } from "@/lib/supabase/server";
+import type { ListingRecord } from "@/lib/listings/types";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -18,10 +18,6 @@ type BrokerProfile = {
   agency_name: string | null;
   phone: string | null;
   preferred_language: string | null;
-};
-
-type RawListingRecord = Omit<ListingRecord, "media"> & {
-  listing_media?: ListingMediaRecord[] | null;
 };
 
 type HomeProps = {
@@ -116,7 +112,7 @@ async function getListingsForBroker(
   const { data: listings, error } = await supabase
     .from("listings")
     .select(
-      "id, status, title, description, city, location_area, property_type, listing_type, price_amount, price_currency, area_value, area_unit, bedrooms, bathrooms, features, created_at, updated_at, listing_media(id, listing_id, media_type, storage_url, sort_order, created_at)"
+      "id, status, title, description, city, location_area, property_type, listing_type, price_amount, price_currency, area_value, area_unit, bedrooms, bathrooms, features, created_at, updated_at"
     )
     .eq("broker_id", brokerId)
     .order("updated_at", { ascending: false })
@@ -126,30 +122,7 @@ async function getListingsForBroker(
     throw new Error(error.message);
   }
 
-  const service = createServiceClient();
-  const rawListings = (listings ?? []) as RawListingRecord[];
-
-  return Promise.all(
-    rawListings.map(async ({ listing_media: mediaRows, ...listing }) => {
-      const media = await Promise.all(
-        (mediaRows ?? []).map(async (mediaRow) => {
-          const { data: signedUrlData } = await service.storage
-            .from("listing-media")
-            .createSignedUrl(mediaRow.storage_url, 60 * 60);
-
-          return {
-            ...mediaRow,
-            signed_url: signedUrlData?.signedUrl ?? null
-          };
-        })
-      );
-
-      return {
-        ...listing,
-        media: media.sort((left, right) => left.sort_order - right.sort_order)
-      } as ListingRecord;
-    })
-  );
+  return (listings ?? []) as ListingRecord[];
 }
 
 export default async function Home({ searchParams }: HomeProps) {

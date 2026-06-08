@@ -114,6 +114,28 @@ export type AgentAction = z.infer<typeof agentActionSchema>;
 
 export const scheduleEventActionPayloadSchema = brokerEventDraftInputSchema;
 
+export const scheduleEventListPayloadSchema = z.object({
+  date_filter: z.enum(["today", "tomorrow", "week", "all"]).default("today"),
+  status: z.enum(["scheduled", "completed", "canceled", "overdue", "all"]).default("scheduled"),
+  event_type: z
+    .enum([
+      "viewing",
+      "contract_signing",
+      "handover",
+      "follow_up",
+      "offer_deadline",
+      "document_expiry",
+      "weekly_review",
+      "monthly_client_review",
+      "custom",
+      "all"
+    ])
+    .default("all"),
+  limit: z.number().int().positive().max(50).default(10)
+});
+
+export type ScheduleEventListPayload = z.infer<typeof scheduleEventListPayloadSchema>;
+
 export const leadOperationPayloadSchema = z.object({
   lead_id: z.string().uuid().optional(),
   lead_name: z.string().optional(),

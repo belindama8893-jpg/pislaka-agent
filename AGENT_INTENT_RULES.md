@@ -159,6 +159,7 @@ If multiple targets match:
 | "Create a listing for 1 kanal DHA Phase 6 8.5 crore" | `create_listing_draft` | Editable preview before save |
 | "Change this listing price to 1.2 crore" | `update_listing_draft` | Resolve the current listing and confirm before update |
 | "Schedule viewing with Ahmed tomorrow at 3pm" | `create_schedule_event` | Calendar preview before save |
+| "What do I have today?" | `list_schedule_events` | Read-only schedule list, no confirmation |
 | "Which leads should I follow up today?" | `analyze_leads` or `list_leads` | Read-only, can rank urgent leads |
 | "How is this listing performing?" | `analyze_listings` | Requires current listing or explicit target |
 
@@ -225,6 +226,9 @@ Implemented now:
 - Backend listing resolution runs for `create_campaign_links` and can use an explicit/current listing id, the latest listing when explicitly requested, or strong listing details.
 - Backend listing resolution runs for `update_listing_draft` before showing a listing update confirmation.
 - Backend schedule event resolution runs for `create_schedule_event` and can resolve the participant lead, the associated listing, or both before showing the calendar preview.
+- Frontend preserves resolved `lead_id` and `listing_id` when confirming a schedule preview.
+- Frontend can execute `list_schedule_events` as a read-only `/api/events` query and display schedule items in chat.
+- The Schedule workspace page lists, filters, edits, completes, and cancels broker events.
 - Frontend shows listing candidate cards when `update_listing_draft` returns ambiguous listing matches.
 - Frontend sends `current_listing_id` when the broker has an active listing context.
 - Frontend still has local lead scoring as a compatibility fallback when `resolution` is missing.

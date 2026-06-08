@@ -45,16 +45,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ action });
     }
 
-    const recentMessages = await getRecentAgentContextMessages(supabase, broker.id, 20);
     const userMessage = await insertAgentChatMessage(supabase, {
       conversationId: parsed.data.conversationId,
       brokerId: broker.id,
       role: "user",
       content: parsed.data.message
     });
+    const recentMessages =
+      parsed.data.context_messages && parsed.data.context_messages.length
+        ? parsed.data.context_messages
+        : await getRecentAgentContextMessages(supabase, broker.id, 20);
 
     const action = await routeAgentMessage(parsed.data.message, {
-      recentMessages: parsed.data.context_messages ?? recentMessages
+      recentMessages
     });
     const resolvedAction = broker?.id
       ? await resolveAgentActionEntities(action, supabase, broker.id, {

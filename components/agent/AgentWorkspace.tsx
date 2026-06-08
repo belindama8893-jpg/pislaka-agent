@@ -21,7 +21,7 @@ import {
 import { AgentComposer, type AgentComposerContextPreview } from "@/components/agent/AgentComposer";
 import { useRouter } from "next/navigation";
 import type { AgentChatMessageRecord } from "@/lib/agent/conversations";
-import type { BrokerEventDraftInput } from "@/lib/events/types";
+import type { BrokerEventDraftInput, BrokerEventRecord } from "@/lib/events/types";
 import type { LeadListItem, LeadRecord } from "@/lib/leads/types";
 import type { LeadReplyDraft } from "@/lib/leads/reply-types";
 import type {
@@ -30,7 +30,8 @@ import type {
   LeadDetailsUpdatePayload,
   LeadListingUpdatePayload,
   LeadOperationPayload,
-  ListingUpdatePayload
+  ListingUpdatePayload,
+  ScheduleEventListPayload
 } from "@/lib/agent/types";
 import type { ListingDraftInput, ListingDraftUpdateInput } from "@/lib/listings/types";
 import type { ListingPromotion, PromotionChannel } from "@/lib/promotions/types";
@@ -74,6 +75,7 @@ type ChatMessage = {
   fileAttachments?: PendingFileAttachment[];
   draft?: ListingDraftInput;
   scheduleEvent?: BrokerEventDraftInput;
+  scheduleEvents?: BrokerEventRecord[];
   leadResults?: LeadListItem[];
   leadLatestOffer?: boolean;
   leadDetailsUpdate?: LeadDetailsUpdatePreview;
@@ -323,9 +325,12 @@ type EventFormState = {
   end_at: string;
   reminder_at: string;
   recurrence_rule: string;
+  lead_id: string;
+  listing_id: string;
   lead_name: string;
   listing_reference: string;
   location_text: string;
+  source_payload: Record<string, unknown>;
 };
 
 function createId() {
@@ -467,9 +472,12 @@ function eventToFormState(event: BrokerEventDraftInput): EventFormState {
     end_at: toDatetimeLocal(event.end_at),
     reminder_at: toDatetimeLocal(event.reminder_at),
     recurrence_rule: event.recurrence_rule ?? "",
+    lead_id: event.lead_id ?? "",
+    listing_id: event.listing_id ?? "",
     lead_name: event.lead_name ?? "",
     listing_reference: event.listing_reference ?? "",
-    location_text: event.location_text ?? ""
+    location_text: event.location_text ?? "",
+    source_payload: event.source_payload ?? {}
   };
 }
 
@@ -483,10 +491,13 @@ function formStateToEvent(form: EventFormState): BrokerEventDraftInput {
     end_at: fromDatetimeLocal(form.end_at),
     reminder_at: fromDatetimeLocal(form.reminder_at),
     recurrence_rule: form.recurrence_rule.trim() || undefined,
+    lead_id: form.lead_id || undefined,
+    listing_id: form.listing_id || undefined,
     lead_name: form.lead_name.trim() || undefined,
     listing_reference: form.listing_reference.trim() || undefined,
     location_text: form.location_text.trim() || undefined,
     source_payload: {
+      ...form.source_payload,
       source: "agent_workspace_schedule_preview"
     }
   };
@@ -503,6 +514,42 @@ function formatEventTime(event: BrokerEventDraftInput) {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(primaryTime));
+}
+
+function getScheduleResultTime(event: BrokerEventRecord) {
+  return event.start_at ?? event.reminder_at ?? event.created_at;
+}
+
+function formatScheduleResultTime(event: BrokerEventRecord) {
+  return new Intl.DateTimeFormat("en-PK", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(new Date(getScheduleResultTime(event)));
+}
+
+function getScheduleDateRange(dateFilter: ScheduleEventListPayload["date_filter"]) {
+  if (dateFilter === "all") {
+    return {};
+  }
+
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  if (dateFilter === "tomorrow") {
+    start.setDate(start.getDate() + 1);
+  }
+
+  const end = new Date(start);
+
+  if (dateFilter === "week") {
+    end.setDate(start.getDate() + 7);
+  }
+
+  end.setHours(23, 59, 59, 999);
+
+  return {
+    from: start.toISOString(),
+    to: end.toISOString()
+  };
 }
 
 function formatPrice(amount: string) {
@@ -2061,6 +2108,40 @@ function SchedulePreviewCard({
   );
 }
 
+function ScheduleResultsCard({ events }: { events: BrokerEventRecord[] }) {
+  return (
+    <div className="chat-card schedule-results-card">
+      <div className="card-title">
+        <CalendarClock size={16} /> Schedule items
+      </div>
+      {events.length === 0 ? (
+        <p>No matching schedule items.</p>
+      ) : (
+        <div className="event-mini-list">
+          {events.map((event) => (
+            <div className="event-mini-row" key={event.id}>
+              <time dateTime={getScheduleResultTime(event)}>{formatScheduleResultTime(event)}</time>
+              <div>
+                <strong>{event.title}</strong>
+                <small>
+                  {[
+                    event.event_type.replace(/_/g, " "),
+                    event.lead_name,
+                    event.listing_reference,
+                    event.location_text
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </small>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AgentWorkspace({
   conversationId: initialConversationId,
   firstName,
@@ -2914,6 +2995,48 @@ export function AgentWorkspace({
     });
   }
 
+  async function showScheduleResults(actionResponse: string, payload: ScheduleEventListPayload) {
+    const params = new URLSearchParams({
+      status: payload.status,
+      limit: String(payload.limit)
+    });
+    const range = getScheduleDateRange(payload.date_filter);
+
+    if (payload.event_type !== "all") {
+      params.set("event_type", payload.event_type);
+    }
+
+    if (range.from) {
+      params.set("from", range.from);
+    }
+
+    if (range.to) {
+      params.set("to", range.to);
+    }
+
+    const response = await fetch(`/api/events?${params.toString()}`);
+    if (!response.ok) {
+      const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null;
+      appendAssistantMessage({
+        content: errorPayload?.error ?? "I could not read your schedule yet. Please try again in a moment."
+      });
+      return;
+    }
+
+    const result = (await response.json()) as { events?: BrokerEventRecord[]; migration_required?: boolean };
+    if (result.migration_required) {
+      appendAssistantMessage({
+        content: "Schedule storage is not ready yet. Please run the broker events migration first."
+      });
+      return;
+    }
+
+    appendAssistantMessage({
+      content: actionResponse,
+      scheduleEvents: result.events ?? []
+    });
+  }
+
   function formatResolutionCandidates(candidates: AgentResolutionCandidate[]) {
     return candidates
       .map((candidate) => [candidate.label, candidate.phone].filter(Boolean).join(" · "))
@@ -3291,7 +3414,7 @@ export function AgentWorkspace({
     }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    const timeout = setTimeout(() => controller.abort(), 25000);
 
     try {
       const response = await fetch("/api/agent/message", {
@@ -3343,6 +3466,14 @@ export function AgentWorkspace({
 
       if (payload.action.intent === "list_leads" && leadPayload) {
         showLeadResults(payload.action.response, leadPayload);
+        return;
+      }
+
+      if (payload.action.intent === "list_schedule_events") {
+        await showScheduleResults(
+          payload.action.response,
+          payload.action.payload as ScheduleEventListPayload
+        );
         return;
       }
 
@@ -3724,6 +3855,7 @@ export function AgentWorkspace({
                     }}
                   />
                 ) : null}
+                {message.scheduleEvents ? <ScheduleResultsCard events={message.scheduleEvents} /> : null}
                 {message.leadResults ? <LeadResultsCard leads={message.leadResults} onSelect={addLeadContext} /> : null}
                 {message.leadLatestOffer ? (
                   <LeadLatestOfferCard
