@@ -11,9 +11,16 @@ import {
   UserRound,
   XCircle
 } from "lucide-react";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { BrokerEventRecord } from "@/lib/events/types";
+import {
+  formatBrokerDateTime,
+  fromBrokerDatetimeLocal,
+  getBrokerDateKey,
+  getResolvedTimeZone,
+  toBrokerDatetimeLocal
+} from "@/lib/events/time";
 
 type SchedulePanelProps = {
   events: BrokerEventRecord[];
@@ -53,71 +60,36 @@ function getEventTime(event: Pick<BrokerEventRecord, "start_at" | "reminder_at" 
   return event.start_at ?? event.reminder_at ?? event.created_at;
 }
 
-function formatEventTime(value: string | null) {
+function formatEventTime(value: string | null, timeZone?: string | null) {
   if (!value) {
     return "Time not set";
   }
 
-  return new Intl.DateTimeFormat("en-PK", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(value));
+  return formatBrokerDateTime(value, timeZone);
 }
 
-function formatShortTime(value: string | null) {
+function formatShortTime(value: string | null, timeZone?: string | null) {
   if (!value) {
     return "No time";
   }
 
-  return new Intl.DateTimeFormat("en-PK", {
+  return formatBrokerDateTime(value, timeZone, {
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit"
-  }).format(new Date(value));
+  });
 }
 
-function toDatetimeLocal(value: string | null) {
-  if (!value) {
-    return "";
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-}
-
-function fromDatetimeLocal(value: string) {
-  if (!value) {
-    return undefined;
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return undefined;
-  }
-
-  return date.toISOString();
-}
-
-function getEditState(event: BrokerEventRecord): EventEditState {
+function getEditState(event: BrokerEventRecord, timeZone?: string | null): EventEditState {
   return {
     event_category: event.event_category,
     event_type: event.event_type,
     title: event.title,
     description: event.description ?? "",
-    start_at: toDatetimeLocal(event.start_at),
-    end_at: toDatetimeLocal(event.end_at),
-    reminder_at: toDatetimeLocal(event.reminder_at),
+    start_at: toBrokerDatetimeLocal(event.start_at, timeZone),
+    end_at: toBrokerDatetimeLocal(event.end_at, timeZone),
+    reminder_at: toBrokerDatetimeLocal(event.reminder_at, timeZone),
     recurrence_rule: event.recurrence_rule ?? "",
     lead_name: event.lead_name ?? "",
     listing_reference: event.listing_reference ?? "",
@@ -126,27 +98,20 @@ function getEditState(event: BrokerEventRecord): EventEditState {
   };
 }
 
-function isSameDay(left: Date, right: Date) {
-  return (
-    left.getFullYear() === right.getFullYear() &&
-    left.getMonth() === right.getMonth() &&
-    left.getDate() === right.getDate()
-  );
-}
-
-function isInRange(event: BrokerEventRecord, rangeFilter: string) {
+function isInRange(event: BrokerEventRecord, rangeFilter: string, timeZone?: string | null) {
   if (rangeFilter === "all") {
     return true;
   }
 
-  const eventDate = new Date(getEventTime(event));
+  const eventTime = getEventTime(event);
+  const eventDate = new Date(eventTime);
   if (Number.isNaN(eventDate.getTime())) {
     return false;
   }
 
   const now = new Date();
   if (rangeFilter === "today") {
-    return isSameDay(eventDate, now);
+    return getBrokerDateKey(eventTime, timeZone) === getBrokerDateKey(now, timeZone);
   }
 
   const weekEnd = new Date(now);
@@ -174,15 +139,20 @@ function eventSearchText(event: BrokerEventRecord) {
 
 export function SchedulePanel({ className = "", events, migrationRequired = false }: SchedulePanelProps) {
   const router = useRouter();
+  const [userTimeZone, setUserTimeZone] = useState(() => getResolvedTimeZone());
   const [localEvents, setLocalEvents] = useState(events);
   const [status, setStatus] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editState, setEditState] = useState<EventEditState | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [rangeFilter, setRangeFilter] = useState("today");
+  const [rangeFilter, setRangeFilter] = useState("week");
   const [statusFilter, setStatusFilter] = useState<BrokerEventRecord["status"] | "all">("scheduled");
   const [typeFilter, setTypeFilter] = useState<BrokerEventRecord["event_type"] | "all">("all");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setUserTimeZone(getResolvedTimeZone());
+  }, []);
 
   const filteredEvents = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -190,18 +160,18 @@ export function SchedulePanel({ className = "", events, migrationRequired = fals
     return localEvents
       .filter((event) => statusFilter === "all" || event.status === statusFilter)
       .filter((event) => typeFilter === "all" || event.event_type === typeFilter)
-      .filter((event) => isInRange(event, rangeFilter))
+      .filter((event) => isInRange(event, rangeFilter, userTimeZone))
       .filter((event) => !normalizedQuery || eventSearchText(event).includes(normalizedQuery))
       .sort((left, right) => new Date(getEventTime(left)).getTime() - new Date(getEventTime(right)).getTime());
-  }, [localEvents, rangeFilter, searchQuery, statusFilter, typeFilter]);
+  }, [localEvents, rangeFilter, searchQuery, statusFilter, typeFilter, userTimeZone]);
 
   const todayCount = useMemo(
-    () => localEvents.filter((event) => event.status === "scheduled" && isInRange(event, "today")).length,
-    [localEvents]
+    () => localEvents.filter((event) => event.status === "scheduled" && isInRange(event, "today", userTimeZone)).length,
+    [localEvents, userTimeZone]
   );
   const upcomingCount = useMemo(
-    () => localEvents.filter((event) => event.status === "scheduled" && isInRange(event, "week")).length,
-    [localEvents]
+    () => localEvents.filter((event) => event.status === "scheduled" && isInRange(event, "week", userTimeZone)).length,
+    [localEvents, userTimeZone]
   );
   const overdueCount = useMemo(() => {
     const now = Date.now();
@@ -213,7 +183,7 @@ export function SchedulePanel({ className = "", events, migrationRequired = fals
 
   function startEditing(event: BrokerEventRecord) {
     setEditingId(event.id);
-    setEditState(getEditState(event));
+    setEditState(getEditState(event, userTimeZone));
     setStatus(null);
   }
 
@@ -266,9 +236,9 @@ export function SchedulePanel({ className = "", events, migrationRequired = fals
         event_type: editState.event_type,
         title: editState.title.trim() || "Broker event",
         description: editState.description.trim() || undefined,
-        start_at: fromDatetimeLocal(editState.start_at),
-        end_at: fromDatetimeLocal(editState.end_at),
-        reminder_at: fromDatetimeLocal(editState.reminder_at),
+        start_at: fromBrokerDatetimeLocal(editState.start_at, userTimeZone),
+        end_at: fromBrokerDatetimeLocal(editState.end_at, userTimeZone),
+        reminder_at: fromBrokerDatetimeLocal(editState.reminder_at, userTimeZone),
         recurrence_rule: editState.recurrence_rule.trim() || undefined,
         lead_name: editState.lead_name.trim() || undefined,
         listing_reference: editState.listing_reference.trim() || undefined,
@@ -481,7 +451,7 @@ export function SchedulePanel({ className = "", events, migrationRequired = fals
             ) : (
               <article className={`schedule-row ${scheduleEvent.status}`} key={scheduleEvent.id}>
                 <time dateTime={getEventTime(scheduleEvent)}>
-                  <Clock size={14} /> {formatShortTime(scheduleEvent.start_at ?? scheduleEvent.reminder_at)}
+                  <Clock size={14} /> {formatShortTime(scheduleEvent.start_at ?? scheduleEvent.reminder_at, userTimeZone)}
                 </time>
                 <div className="schedule-row-main">
                   <div className="schedule-row-header">
@@ -502,7 +472,7 @@ export function SchedulePanel({ className = "", events, migrationRequired = fals
                         <MapPin size={13} /> {scheduleEvent.location_text}
                       </span>
                     ) : null}
-                    {scheduleEvent.reminder_at ? <span>Reminder {formatEventTime(scheduleEvent.reminder_at)}</span> : null}
+                    {scheduleEvent.reminder_at ? <span>Reminder {formatEventTime(scheduleEvent.reminder_at, userTimeZone)}</span> : null}
                   </div>
                 </div>
                 <div className="schedule-row-actions">

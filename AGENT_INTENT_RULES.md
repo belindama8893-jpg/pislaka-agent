@@ -227,6 +227,7 @@ Implemented now:
 - Backend listing resolution runs for `update_listing_draft` before showing a listing update confirmation.
 - Backend schedule event resolution runs for `create_schedule_event` and can resolve the participant lead, the associated listing, or both before showing the calendar preview.
 - Frontend preserves resolved `lead_id` and `listing_id` when confirming a schedule preview.
+- Schedule times are interpreted, displayed, edited, and queried in the user's current browser timezone; persisted event timestamps remain ISO instants.
 - Frontend can execute `list_schedule_events` as a read-only `/api/events` query and display schedule items in chat.
 - The Schedule workspace page lists, filters, edits, completes, and cancels broker events.
 - Frontend shows listing candidate cards when `update_listing_draft` returns ambiguous listing matches.

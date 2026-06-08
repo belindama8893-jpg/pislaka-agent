@@ -180,10 +180,14 @@ export function classifyLocalIntent(message: string): LocalIntentKind {
 }
 
 export function extractLeadName(message: string) {
+  const englishMatch = message.match(
+    /\b(?:reply to|respond to|message back|message|with|for|follow up|call|remind me to call|to)\s+([\p{L}\p{N}'-]+(?:\s+[\p{L}\p{N}'-]+){0,2})/iu
+  );
+  const englishName = englishMatch?.[1]
+    ?.replace(/\s+\b(?:today|tomorrow|tonight|next|this|at|for|about|on|in|with|my)\b.*$/iu, "")
+    .trim();
   const match =
-    message.match(
-      /\b(?:reply to|respond to|message back|message|with|for|follow up|call|remind me to call|to)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/
-    ) ??
+    (englishName ? [, englishName] : null) ??
     message.match(/(?:客户|跟进|提醒|回复|回消息)\s*([\p{L}\p{N} ]{2,24})/u);
 
   return match?.[1]?.trim();

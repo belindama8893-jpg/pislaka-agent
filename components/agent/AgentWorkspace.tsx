@@ -22,6 +22,13 @@ import { AgentComposer, type AgentComposerContextPreview } from "@/components/ag
 import { useRouter } from "next/navigation";
 import type { AgentChatMessageRecord } from "@/lib/agent/conversations";
 import type { BrokerEventDraftInput, BrokerEventRecord } from "@/lib/events/types";
+import {
+  formatBrokerDateTime,
+  fromBrokerDatetimeLocal,
+  getBrokerDayRange,
+  getResolvedTimeZone,
+  toBrokerDatetimeLocal
+} from "@/lib/events/time";
 import type { LeadListItem, LeadRecord } from "@/lib/leads/types";
 import type { LeadReplyDraft } from "@/lib/leads/reply-types";
 import type {
@@ -430,47 +437,15 @@ function getLeadValue(lead: LeadListItem, field: keyof LeadDetailsUpdateChanges)
   return lead[field];
 }
 
-function toDatetimeLocal(value: string | undefined) {
-  if (!value) {
-    return "";
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-}
-
-function fromDatetimeLocal(value: string) {
-  if (!value) {
-    return undefined;
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return undefined;
-  }
-
-  return date.toISOString();
-}
-
-function eventToFormState(event: BrokerEventDraftInput): EventFormState {
+function eventToFormState(event: BrokerEventDraftInput, timeZone?: string | null): EventFormState {
   return {
     event_category: event.event_category,
     event_type: event.event_type,
     title: event.title,
     description: event.description ?? "",
-    start_at: toDatetimeLocal(event.start_at),
-    end_at: toDatetimeLocal(event.end_at),
-    reminder_at: toDatetimeLocal(event.reminder_at),
+    start_at: toBrokerDatetimeLocal(event.start_at, timeZone),
+    end_at: toBrokerDatetimeLocal(event.end_at, timeZone),
+    reminder_at: toBrokerDatetimeLocal(event.reminder_at, timeZone),
     recurrence_rule: event.recurrence_rule ?? "",
     lead_id: event.lead_id ?? "",
     listing_id: event.listing_id ?? "",
@@ -481,15 +456,15 @@ function eventToFormState(event: BrokerEventDraftInput): EventFormState {
   };
 }
 
-function formStateToEvent(form: EventFormState): BrokerEventDraftInput {
+function formStateToEvent(form: EventFormState, timeZone?: string | null): BrokerEventDraftInput {
   return {
     event_category: form.event_category,
     event_type: form.event_type,
     title: form.title.trim() || "Broker event",
     description: form.description.trim() || undefined,
-    start_at: fromDatetimeLocal(form.start_at),
-    end_at: fromDatetimeLocal(form.end_at),
-    reminder_at: fromDatetimeLocal(form.reminder_at),
+    start_at: fromBrokerDatetimeLocal(form.start_at, timeZone),
+    end_at: fromBrokerDatetimeLocal(form.end_at, timeZone),
+    reminder_at: fromBrokerDatetimeLocal(form.reminder_at, timeZone),
     recurrence_rule: form.recurrence_rule.trim() || undefined,
     lead_id: form.lead_id || undefined,
     listing_id: form.listing_id || undefined,
@@ -503,53 +478,41 @@ function formStateToEvent(form: EventFormState): BrokerEventDraftInput {
   };
 }
 
-function formatEventTime(event: BrokerEventDraftInput) {
+function formatEventTime(event: BrokerEventDraftInput, timeZone?: string | null) {
   const primaryTime = event.start_at ?? event.reminder_at;
 
   if (!primaryTime) {
     return event.recurrence_rule || "Time not set";
   }
 
-  return new Intl.DateTimeFormat("en-PK", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(primaryTime));
+  return formatBrokerDateTime(primaryTime, timeZone);
 }
 
 function getScheduleResultTime(event: BrokerEventRecord) {
   return event.start_at ?? event.reminder_at ?? event.created_at;
 }
 
-function formatScheduleResultTime(event: BrokerEventRecord) {
-  return new Intl.DateTimeFormat("en-PK", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(getScheduleResultTime(event)));
+function formatScheduleResultTime(event: BrokerEventRecord, timeZone?: string | null) {
+  return formatBrokerDateTime(getScheduleResultTime(event), timeZone);
 }
 
-function getScheduleDateRange(dateFilter: ScheduleEventListPayload["date_filter"]) {
+function getScheduleDateRange(
+  dateFilter: ScheduleEventListPayload["date_filter"],
+  timeZone?: string | null
+): { from?: string; to?: string } {
   if (dateFilter === "all") {
     return {};
   }
 
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
   if (dateFilter === "tomorrow") {
-    start.setDate(start.getDate() + 1);
+    return getBrokerDayRange(1, 0, timeZone);
   }
-
-  const end = new Date(start);
 
   if (dateFilter === "week") {
-    end.setDate(start.getDate() + 7);
+    return getBrokerDayRange(0, 7, timeZone);
   }
 
-  end.setHours(23, 59, 59, 999);
-
-  return {
-    from: start.toISOString(),
-    to: end.toISOString()
-  };
+  return getBrokerDayRange(0, 0, timeZone);
 }
 
 function formatPrice(amount: string) {
@@ -1951,17 +1914,19 @@ function DraftPreviewCard({
 
 function SchedulePreviewCard({
   event,
-  onSaved
+  onSaved,
+  timeZone
 }: {
   event: BrokerEventDraftInput;
   onSaved: () => void;
+  timeZone?: string | null;
 }) {
   const router = useRouter();
-  const [form, setForm] = useState(() => eventToFormState(event));
+  const [form, setForm] = useState(() => eventToFormState(event, timeZone));
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
-  const previewEvent = useMemo(() => formStateToEvent(form), [form]);
+  const previewEvent = useMemo(() => formStateToEvent(form, timeZone), [form, timeZone]);
 
   async function handleConfirm() {
     if (isSaving) {
@@ -2088,7 +2053,7 @@ function SchedulePreviewCard({
           <div className="schedule-facts">
             <span>{previewEvent.event_category}</span>
             <span>{previewEvent.event_type.replace(/_/g, " ")}</span>
-            <span>{formatEventTime(previewEvent)}</span>
+            <span>{formatEventTime(previewEvent, timeZone)}</span>
             {previewEvent.lead_name ? <span>{previewEvent.lead_name}</span> : null}
             {previewEvent.listing_reference ? <span>{previewEvent.listing_reference}</span> : null}
           </div>
@@ -2108,7 +2073,7 @@ function SchedulePreviewCard({
   );
 }
 
-function ScheduleResultsCard({ events }: { events: BrokerEventRecord[] }) {
+function ScheduleResultsCard({ events, timeZone }: { events: BrokerEventRecord[]; timeZone?: string | null }) {
   return (
     <div className="chat-card schedule-results-card">
       <div className="card-title">
@@ -2120,7 +2085,7 @@ function ScheduleResultsCard({ events }: { events: BrokerEventRecord[] }) {
         <div className="event-mini-list">
           {events.map((event) => (
             <div className="event-mini-row" key={event.id}>
-              <time dateTime={getScheduleResultTime(event)}>{formatScheduleResultTime(event)}</time>
+              <time dateTime={getScheduleResultTime(event)}>{formatScheduleResultTime(event, timeZone)}</time>
               <div>
                 <strong>{event.title}</strong>
                 <small>
@@ -2151,6 +2116,7 @@ export function AgentWorkspace({
   recentLeads,
   recentListings
 }: AgentWorkspaceProps) {
+  const [userTimeZone, setUserTimeZone] = useState(() => getResolvedTimeZone());
   const [input, setInput] = useState("");
   const [composerMedia, setComposerMedia] = useState<PendingMedia[]>([]);
   const [composerFiles, setComposerFiles] = useState<PendingFileAttachment[]>([]);
@@ -2193,6 +2159,10 @@ export function AgentWorkspace({
   const composerMediaRef = useRef<PendingMedia[]>([]);
   const pendingMediaRef = useRef<PendingMedia[]>([]);
   const mediaSelectionTargetRef = useRef<"composer" | "draft">("composer");
+
+  useEffect(() => {
+    setUserTimeZone(getResolvedTimeZone());
+  }, []);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const voiceChunksRef = useRef<Blob[]>([]);
   const voiceStreamRef = useRef<MediaStream | null>(null);
@@ -3000,7 +2970,7 @@ export function AgentWorkspace({
       status: payload.status,
       limit: String(payload.limit)
     });
-    const range = getScheduleDateRange(payload.date_filter);
+    const range = getScheduleDateRange(payload.date_filter, userTimeZone);
 
     if (payload.event_type !== "all") {
       params.set("event_type", payload.event_type);
@@ -3428,6 +3398,7 @@ export function AgentWorkspace({
           message: agentMessageContent,
           current_listing_id: currentListingId,
           current_lead_id: currentLeadId,
+          time_zone: userTimeZone,
           context_attachments: outgoingContext,
           context_messages: recentContextMessages()
         })
@@ -3847,6 +3818,7 @@ export function AgentWorkspace({
                 {message.scheduleEvent ? (
                   <SchedulePreviewCard
                     event={message.scheduleEvent}
+                    timeZone={userTimeZone}
                     onSaved={() => {
                       appendAssistantMessage({
                         content:
@@ -3855,7 +3827,7 @@ export function AgentWorkspace({
                     }}
                   />
                 ) : null}
-                {message.scheduleEvents ? <ScheduleResultsCard events={message.scheduleEvents} /> : null}
+                {message.scheduleEvents ? <ScheduleResultsCard events={message.scheduleEvents} timeZone={userTimeZone} /> : null}
                 {message.leadResults ? <LeadResultsCard leads={message.leadResults} onSelect={addLeadContext} /> : null}
                 {message.leadLatestOffer ? (
                   <LeadLatestOfferCard

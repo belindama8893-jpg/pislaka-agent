@@ -224,6 +224,7 @@ Resolution status 应为以下之一：
 - 后端 listing resolution 已覆盖 `create_campaign_links`，可以使用显式/当前 listing id、用户明确要求的最新 listing，或强房源细节进行匹配。
 - 后端 schedule event resolution 已覆盖 `create_schedule_event`，可以在展示日程预览前解析参与线索、关联房源，或同时解析两者。
 - 前端确认日程预览时会保留已解析的 `lead_id` 和 `listing_id`。
+- 日程时间按照用户当前浏览器时区进行解析、展示、编辑和查询；数据库中仍保存 ISO 绝对时间。
 - 前端可以把 `list_schedule_events` 作为只读 `/api/events` 查询执行，并在聊天中展示日程列表。
 - Schedule 工作台页面可以列表、筛选、编辑、完成和取消 broker events。
 - 当前经纪人存在活跃房源上下文时，前端会发送 `current_listing_id`。

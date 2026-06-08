@@ -3681,10 +3681,31 @@ a {
 }
 
 @media (max-width: 640px) {
-  .schedule-metrics,
   .schedule-filter-bar,
   .schedule-edit-grid {
     grid-template-columns: 1fr;
+  }
+
+  .schedule-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .schedule-metrics div {
+    padding: 8px 6px;
+    text-align: center;
+  }
+
+  .schedule-metrics strong {
+    font-size: 1rem;
+    line-height: 1.1;
+  }
+
+  .schedule-metrics span {
+    margin-top: 3px;
+    font-size: 0.64rem;
+    line-height: 1.15;
   }
 
   .schedule-row {

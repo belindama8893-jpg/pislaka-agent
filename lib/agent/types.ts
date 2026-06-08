@@ -16,6 +16,7 @@ export const agentMessageSchema = z.object({
   conversationId: z.string().uuid().optional(),
   message: z.string().min(1),
   brokerId: z.string().uuid().optional(),
+  time_zone: z.string().min(1).max(100).optional(),
   current_listing_id: z.string().uuid().optional(),
   current_lead_id: z.string().uuid().optional(),
   context_attachments: z.array(agentContextAttachmentSchema).max(20).optional(),

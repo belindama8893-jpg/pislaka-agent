@@ -444,30 +444,25 @@ async function resolveScheduleEventEntities(
         .sort((left, right) => right.score - left.score);
 
       if (!scoredLeads.length) {
-        return {
-          ...action,
-          resolution: {
-            status: "no_match",
-            target_type: "lead"
-          }
-        };
-      }
+        sourcePayload.unresolved_lead_name = leadQuery;
+        nextPayload.lead_name = payload.lead_name ?? leadQuery;
+      } else {
+        const [best, second] = scoredLeads;
+        if (second && (best.score === second.score || best.score - second.score < 5)) {
+          return {
+            ...action,
+            resolution: {
+              status: "ambiguous",
+              target_type: "lead",
+              candidates: scoredLeads.slice(0, 5).map((item) => toResolutionCandidate(item.lead))
+            }
+          };
+        }
 
-      const [best, second] = scoredLeads;
-      if (second && (best.score === second.score || best.score - second.score < 5)) {
-        return {
-          ...action,
-          resolution: {
-            status: "ambiguous",
-            target_type: "lead",
-            candidates: scoredLeads.slice(0, 5).map((item) => toResolutionCandidate(item.lead))
-          }
-        };
+        nextPayload.lead_id = best.lead.id;
+        nextPayload.lead_name = payload.lead_name ?? leadLabel(best.lead);
+        sourcePayload.resolved_lead = toResolutionCandidate(best.lead);
       }
-
-      nextPayload.lead_id = best.lead.id;
-      nextPayload.lead_name = payload.lead_name ?? leadLabel(best.lead);
-      sourcePayload.resolved_lead = toResolutionCandidate(best.lead);
     }
   }
 
@@ -527,30 +522,20 @@ async function resolveScheduleEventEntities(
       .sort((left, right) => right.score - left.score);
 
     if (!scoredListings.length) {
-      return {
-        ...action,
-        resolution: {
-          status: "no_match",
-          target_type: "listing"
-        }
-      };
+      sourcePayload.unresolved_listing_reference = payload.listing_reference ?? payload.location_text ?? listingQuery;
+    } else {
+      const [best, second] = scoredListings;
+      if (second && (best.score === second.score || best.score - second.score < 5)) {
+        sourcePayload.ambiguous_listing_candidates = scoredListings
+          .slice(0, 5)
+          .map((item) => toListingResolutionCandidate(item.listing));
+        sourcePayload.unresolved_listing_reference = payload.listing_reference ?? payload.location_text ?? listingQuery;
+      } else {
+        nextPayload.listing_id = best.listing.id;
+        nextPayload.listing_reference = payload.listing_reference ?? listingLabel(best.listing);
+        sourcePayload.resolved_listing = toListingResolutionCandidate(best.listing);
+      }
     }
-
-    const [best, second] = scoredListings;
-    if (second && (best.score === second.score || best.score - second.score < 5)) {
-      return {
-        ...action,
-        resolution: {
-          status: "ambiguous",
-          target_type: "listing",
-          candidates: scoredListings.slice(0, 5).map((item) => toListingResolutionCandidate(item.listing))
-        }
-      };
-    }
-
-    nextPayload.listing_id = best.listing.id;
-    nextPayload.listing_reference = payload.listing_reference ?? listingLabel(best.listing);
-    sourcePayload.resolved_listing = toListingResolutionCandidate(best.listing);
   }
 
   return {

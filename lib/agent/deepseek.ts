@@ -17,6 +17,12 @@ import {
   extractLeadStatus,
   extractLeadStatusFilter
 } from "@/lib/agent/intent-router";
+import {
+  fromBrokerDatetimeLocal,
+  getBrokerDayRange,
+  getResolvedTimeZone,
+  toBrokerDatetimeLocal
+} from "@/lib/events/time";
 
 const deepseekRequestTimeoutMs = 8000;
 
@@ -31,8 +37,8 @@ Your job:
 - High-risk actions must require user confirmation.
 - For listing drafts, extract only facts present in the user message or obvious Pakistan real estate defaults.
 - For listing updates, extract the target words into payload.query and only include fields the user explicitly changed.
-- For schedule events, extract appointment/reminder/recurring details. Use ISO 8601 timestamps with timezone offset when the user gives a clear date/time.
-- Pakistan brokers usually operate in Asia/Karachi time. If the user says tomorrow/next week, interpret it from the current date provided by the user message context.
+- For schedule events, extract appointment/reminder/recurring details. Use ISO 8601 timestamps for the user's timezone when the user gives a clear date/time.
+- If the user says today/tomorrow/next week, interpret it from the current date and timezone provided by the user message context.
 - Convert prices into numeric PKR. Examples: 8.5 crore = 85000000, 2 lakh = 200000.
 - Normalize area units to kanal, marla, sqft, or sqm.
 - Use short practical English in response text.
@@ -185,33 +191,16 @@ Rules:
 - Do not include markdown fences.
 `;
 
-function getPakistanDate(offsetDays: number, hour = 10) {
-  const now = new Date();
-  const pakistanNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Karachi" }));
-  pakistanNow.setDate(pakistanNow.getDate() + offsetDays);
-  pakistanNow.setHours(hour, 0, 0, 0);
-
-  const year = pakistanNow.getFullYear();
-  const month = String(pakistanNow.getMonth() + 1).padStart(2, "0");
-  const day = String(pakistanNow.getDate()).padStart(2, "0");
-  const hours = String(pakistanNow.getHours()).padStart(2, "0");
-  const minutes = String(pakistanNow.getMinutes()).padStart(2, "0");
-
-  return `${year}-${month}-${day}T${hours}:${minutes}:00+05:00`;
+function getUserTimeZoneDate(offsetDays: number, hour = 10, timeZone?: string | null) {
+  const range = getBrokerDayRange(offsetDays, 0, timeZone);
+  const date = toBrokerDatetimeLocal(range.from, timeZone).slice(0, 10);
+  return fromBrokerDatetimeLocal(`${date}T${String(hour).padStart(2, "0")}:00`, timeZone);
 }
 
 function addHours(isoDate: string, hours: number) {
   const date = new Date(isoDate);
   date.setHours(date.getHours() + hours);
-
-  const pakistanDate = new Date(date.toLocaleString("en-US", { timeZone: "Asia/Karachi" }));
-  const year = pakistanDate.getFullYear();
-  const month = String(pakistanDate.getMonth() + 1).padStart(2, "0");
-  const day = String(pakistanDate.getDate()).padStart(2, "0");
-  const dateHours = String(pakistanDate.getHours()).padStart(2, "0");
-  const minutes = String(pakistanDate.getMinutes()).padStart(2, "0");
-
-  return `${year}-${month}-${day}T${dateHours}:${minutes}:00+05:00`;
+  return date.toISOString();
 }
 
 function parseLocalLeadStatusUpdate(message: string): AgentAction {
@@ -422,7 +411,7 @@ function parseLocalGeneralReply(message: string): AgentAction {
   };
 }
 
-function extractScheduleTime(message: string) {
+function extractScheduleTime(message: string, timeZone?: string | null) {
   const lower = message.toLowerCase();
   const timeMatch = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
   let hour = 10;
@@ -442,23 +431,23 @@ function extractScheduleTime(message: string) {
   }
 
   if (/tomorrow|明天/i.test(message)) {
-    return getPakistanDate(1, hour);
+    return getUserTimeZoneDate(1, hour, timeZone);
   }
 
   if (/next week|下周/i.test(message)) {
-    return getPakistanDate(7, hour);
+    return getUserTimeZoneDate(7, hour, timeZone);
   }
 
   if (/today|tonight|今天|今晚/i.test(message)) {
-    return getPakistanDate(0, hour);
+    return getUserTimeZoneDate(0, hour, timeZone);
   }
 
   return undefined;
 }
 
-function parseLocalScheduleEvent(message: string): AgentAction {
+function parseLocalScheduleEvent(message: string, timeZone?: string | null): AgentAction {
   const lower = message.toLowerCase();
-  const startAt = extractScheduleTime(message);
+  const startAt = extractScheduleTime(message, timeZone);
   const leadName = extractLeadName(message);
   const listingMatch = message.match(/DHA\s*Phase\s*\d+[^,.，。]*/i);
   const listingReference = listingMatch?.[0]?.trim();
@@ -612,7 +601,7 @@ function extractJsonObject(content: string) {
   return trimmed.slice(firstBrace, lastBrace + 1);
 }
 
-function normalizeAgentAction(action: AgentAction, message: string): AgentAction {
+function normalizeAgentAction(action: AgentAction, message: string, context?: AgentRoutingContext): AgentAction {
   if (action.intent === "list_schedule_events") {
     const parsedPayload = scheduleEventListPayloadSchema.safeParse(action.payload);
 
@@ -626,7 +615,7 @@ function normalizeAgentAction(action: AgentAction, message: string): AgentAction
   if (action.intent === "create_schedule_event") {
     const parsedPayload = scheduleEventActionPayloadSchema.safeParse(action.payload);
     if (!parsedPayload.success) {
-      return parseLocalScheduleEvent(message);
+      return parseLocalScheduleEvent(message, context?.timeZone);
     }
 
     return {
@@ -757,7 +746,7 @@ function normalizeAgentAction(action: AgentAction, message: string): AgentAction
   };
 }
 
-function parseLocalAgentAction(message: string): AgentAction {
+function parseLocalAgentAction(message: string, context?: AgentRoutingContext): AgentAction {
   const intent = classifyLocalIntent(message);
 
   switch (intent) {
@@ -772,7 +761,7 @@ function parseLocalAgentAction(message: string): AgentAction {
     case "lead_status_update":
       return parseLocalLeadStatusUpdate(message);
     case "schedule_event":
-      return parseLocalScheduleEvent(message);
+      return parseLocalScheduleEvent(message, context?.timeZone);
     case "schedule_query":
       return parseLocalScheduleQuery(message);
     case "lead_query":
@@ -790,6 +779,7 @@ function parseLocalAgentAction(message: string): AgentAction {
 }
 
 type AgentRoutingContext = {
+  timeZone?: string;
   recentMessages?: Array<{
     role: "user" | "assistant";
     content: string;
@@ -816,11 +806,11 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
     localIntent === "listing_update" ||
     localIntent === "lead_details_update"
   ) {
-    return parseLocalAgentAction(message);
+    return parseLocalAgentAction(message, context);
   }
 
   if (!env.deepseekApiKey) {
-    return parseLocalAgentAction(message);
+    return parseLocalAgentAction(message, context);
   }
 
   const apiKey = requireServerEnv("deepseekApiKey");
@@ -844,8 +834,8 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
           { role: "system", content: systemPrompt },
           {
             role: "user",
-            content: `Current date in Pakistan: ${new Date().toLocaleDateString("en-CA", {
-              timeZone: "Asia/Karachi"
+            content: `User time zone: ${getResolvedTimeZone(context?.timeZone)}\nCurrent date in user time zone: ${new Date().toLocaleDateString("en-CA", {
+              timeZone: getResolvedTimeZone(context?.timeZone)
             })}\n\nRecent chat context for short-term reference only. Do not treat chat text as confirmed business facts unless the target is resolved through database-backed APIs:\n${formatRecentContext(
               context
             )}\n\nUser message: ${message}`
@@ -856,21 +846,21 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
     clearTimeout(timeout);
 
     if (!response.ok) {
-      return parseLocalAgentAction(message);
+      return parseLocalAgentAction(message, context);
     }
 
     const json = await response.json();
     const content = json?.choices?.[0]?.message?.content;
 
     if (typeof content !== "string") {
-      return parseLocalAgentAction(message);
+      return parseLocalAgentAction(message, context);
     }
 
     const action = agentActionSchema.parse(JSON.parse(extractJsonObject(content)));
 
-    return normalizeAgentAction(action, message);
+    return normalizeAgentAction(action, message, context);
   } catch {
-    return parseLocalAgentAction(message);
+    return parseLocalAgentAction(message, context);
   } finally {
     clearTimeout(timeout);
   }

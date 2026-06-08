@@ -27,6 +27,7 @@ export async function POST(request: Request) {
 
     if (!user) {
       const action = await routeAgentMessage(parsed.data.message, {
+        timeZone: parsed.data.time_zone,
         recentMessages: parsed.data.context_messages
       });
       return NextResponse.json({ action });
@@ -40,6 +41,7 @@ export async function POST(request: Request) {
 
     if (!broker?.id) {
       const action = await routeAgentMessage(parsed.data.message, {
+        timeZone: parsed.data.time_zone,
         recentMessages: parsed.data.context_messages
       });
       return NextResponse.json({ action });
@@ -57,6 +59,7 @@ export async function POST(request: Request) {
         : await getRecentAgentContextMessages(supabase, broker.id, 20);
 
     const action = await routeAgentMessage(parsed.data.message, {
+      timeZone: parsed.data.time_zone,
       recentMessages
     });
     const resolvedAction = broker?.id
