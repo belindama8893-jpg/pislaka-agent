@@ -124,9 +124,23 @@ Example:
 
 If multiple targets match:
 
-1. Show a short candidate list.
-2. Ask the user to choose one.
+1. Show candidate selection cards for the matching leads or listings.
+2. Ask the user to choose one card.
 3. Do not execute the action until the user confirms the exact target.
+
+Text-only candidate lists are not acceptable for write, external, promotion, reply, status, or exact-linked schedule flows because they make the broker retype context and increase the chance of operating on the wrong record.
+
+Read-only search and list flows are the exception. For example, "show DHA Phase 5 villas" may return a result list without forcing a candidate confirmation, because no record is being mutated or externally acted on.
+
+### Schedule Binding Behavior
+
+Schedule is an independent workflow and does not require every event to bind a lead or listing.
+
+- If the broker gives only a task and time, show the schedule preview card without lead/listing binding.
+- If the broker mentions a lead or listing and one owned record matches confidently, bind that record and show it in the schedule preview.
+- If the broker mentions a lead or listing and multiple owned records match, show candidate cards. The broker may select a record to bind, or continue without binding and keep the natural-language reference on the schedule item.
+- If the event explicitly depends on an exact business record, such as "viewing with Ahmed for this listing", any ambiguous lead/listing binding must be selected by card before a structured `lead_id` or `listing_id` is saved.
+- Never bind a schedule item to the latest or first lead/listing silently.
 
 ## Confirmation Rules
 
@@ -228,8 +242,10 @@ Implemented now:
 - Backend schedule event resolution runs for `create_schedule_event` and can resolve the participant lead, the associated listing, or both before showing the calendar preview.
 - Frontend preserves resolved `lead_id` and `listing_id` when confirming a schedule preview.
 - Schedule times are interpreted, displayed, edited, and queried in the user's current browser timezone; persisted event timestamps remain ISO instants.
+- Schedule creation should not block on unresolved natural-language listing text such as "DHA Phase 5 villa" or new/unmatched lead names. Keep the text on the preview and only bind `lead_id`/`listing_id` when an exact selected or confidently matched record exists.
+- Frontend shows candidate selection cards for ambiguous lead/listing resolution in promotion, lead reply, lead status/detail updates, lead-listing updates, and schedule binding.
 - Frontend can execute `list_schedule_events` as a read-only `/api/events` query and display schedule items in chat.
-- The Schedule workspace page lists, filters, edits, completes, and cancels broker events.
+- The Schedule workspace page lists, filters, edits, completes, and cancels broker events. It defaults to the next 7 days, and its top metrics must remain compact on mobile.
 - Frontend shows listing candidate cards when `update_listing_draft` returns ambiguous listing matches.
 - Frontend sends `current_listing_id` when the broker has an active listing context.
 - Frontend still has local lead scoring as a compatibility fallback when `resolution` is missing.

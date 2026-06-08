@@ -857,8 +857,17 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
     }
 
     const action = agentActionSchema.parse(JSON.parse(extractJsonObject(content)));
+    const normalizedAction = normalizeAgentAction(action, message, context);
 
-    return normalizeAgentAction(action, message, context);
+    if (normalizedAction.intent === "general_reply" && localIntent !== "general_reply") {
+      return parseLocalAgentAction(message, context);
+    }
+
+    if (localIntent === "promotion" && normalizedAction.intent !== "create_campaign_links") {
+      return parseLocalAgentAction(message, context);
+    }
+
+    return normalizedAction;
   } catch {
     return parseLocalAgentAction(message, context);
   } finally {

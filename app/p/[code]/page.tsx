@@ -101,65 +101,70 @@ export default async function PublicListingPage({
 
   const listingRecord = listing as ListingRecord;
   const heroMedia = media[0];
+  const galleryMedia = media.slice(heroMedia ? 1 : 0, 7);
   const channelLabel = formatChannel(campaign.channel);
   const location = [listingRecord.location_area, listingRecord.city].filter(Boolean).join(", ");
   const area = [listingRecord.area_value, listingRecord.area_unit].filter(Boolean).join(" ");
 
   return (
     <main className="public-listing-page">
-      <section className="public-listing-hero">
-        <div className="public-listing-media">
-          {heroMedia?.signed_url && heroMedia.media_type === "image" ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img alt="" src={heroMedia.signed_url} />
-          ) : heroMedia?.signed_url && heroMedia.media_type === "video" ? (
-            <video controls muted playsInline src={heroMedia.signed_url} />
-          ) : (
-            <div className="public-listing-placeholder">Pislaka Listing</div>
-          )}
-        </div>
-        <div className="public-listing-details">
-          <div className="public-source-row">
-            <span className="status-pill">{channelLabel}</span>
-            <span>Verified inquiry page</span>
+      <section className="public-listing-shell">
+        <div className="public-listing-main">
+          {heroMedia?.signed_url ? (
+            <div className="public-listing-media">
+              {heroMedia.media_type === "image" ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img alt="" src={heroMedia.signed_url} />
+              ) : (
+                <video controls muted playsInline src={heroMedia.signed_url} />
+              )}
+            </div>
+          ) : null}
+
+          <div className="public-listing-details">
+            <div className="public-source-row">
+              <span className="status-pill">{channelLabel}</span>
+              <span>Verified broker inquiry page</span>
+            </div>
+            <h1>{listingRecord.title || "Property listing"}</h1>
+            <p>{listingRecord.description || "Contact the broker for complete property details and viewing availability."}</p>
+            <div className="public-listing-facts">
+              <span>{formatPrice(listingRecord)}</span>
+              <span>{location || "Location not set"}</span>
+              <span>{area || "Area not set"}</span>
+              <span>
+                {listingRecord.bedrooms ?? "-"} beds / {listingRecord.bathrooms ?? "-"} baths
+              </span>
+            </div>
+            {listingRecord.features?.length ? (
+              <div className="public-feature-list">
+                {listingRecord.features.slice(0, 6).map((feature) => (
+                  <span key={feature}>{feature}</span>
+                ))}
+              </div>
+            ) : null}
           </div>
-          <h1>{listingRecord.title || "Property listing"}</h1>
-          <p>{listingRecord.description || "Contact the broker for complete property details and viewing availability."}</p>
-          <div className="public-listing-facts">
-            <span>{formatPrice(listingRecord)}</span>
-            <span>{location || "Location not set"}</span>
-            <span>{area || "Area not set"}</span>
-            <span>
-              {listingRecord.bedrooms ?? "-"} beds / {listingRecord.bathrooms ?? "-"} baths
-            </span>
-          </div>
-          {listingRecord.features?.length ? (
-            <div className="public-feature-list">
-              {listingRecord.features.slice(0, 6).map((feature) => (
-                <span key={feature}>{feature}</span>
+
+          {galleryMedia.length ? (
+            <div className="public-media-grid">
+              {galleryMedia.map((item) => (
+                <div className="public-media-thumb" key={item.id}>
+                  {item.signed_url && item.media_type === "image" ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img alt="" src={item.signed_url} />
+                  ) : item.signed_url && item.media_type === "video" ? (
+                    <video muted playsInline src={item.signed_url} />
+                  ) : null}
+                </div>
               ))}
             </div>
           ) : null}
         </div>
-      </section>
 
-      <section className="public-listing-content">
-        <div className="public-media-grid">
-          {media.slice(1, 7).map((item) => (
-            <div className="public-media-thumb" key={item.id}>
-              {item.signed_url && item.media_type === "image" ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img alt="" src={item.signed_url} />
-              ) : item.signed_url && item.media_type === "video" ? (
-                <video muted playsInline src={item.signed_url} />
-              ) : null}
-            </div>
-          ))}
-        </div>
         <aside className="public-lead-panel">
           <span className="lead-panel-eyebrow">{channelLabel} inquiry</span>
-          <h2>Request details or viewing</h2>
-          <p>Share your WhatsApp number and buying preference. The broker can follow up with the right next step.</p>
+          <h2>Contact the broker</h2>
+          <p>Share your WhatsApp number to request details, confirm availability, or arrange a viewing.</p>
           <LeadCaptureForm campaignCode={campaign.code} />
         </aside>
       </section>

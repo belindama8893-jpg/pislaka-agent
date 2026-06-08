@@ -93,6 +93,7 @@ type ChatMessage = {
   leadReply?: LeadReplyDraftWithLink;
   listingUpdate?: ListingUpdatePreview;
   listingUpdateChoices?: ListingUpdateChoicePreview;
+  entitySelection?: EntitySelectionPreview;
   promotion?: ListingPromotion;
   promotionTarget?: RecentListingSummary;
   promotionInstruction?: string;
@@ -140,6 +141,15 @@ type ListingUpdateChoicePreview = {
   actionResponse: string;
 };
 
+type EntitySelectionPreview = {
+  targetType: "lead" | "listing";
+  intent: AgentAction["intent"];
+  candidates: AgentResolutionCandidate[];
+  actionResponse: string;
+  originalMessage: string;
+  payload: Record<string, unknown>;
+};
+
 type LeadReplyDraftWithLink = LeadReplyDraft & {
   whatsapp_url: string;
 };
@@ -164,6 +174,7 @@ type ChatMessageUiPayload = Partial<
     | "leadReply"
     | "listingUpdate"
     | "listingUpdateChoices"
+    | "entitySelection"
     | "promotion"
     | "promotionTarget"
     | "promotionInstruction"
@@ -179,6 +190,50 @@ type ChatContextAttachment = {
   summary: string;
   snapshot?: Record<string, unknown>;
 };
+
+function resolutionCandidateToListing(candidate: AgentResolutionCandidate): RecentListingSummary {
+  return {
+    id: candidate.id,
+    status: candidate.status as RecentListingSummary["status"],
+    title: candidate.listing_title ?? candidate.label,
+    description: candidate.description ?? null,
+    location_area: candidate.location_area ?? candidate.listing_area ?? null,
+    city: candidate.city ?? candidate.listing_city ?? null,
+    property_type: candidate.property_type ?? null,
+    listing_type: candidate.listing_type ?? null,
+    price_amount: candidate.price_amount ?? null,
+    price_currency: candidate.price_currency ?? null,
+    area_value: candidate.area_value ?? null,
+    area_unit: candidate.area_unit ?? null,
+    bedrooms: candidate.bedrooms ?? null,
+    bathrooms: candidate.bathrooms ?? null,
+    features: candidate.features ?? null
+  };
+}
+
+function resolutionCandidateToLead(candidate: AgentResolutionCandidate): LeadListItem {
+  return {
+    id: candidate.id,
+    broker_id: "",
+    listing_id: null,
+    campaign_link_id: null,
+    source_channel: null,
+    full_name: candidate.label === "Unnamed buyer" ? null : candidate.label,
+    phone: candidate.phone ?? null,
+    email: candidate.email ?? null,
+    message: null,
+    status: (candidate.status as LeadRecord["status"] | undefined) ?? "new",
+    urgency: null,
+    ai_summary: null,
+    created_at: new Date().toISOString(),
+    updated_at: null,
+    listing_title: candidate.listing_title ?? null,
+    listing_area: candidate.listing_area ?? null,
+    listing_city: candidate.listing_city ?? null,
+    campaign_code: null,
+    campaign_channel: null
+  };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -218,6 +273,7 @@ function structuredPayloadForMessage(message: ChatMessage): Record<string, unkno
     "leadReply",
     "listingUpdate",
     "listingUpdateChoices",
+    "entitySelection",
     "promotion",
     "promotionTarget",
     "promotionInstruction",
@@ -1638,6 +1694,81 @@ function ListingUpdateSelectionCard({
   );
 }
 
+function EntitySelectionCard({
+  preview,
+  onSelect,
+  onSkip
+}: {
+  preview: EntitySelectionPreview;
+  onSelect: (candidate: AgentResolutionCandidate) => void;
+  onSkip?: () => void;
+}) {
+  const isListingTarget = preview.targetType === "listing";
+  const title = isListingTarget ? "Choose listing" : "Choose lead";
+  const helper = isListingTarget
+    ? "I found multiple matching listings. Select the exact property before I continue."
+    : "I found multiple matching leads. Select the exact buyer before I continue.";
+
+  return (
+    <div className={isListingTarget ? "listing-update-card" : "lead-chat-card"}>
+      <div className="card-title">
+        {isListingTarget ? <House size={16} /> : <MessageCircle size={16} />} {title}
+      </div>
+      <p className="agent-draft-status">{helper}</p>
+      <div className={isListingTarget ? "listing-choice-grid" : "lead-chat-list"}>
+        {preview.candidates.map((candidate) => {
+          const listing = isListingTarget ? resolutionCandidateToListing(candidate) : null;
+          const lead = isListingTarget ? null : resolutionCandidateToLead(candidate);
+
+          return isListingTarget && listing ? (
+            <article className="listing-choice-card" key={candidate.id}>
+              <div>
+                <strong>{listing.title || "Untitled listing"}</strong>
+                <p>
+                  {[listing.area_value, listing.area_unit].filter(Boolean).join(" ") || "Area not set"} ·{" "}
+                  {[listing.location_area, listing.city].filter(Boolean).join(", ") || "Location not set"}
+                </p>
+                <small>
+                  {formatListingCurrency(listing.price_amount, listing.price_currency ?? "PKR")} ·{" "}
+                  {listing.bedrooms ?? "-"} beds / {listing.bathrooms ?? "-"} baths
+                  {listing.status ? ` · ${listing.status}` : ""}
+                </small>
+              </div>
+              <button className="primary-button small" type="button" onClick={() => onSelect(candidate)}>
+                <CheckCircle2 size={15} /> Select
+              </button>
+            </article>
+          ) : lead ? (
+            <div className="lead-chat-row" key={candidate.id}>
+              <div>
+                <strong>{lead.full_name || lead.phone || "Unnamed buyer"}</strong>
+                <p>{getLeadInterestLine(lead)}</p>
+                <small>
+                  {lead.status} · {lead.phone || "No phone"}
+                  {lead.email ? ` · ${lead.email}` : ""}
+                </small>
+              </div>
+              <div className="lead-chat-row-action">
+                <span className={`lead-status ${lead.status}`}>{lead.status}</span>
+                <button className="primary-button small" type="button" onClick={() => onSelect(candidate)}>
+                  <CheckCircle2 size={15} /> Select
+                </button>
+              </div>
+            </div>
+          ) : null;
+        })}
+      </div>
+      {onSkip ? (
+        <div className="card-actions">
+          <button className="outline-button small" type="button" onClick={onSkip}>
+            Continue without binding
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function LeadReplyCard({ draft }: { draft: LeadReplyDraftWithLink }) {
   const [copied, setCopied] = useState(false);
 
@@ -2755,11 +2886,13 @@ export function AgentWorkspace({
     const target = getPromotionTarget(messageText, resolution);
 
     if (target.ambiguous) {
-      const candidateText = formatListingCandidates(target.candidates);
-      appendAssistantMessage({
-        content: candidateText
-          ? `I found more than one matching listing: ${candidateText}. Please add one more detail, like phase, exact area size, price, or bedrooms.`
-          : "I found more than one matching listing. Please add one more detail, like phase, exact area size, price, or bedrooms."
+      appendEntitySelectionMessage({
+        targetType: "listing",
+        intent: "create_campaign_links",
+        candidates: target.candidates,
+        actionResponse: "Please confirm the property and choose channels before I generate campaign links.",
+        originalMessage: messageText,
+        payload: { query: messageText }
       });
       return;
     }
@@ -3014,12 +3147,52 @@ export function AgentWorkspace({
       .join(", ");
   }
 
-  function showScheduleResolutionMessage(resolution?: AgentResolution) {
+  function appendEntitySelectionMessage({
+    targetType,
+    intent,
+    candidates,
+    actionResponse,
+    originalMessage,
+    payload
+  }: EntitySelectionPreview) {
+    appendAssistantMessage({
+      content:
+        targetType === "listing"
+          ? "I found multiple matching listings. Choose the exact property before I continue."
+          : "I found multiple matching leads. Choose the exact buyer before I continue.",
+      entitySelection: {
+        targetType,
+        intent,
+        candidates,
+        actionResponse,
+        originalMessage,
+        payload
+      }
+    });
+  }
+
+  function showScheduleResolutionMessage(
+    actionResponse: string,
+    event: BrokerEventDraftInput,
+    resolution?: AgentResolution
+  ) {
     if (!resolution || resolution.status === "matched") {
       return false;
     }
 
     const isListingTarget = resolution.target_type === "listing";
+    if (resolution.status === "ambiguous" && (resolution.target_type === "lead" || resolution.target_type === "listing")) {
+      appendEntitySelectionMessage({
+        targetType: resolution.target_type,
+        intent: "create_schedule_event",
+        candidates: resolution.candidates ?? [],
+        actionResponse,
+        originalMessage: event.source_payload?.original_message as string | undefined ?? event.description ?? event.title,
+        payload: event as Record<string, unknown>
+      });
+      return true;
+    }
+
     const candidateText = isListingTarget
       ? formatListingCandidates(resolution.candidates ?? [])
       : formatResolutionCandidates(resolution.candidates ?? []);
@@ -3050,11 +3223,13 @@ export function AgentWorkspace({
     const target = getLeadTarget(payload, resolution);
 
     if (target.ambiguous) {
-      const candidateText = formatResolutionCandidates(target.candidates);
-      appendAssistantMessage({
-        content: candidateText
-          ? `I found more than one matching lead: ${candidateText}. Please add the buyer phone, full name, or listing detail.`
-          : "I found more than one matching lead. Please add the buyer phone, full name, or listing detail."
+      appendEntitySelectionMessage({
+        targetType: "lead",
+        intent: "update_lead_status",
+        candidates: target.candidates,
+        actionResponse,
+        originalMessage: payload.query ?? payload.lead_name ?? "",
+        payload: payload as Record<string, unknown>
       });
       return;
     }
@@ -3096,11 +3271,13 @@ export function AgentWorkspace({
     }
 
     if (target.ambiguous) {
-      const candidateText = formatResolutionCandidates(target.candidates);
-      appendAssistantMessage({
-        content: candidateText
-          ? `I found more than one matching lead: ${candidateText}. Please choose the exact lead before I update contact details.`
-          : "I found more than one matching lead. Please choose the exact lead before I update contact details."
+      appendEntitySelectionMessage({
+        targetType: "lead",
+        intent: "update_lead_details",
+        candidates: target.candidates,
+        actionResponse,
+        originalMessage: payload.query ?? payload.lead_name ?? "",
+        payload: payload as Record<string, unknown>
       });
       return;
     }
@@ -3174,8 +3351,13 @@ export function AgentWorkspace({
     const target = getLeadTarget(payload, resolution);
 
     if (resolution?.target_type === "listing" && resolution.status === "ambiguous") {
-      appendAssistantMessage({
-        content: "I found more than one matching listing. Choose the exact property before I update the lead."
+      appendEntitySelectionMessage({
+        targetType: "listing",
+        intent: "update_lead_listing",
+        candidates: resolution.candidates ?? [],
+        actionResponse,
+        originalMessage: payload.query ?? payload.listing_query ?? payload.lead_name ?? "",
+        payload: payload as Record<string, unknown>
       });
       return;
     }
@@ -3188,11 +3370,13 @@ export function AgentWorkspace({
     }
 
     if (target.ambiguous) {
-      const candidateText = formatResolutionCandidates(target.candidates);
-      appendAssistantMessage({
-        content: candidateText
-          ? `I found more than one matching lead: ${candidateText}. Please choose the exact lead before I update its listing.`
-          : "I found more than one matching lead. Please choose the exact lead before I update its listing."
+      appendEntitySelectionMessage({
+        targetType: "lead",
+        intent: "update_lead_listing",
+        candidates: target.candidates,
+        actionResponse,
+        originalMessage: payload.query ?? payload.listing_query ?? payload.lead_name ?? "",
+        payload: payload as Record<string, unknown>
       });
       return;
     }
@@ -3232,11 +3416,13 @@ export function AgentWorkspace({
     const target = getLeadTarget(payload, resolution);
 
     if (target.ambiguous) {
-      const candidateText = formatResolutionCandidates(target.candidates);
-      appendAssistantMessage({
-        content: candidateText
-          ? `I found more than one matching lead: ${candidateText}. Please add the buyer phone, full name, or listing detail.`
-          : "I found more than one matching lead. Please add the buyer phone, full name, or listing detail."
+      appendEntitySelectionMessage({
+        targetType: "lead",
+        intent: "draft_lead_reply",
+        candidates: target.candidates,
+        actionResponse,
+        originalMessage: payload.query ?? payload.lead_name ?? "",
+        payload: payload as Record<string, unknown>
       });
       return;
     }
@@ -3276,6 +3462,112 @@ export function AgentWorkspace({
       content: actionResponse,
       leadReply: replyPayload.draft
     });
+  }
+
+  async function continueAfterEntitySelection(preview: EntitySelectionPreview, candidate: AgentResolutionCandidate) {
+    if (preview.targetType === "listing") {
+      const listing = candidateToListing(candidate);
+      const nextPayload = {
+        ...preview.payload,
+        listing_id: candidate.id
+      };
+
+      setActiveListingId(candidate.id);
+
+      if (preview.intent === "create_campaign_links") {
+        appendAssistantMessage({
+          content: preview.actionResponse,
+          promotionTarget: listing,
+          promotionInstruction: preview.originalMessage,
+          promotionChannels: extractPromotionChannels(preview.originalMessage)
+        });
+        return;
+      }
+
+      if (preview.intent === "update_lead_listing") {
+        proposeLeadListingUpdate(
+          preview.actionResponse,
+          nextPayload as LeadListingUpdatePayload,
+          {
+            status: "matched",
+            target_type: "listing",
+            target_id: candidate.id,
+            matched: candidate
+          }
+        );
+        return;
+      }
+
+      if (preview.intent === "create_schedule_event") {
+        const schedulePayload = nextPayload as BrokerEventDraftInput;
+        appendAssistantMessage({
+          content: preview.actionResponse,
+          scheduleEvent: {
+            ...schedulePayload,
+            listing_id: candidate.id,
+            listing_reference: schedulePayload.listing_reference ?? listing.title ?? candidate.label
+          }
+        });
+        return;
+      }
+    }
+
+    const lead = candidateToLead(candidate);
+    const nextPayload = {
+      ...preview.payload,
+      lead_id: candidate.id
+    };
+    const matchedLeadResolution: AgentResolution = {
+      status: "matched",
+      target_type: "lead",
+      target_id: candidate.id,
+      matched: candidate
+    };
+
+    if (preview.intent === "update_lead_status") {
+      appendAssistantMessage({
+        content: preview.actionResponse,
+        leadStatusUpdate: {
+          lead,
+          status: (nextPayload as LeadOperationPayload).status,
+          urgency: (nextPayload as LeadOperationPayload).urgency
+        }
+      });
+      return;
+    }
+
+    if (preview.intent === "update_lead_details") {
+      appendAssistantMessage({
+        content: preview.actionResponse,
+        leadDetailsUpdate: {
+          lead,
+          changes: leadDetailsPayloadToChanges(nextPayload as LeadDetailsUpdatePayload)
+        }
+      });
+      return;
+    }
+
+    if (preview.intent === "draft_lead_reply") {
+      await draftReplyForLead(preview.actionResponse, nextPayload as LeadOperationPayload, matchedLeadResolution);
+      return;
+    }
+
+    if (preview.intent === "update_lead_listing") {
+      proposeLeadListingUpdate(preview.actionResponse, nextPayload as LeadListingUpdatePayload, matchedLeadResolution);
+      return;
+    }
+
+    if (preview.intent === "create_schedule_event") {
+      const schedulePayload = nextPayload as BrokerEventDraftInput;
+      appendAssistantMessage({
+        content: preview.actionResponse,
+        scheduleEvent: {
+          ...schedulePayload,
+          lead_id: candidate.id,
+          lead_name: schedulePayload.lead_name ?? lead.full_name ?? lead.phone ?? candidate.label
+        }
+      });
+    }
   }
 
   async function generatePromotionForListing(
@@ -3493,7 +3785,11 @@ export function AgentWorkspace({
 
       if (
         payload.action.intent === "create_schedule_event" &&
-        showScheduleResolutionMessage(payload.action.resolution)
+        showScheduleResolutionMessage(
+          payload.action.response,
+          payload.action.payload as BrokerEventDraftInput,
+          payload.action.resolution
+        )
       ) {
         return;
       }
@@ -3915,6 +4211,24 @@ export function AgentWorkspace({
                         }
                       });
                     }}
+                  />
+                ) : null}
+                {message.entitySelection ? (
+                  <EntitySelectionCard
+                    preview={message.entitySelection}
+                    onSelect={(candidate) => {
+                      void continueAfterEntitySelection(message.entitySelection as EntitySelectionPreview, candidate);
+                    }}
+                    onSkip={
+                      message.entitySelection.intent === "create_schedule_event"
+                        ? () => {
+                            appendAssistantMessage({
+                              content: message.entitySelection?.actionResponse ?? "Please confirm this schedule item.",
+                              scheduleEvent: message.entitySelection?.payload as BrokerEventDraftInput
+                            });
+                          }
+                        : undefined
+                    }
                   />
                 ) : null}
                 {message.leadReply ? <LeadReplyCard draft={message.leadReply} /> : null}

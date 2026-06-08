@@ -526,10 +526,21 @@ async function resolveScheduleEventEntities(
     } else {
       const [best, second] = scoredListings;
       if (second && (best.score === second.score || best.score - second.score < 5)) {
-        sourcePayload.ambiguous_listing_candidates = scoredListings
-          .slice(0, 5)
-          .map((item) => toListingResolutionCandidate(item.listing));
+        const candidates = scoredListings.slice(0, 5).map((item) => toListingResolutionCandidate(item.listing));
+        sourcePayload.ambiguous_listing_candidates = candidates;
         sourcePayload.unresolved_listing_reference = payload.listing_reference ?? payload.location_text ?? listingQuery;
+        return {
+          ...action,
+          payload: {
+            ...nextPayload,
+            source_payload: sourcePayload
+          },
+          resolution: {
+            status: "ambiguous",
+            target_type: "listing",
+            candidates
+          }
+        };
       } else {
         nextPayload.listing_id = best.listing.id;
         nextPayload.listing_reference = payload.listing_reference ?? listingLabel(best.listing);
