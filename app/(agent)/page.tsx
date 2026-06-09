@@ -4,8 +4,8 @@ import { ProfileCompletionForm } from "@/components/profile/ProfileCompletionFor
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
 import { getAgentChatMessages } from "@/lib/agent/conversations";
 import { getRecentLeadsForBroker } from "@/lib/leads/queries";
-import type { ListingRecord } from "@/lib/listings/types";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { ListingMediaRecord, ListingRecord } from "@/lib/listings/types";
+import { createServiceClient, createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +22,10 @@ type BrokerProfile = {
 
 type HomeProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+type RawListingRecord = Omit<ListingRecord, "media"> & {
+  listing_media?: ListingMediaRecord[] | null;
 };
 
 function getFirstName(profile: BrokerProfile) {
@@ -112,7 +116,7 @@ async function getListingsForBroker(
   const { data: listings, error } = await supabase
     .from("listings")
     .select(
-      "id, status, title, description, city, location_area, property_type, listing_type, price_amount, price_currency, area_value, area_unit, bedrooms, bathrooms, features, created_at, updated_at"
+      "id, status, title, description, city, location_area, property_type, listing_type, price_amount, price_currency, area_value, area_unit, bedrooms, bathrooms, features, created_at, updated_at, listing_media(id, listing_id, media_type, storage_url, sort_order, created_at)"
     )
     .eq("broker_id", brokerId)
     .order("updated_at", { ascending: false })
@@ -122,7 +126,33 @@ async function getListingsForBroker(
     throw new Error(error.message);
   }
 
-  return (listings ?? []) as ListingRecord[];
+  const service = createServiceClient();
+  const rawListings = (listings ?? []) as RawListingRecord[];
+
+  return Promise.all(
+    rawListings.map(async ({ listing_media: mediaRows, ...listing }) => {
+      const sortedMediaRows = [...(mediaRows ?? [])].sort((left, right) => left.sort_order - right.sort_order);
+      const signedPreviewMedia = await Promise.all(
+        sortedMediaRows.slice(0, 6).map(async (mediaRow) => {
+          const { data: signedUrlData } = await service.storage
+            .from("listing-media")
+            .createSignedUrl(mediaRow.storage_url, 60 * 60);
+
+          return {
+            ...mediaRow,
+            signed_url: signedUrlData?.signedUrl ?? null
+          };
+        })
+      );
+      const signedPreviewById = new Map(signedPreviewMedia.map((mediaRow) => [mediaRow.id, mediaRow]));
+      const media = sortedMediaRows.map((mediaRow) => signedPreviewById.get(mediaRow.id) ?? mediaRow);
+
+      return {
+        ...listing,
+        media
+      } as ListingRecord;
+    })
+  );
 }
 
 export default async function Home({ searchParams }: HomeProps) {
@@ -183,7 +213,10 @@ export default async function Home({ searchParams }: HomeProps) {
           summary: [
             [selectedListing.area_value, selectedListing.area_unit].filter(Boolean).join(" ") || null,
             [selectedListing.location_area, selectedListing.city].filter(Boolean).join(", ") || null,
-            formatListingPrice(selectedListing)
+            formatListingPrice(selectedListing),
+            selectedListing.media?.length
+              ? `${selectedListing.media.length} media file${selectedListing.media.length === 1 ? "" : "s"}`
+              : null
           ]
             .filter(Boolean)
             .join(" · "),
@@ -195,8 +228,18 @@ export default async function Home({ searchParams }: HomeProps) {
             property_type: selectedListing.property_type,
             listing_type: selectedListing.listing_type,
             price_amount: selectedListing.price_amount,
-            price_currency: selectedListing.price_currency
-          }
+            price_currency: selectedListing.price_currency,
+            media_count: selectedListing.media?.length ?? 0
+          },
+          media: selectedListing.media
+            ?.filter((media) => media.signed_url)
+            .slice(0, 3)
+            .map((media, index) => ({
+              id: media.id,
+              name: `Listing media ${index + 1}`,
+              previewUrl: media.signed_url ?? "",
+              mediaType: media.media_type
+            }))
         }
       : null,
     ...selectedLeadAttachments
@@ -238,7 +281,8 @@ export default async function Home({ searchParams }: HomeProps) {
               area_unit: listing.area_unit,
               bedrooms: listing.bedrooms,
               bathrooms: listing.bathrooms,
-              features: listing.features
+              features: listing.features,
+              media: listing.media
             }))}
           />
         </div>

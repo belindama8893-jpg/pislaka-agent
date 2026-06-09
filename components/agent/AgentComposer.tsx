@@ -28,6 +28,7 @@ export type AgentComposerContextPreview = {
   type: "listing" | "lead";
   label: string;
   summary: string;
+  media?: AgentComposerMediaPreview[];
 };
 
 type AgentComposerProps = {
@@ -141,59 +142,73 @@ export function AgentComposer({
 
   return (
     <form className={`agent-composer ${className}`} onSubmit={onSubmit}>
-      {contextAttachments.length || files.length || media.length ? (
-        <div className="agent-composer-attachments" aria-label="Selected attachments">
-          {contextAttachments.map((item) => (
-            <div className={`agent-composer-context-chip ${item.type}`} key={item.id}>
-              <span>{item.type === "listing" ? "Listing" : "Lead"}</span>
-              <strong>{item.label}</strong>
-              <small>{item.summary}</small>
-              <button
-                aria-label={`Remove ${item.label}`}
-                type="button"
-                onClick={() => onRemoveContext?.(item.id)}
-              >
-                <X size={13} />
-              </button>
-            </div>
-          ))}
-
-          {files.map((item) => (
-            <div className="agent-composer-file-chip" key={item.id}>
-              <span>File</span>
-              <strong>{item.name}</strong>
-              <small>{item.sizeLabel}</small>
-              <button
-                aria-label={`Remove ${item.name}`}
-                type="button"
-                onClick={() => onRemoveFile?.(item.id)}
-              >
-                <X size={13} />
-              </button>
-            </div>
-          ))}
-
-          {media.map((item) => (
-            <div className="agent-composer-media-thumb" key={item.id}>
-              {item.mediaType === "image" ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img alt={item.name} src={item.previewUrl} />
-              ) : (
-                <video muted playsInline src={item.previewUrl} />
-              )}
-              <button
-                aria-label={`Remove ${item.name}`}
-                type="button"
-                onClick={() => onRemoveMedia?.(item.id)}
-              >
-                <X size={13} />
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
       <div className="agent-composer-row">
+        {contextAttachments.length || files.length || media.length ? (
+          <div className="agent-composer-attachments" aria-label="Selected attachments">
+            {contextAttachments.map((item) => (
+              <div className={`agent-composer-context-chip ${item.type}`} key={item.id}>
+                <span>{item.type === "listing" ? "Listing" : "Lead"}</span>
+                <strong>{item.label}</strong>
+                <small>{item.summary}</small>
+                {item.media?.length ? (
+                  <div className="agent-composer-context-media" aria-label={`${item.label} media`}>
+                    {item.media.map((media) => (
+                      <span className="agent-composer-context-thumb" key={media.id}>
+                        {media.mediaType === "image" ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img alt={media.name} src={media.previewUrl} />
+                        ) : (
+                          <video muted playsInline src={media.previewUrl} />
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                <button
+                  aria-label={`Remove ${item.label}`}
+                  type="button"
+                  onClick={() => onRemoveContext?.(item.id)}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+
+            {files.map((item) => (
+              <div className="agent-composer-file-chip" key={item.id}>
+                <span>File</span>
+                <strong>{item.name}</strong>
+                <small>{item.sizeLabel}</small>
+                <button
+                  aria-label={`Remove ${item.name}`}
+                  type="button"
+                  onClick={() => onRemoveFile?.(item.id)}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+
+            {media.map((item) => (
+              <div className="agent-composer-media-thumb" key={item.id}>
+                {item.mediaType === "image" ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img alt={item.name} src={item.previewUrl} />
+                ) : (
+                  <video muted playsInline src={item.previewUrl} />
+                )}
+                <button
+                  aria-label={`Remove ${item.name}`}
+                  type="button"
+                  onClick={() => onRemoveMedia?.(item.id)}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
         <div className="agent-composer-attach-wrap" ref={attachWrapRef}>
           <button
             aria-expanded={isAttachMenuOpen}

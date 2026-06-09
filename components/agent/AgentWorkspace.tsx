@@ -9,6 +9,7 @@ import {
   Globe2,
   House,
   ImageIcon,
+  ImagePlus,
   Megaphone,
   MessageCircle,
   Phone,
@@ -19,6 +20,7 @@ import {
   UserPlus
 } from "lucide-react";
 import { AgentComposer, type AgentComposerContextPreview } from "@/components/agent/AgentComposer";
+import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
 import { useRouter } from "next/navigation";
 import type { AgentChatMessageRecord } from "@/lib/agent/conversations";
 import type { BrokerEventDraftInput, BrokerEventRecord } from "@/lib/events/types";
@@ -40,7 +42,7 @@ import type {
   ListingUpdatePayload,
   ScheduleEventListPayload
 } from "@/lib/agent/types";
-import type { ListingDraftInput, ListingDraftUpdateInput } from "@/lib/listings/types";
+import type { ListingDraftInput, ListingDraftUpdateInput, ListingMediaRecord } from "@/lib/listings/types";
 import type { ListingPromotion, PromotionChannel } from "@/lib/promotions/types";
 
 type RecentListingSummary = {
@@ -59,6 +61,7 @@ type RecentListingSummary = {
   bedrooms: number | null;
   bathrooms?: number | null;
   features?: string[] | null;
+  media?: ListingMediaRecord[];
 };
 
 type AgentWorkspaceProps = {
@@ -94,10 +97,28 @@ type ChatMessage = {
   listingUpdate?: ListingUpdatePreview;
   listingUpdateChoices?: ListingUpdateChoicePreview;
   entitySelection?: EntitySelectionPreview;
+  listingSaved?: ListingSavedPreview;
+  listingSavedMedia?: ListingSavedMediaPreview[];
   promotion?: ListingPromotion;
   promotionTarget?: RecentListingSummary;
   promotionInstruction?: string;
   promotionChannels?: PromotionChannel[];
+};
+
+type ListingSavedPreview = {
+  listingId: string;
+  title: string | null;
+  location: string | null;
+  uploadedCount: number;
+  libraryHref: string;
+  agentHref: string;
+};
+
+type ListingSavedMediaPreview = {
+  id: string;
+  name: string;
+  previewUrl: string;
+  mediaType: "image" | "video";
 };
 
 type LeadStatusUpdatePreview = {
@@ -175,6 +196,8 @@ type ChatMessageUiPayload = Partial<
     | "listingUpdate"
     | "listingUpdateChoices"
     | "entitySelection"
+    | "listingSaved"
+    | "listingSavedMedia"
     | "promotion"
     | "promotionTarget"
     | "promotionInstruction"
@@ -188,6 +211,7 @@ type ChatContextAttachment = {
   entity_id: string;
   label: string;
   summary: string;
+  media?: ListingSavedMediaPreview[];
   snapshot?: Record<string, unknown>;
 };
 
@@ -257,6 +281,28 @@ function chatMessageFromRecord(record: AgentChatMessageRecord): ChatMessage {
   };
 }
 
+function hasStructuredOutput(message: ChatMessage) {
+  return Boolean(
+    message.draft ||
+      message.scheduleEvent ||
+      message.scheduleEvents ||
+      message.leadResults ||
+      message.leadLatestOffer ||
+      message.leadDetailsUpdate ||
+      message.leadCreate ||
+      message.leadBatchStatusUpdate ||
+      message.leadListingUpdate ||
+      message.leadStatusUpdate ||
+      message.leadReply ||
+      message.listingUpdate ||
+      message.listingUpdateChoices ||
+      message.entitySelection ||
+      message.listingSaved ||
+      message.promotion ||
+      message.promotionTarget
+  );
+}
+
 function structuredPayloadForMessage(message: ChatMessage): Record<string, unknown> {
   const ui: Record<string, unknown> = {};
 
@@ -274,6 +320,8 @@ function structuredPayloadForMessage(message: ChatMessage): Record<string, unkno
     "listingUpdate",
     "listingUpdateChoices",
     "entitySelection",
+    "listingSaved",
+    "listingSavedMedia",
     "promotion",
     "promotionTarget",
     "promotionInstruction",
@@ -335,31 +383,46 @@ type PendingFileAttachment = {
 function ChannelLogo({ channel }: { channel: PromotionChannel }) {
   if (channel === "whatsapp") {
     return (
-      <span className="channel-logo whatsapp" aria-hidden="true">
-        <MessageCircle size={18} />
+      <span className="channel-logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="#25D366">
+          <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.888-.788-1.489-1.761-1.663-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51a12.8 12.8 0 0 0-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/>
+        </svg>
       </span>
     );
   }
 
   if (channel === "facebook") {
     return (
-      <span className="channel-logo facebook" aria-hidden="true">
-        f
+      <span className="channel-logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="#1877F2">
+          <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+        </svg>
       </span>
     );
   }
 
   if (channel === "instagram") {
     return (
-      <span className="channel-logo instagram" aria-hidden="true">
-        ◎
+      <span className="channel-logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18">
+          <defs>
+            <linearGradient id="ig-grad" x1="0%" y1="100%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#f09433" />
+              <stop offset="25%" stopColor="#e6683c" />
+              <stop offset="50%" stopColor="#dc2743" />
+              <stop offset="75%" stopColor="#cc2366" />
+              <stop offset="100%" stopColor="#bc1888" />
+            </linearGradient>
+          </defs>
+          <path fill="url(#ig-grad)" d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/>
+        </svg>
       </span>
     );
   }
 
   return (
-    <span className="channel-logo portal" aria-hidden="true">
-      <Globe2 size={17} />
+    <span className="channel-logo" aria-hidden="true" style={{ color: "#1f4f8f" }}>
+      <Globe2 size={18} />
     </span>
   );
 }
@@ -615,15 +678,33 @@ function formatFileSize(bytes: number) {
 function listingToContextAttachment(listing: RecentListingSummary): ChatContextAttachment {
   const area = [listing.area_value, listing.area_unit].filter(Boolean).join(" ");
   const location = [listing.location_area, listing.city].filter(Boolean).join(", ");
+  const media = (listing.media ?? [])
+    .filter((item) => item.signed_url)
+    .slice(0, 3)
+    .map((item, index) => ({
+      id: item.id,
+      name: `Listing media ${index + 1}`,
+      previewUrl: item.signed_url ?? "",
+      mediaType: item.media_type
+    }));
+  const mediaSummary = listing.media?.length
+    ? `${listing.media.length} media file${listing.media.length === 1 ? "" : "s"}`
+    : null;
 
   return {
     id: `listing:${listing.id}`,
     type: "listing",
     entity_id: listing.id,
     label: listing.title || "Untitled listing",
-    summary: [area || null, location || null, formatListingCurrency(listing.price_amount, listing.price_currency ?? "PKR")]
+    summary: [
+      area || null,
+      location || null,
+      formatListingCurrency(listing.price_amount, listing.price_currency ?? "PKR"),
+      mediaSummary
+    ]
       .filter(Boolean)
       .join(" · "),
+    media,
     snapshot: {
       status: listing.status,
       title: listing.title,
@@ -636,7 +717,8 @@ function listingToContextAttachment(listing: RecentListingSummary): ChatContextA
       area_value: listing.area_value,
       area_unit: listing.area_unit,
       bedrooms: listing.bedrooms,
-      bathrooms: listing.bathrooms
+      bathrooms: listing.bathrooms,
+      media_count: listing.media?.length ?? 0
     }
   };
 }
@@ -736,7 +818,7 @@ function getListingValue(listing: RecentListingSummary, field: keyof ListingUpda
 }
 
 async function uploadListingMedia(listingId: string, media: PendingMedia[]) {
-  let uploadedCount = 0;
+  const uploadedMedia: ListingMediaRecord[] = [];
 
   for (const item of media) {
     const formData = new FormData();
@@ -753,10 +835,13 @@ async function uploadListingMedia(listingId: string, media: PendingMedia[]) {
       throw new Error(payload?.error ?? `Unable to upload ${item.file.name}`);
     }
 
-    uploadedCount += 1;
+    const payload = (await response.json()) as { media?: ListingMediaRecord };
+    if (payload.media) {
+      uploadedMedia.push(payload.media);
+    }
   }
 
-  return uploadedCount;
+  return uploadedMedia;
 }
 
 function normalizeListingText(value: string) {
@@ -996,8 +1081,12 @@ function PromotionPack({ promotion }: { promotion: ListingPromotion }) {
   }
 
   return (
-    <div className="chat-promotion-pack">
-      <p className="promotion-summary">{promotion.summary}</p>
+    <AgentOutputCard
+      className="chat-promotion-pack"
+      icon={<Megaphone size={16} />}
+      title="Promotion pack"
+      tone="promotion"
+    >
       <div className="promotion-list">
         {promotion.cards.map((card) => (
           <article className="promotion-row" key={card.channel}>
@@ -1010,33 +1099,42 @@ function PromotionPack({ promotion }: { promotion: ListingPromotion }) {
                 className="icon-button compact"
                 type="button"
                 aria-label={`Copy ${card.channel} promotion`}
-                onClick={() => void handleCopy(card.channel, `${card.title}\n\n${card.body}\n\n${card.cta}`)}
+                onClick={() => {
+                  const parts = [card.title, card.body];
+                  if (card.landing_url) parts.push(`Link: ${card.landing_url}`);
+                  if (card.cta) parts.push(card.cta);
+                  void handleCopy(card.channel, parts.join("\n\n"));
+                }}
               >
                 <Copy size={14} />
               </button>
             </div>
             <strong>{card.title}</strong>
-            <p>{card.body}</p>
-            <small>{copiedChannel === card.channel ? "Copied" : card.cta}</small>
-            <div className="promotion-links">
+            <div className="promotion-bubble-content">
+              <p>{card.body}</p>
+              {card.cta ? (
+                <span className="promotion-cta-text">{card.cta}</span>
+              ) : null}
               {card.landing_url ? (
-                <a className="promotion-link" href={card.landing_url} target="_blank" rel="noreferrer">
-                  Lead page: {card.landing_url}
-                </a>
-              ) : null}
-              {card.whatsapp_share_url ? (
-                <a className="promotion-link" href={card.whatsapp_share_url} target="_blank" rel="noreferrer">
-                  Open WhatsApp share
+                <a className="promotion-inline-link" href={card.landing_url} target="_blank" rel="noreferrer">
+                  <Globe2 size={13} />
+                  <span>{card.landing_url}</span>
                 </a>
               ) : null}
             </div>
-            <div className="promotion-media-brief">
-              <span>{card.image_brief}</span>
-            </div>
+            {copiedChannel === card.channel ? <small className="copied-hint">Copied to clipboard</small> : null}
+            {card.whatsapp_share_url ? (
+              <div className="promotion-actions">
+                <a className="promotion-action-button secondary" href={card.whatsapp_share_url} target="_blank" rel="noreferrer">
+                  <MessageCircle size={15} />
+                  <span>Share to WhatsApp</span>
+                </a>
+              </div>
+            ) : null}
           </article>
         ))}
       </div>
-    </div>
+    </AgentOutputCard>
   );
 }
 
@@ -1062,31 +1160,8 @@ function PromotionConfirmCard({
   }
 
   return (
-    <div className="promotion-confirm-card">
-      <div className="card-title">
-        <Megaphone size={16} /> Confirm promotion target
-      </div>
-      <div className="promotion-target-card">
-        <strong>{listing.title || "Untitled listing"}</strong>
-        <span>
-          {[listing.area_value, listing.area_unit].filter(Boolean).join(" ") || "Area not set"} ·{" "}
-          {[listing.location_area, listing.city].filter(Boolean).join(", ") || "Location not set"}
-        </span>
-      </div>
-      <p>Is this the listing you want to promote? Select one or more channels.</p>
-      <div className="channel-selector">
-        {promotionChannels.map((item) => (
-          <label key={item.channel}>
-            <input
-              checked={selectedChannels.includes(item.channel)}
-              type="checkbox"
-              onChange={() => toggleChannel(item.channel)}
-            />
-            <span>{item.label}</span>
-          </label>
-        ))}
-      </div>
-      <div className="card-actions">
+    <AgentOutputCard
+      actions={
         <button
           className="primary-button small"
           disabled={selectedChannels.length === 0}
@@ -1095,8 +1170,35 @@ function PromotionConfirmCard({
         >
           <CheckCircle2 size={15} /> Generate promotion pack
         </button>
+      }
+      className="promotion-confirm-card"
+      hint="Choose channels, then generate the promotion pack."
+      icon={<Megaphone size={16} />}
+      summary="Confirm the property and choose one or more channels."
+      title="Promotion target"
+      tone="promotion"
+    >
+      <div className="promotion-target-card">
+        <strong>{listing.title || "Untitled listing"}</strong>
+        <span>
+          {[listing.area_value, listing.area_unit].filter(Boolean).join(" ") || "Area not set"} ·{" "}
+          {[listing.location_area, listing.city].filter(Boolean).join(", ") || "Location not set"}
+        </span>
       </div>
-    </div>
+      <div className="channel-selector">
+        {promotionChannels.map((item) => (
+          <label key={item.channel} className={selectedChannels.includes(item.channel) ? "selected" : ""}>
+            <input
+              checked={selectedChannels.includes(item.channel)}
+              type="checkbox"
+              onChange={() => toggleChannel(item.channel)}
+            />
+            <ChannelLogo channel={item.channel} />
+            <span>{item.label}</span>
+          </label>
+        ))}
+      </div>
+    </AgentOutputCard>
   );
 }
 
@@ -1108,10 +1210,12 @@ function LeadResultsCard({
   onSelect?: (lead: LeadListItem) => void;
 }) {
   return (
-    <div className="lead-chat-card">
-      <div className="card-title">
-        <MessageCircle size={16} /> Matching leads
-      </div>
+    <AgentOutputCard
+      className="lead-chat-card"
+      icon={<MessageCircle size={16} />}
+      title="Matching leads"
+      tone="lead"
+    >
       {leads.length ? (
         <div className="lead-chat-list">
           {leads.slice(0, 5).map((lead) => (
@@ -1137,25 +1241,27 @@ function LeadResultsCard({
       ) : (
         <p className="agent-draft-status">No matching leads found in the recent inbox.</p>
       )}
-    </div>
+    </AgentOutputCard>
   );
 }
 
 function LeadLatestOfferCard({ onConfirm }: { onConfirm: () => void }) {
   return (
-    <div className="lead-chat-card">
-      <div className="card-title">
-        <MessageCircle size={16} /> No exact lead match
-      </div>
-      <p className="lead-chat-reply">
-        I did not find that exact lead in the recent inbox. I can show the latest lead instead, but I need your confirmation first.
-      </p>
-      <div className="card-actions">
+    <AgentOutputCard
+      actions={
         <button className="primary-button small" type="button" onClick={onConfirm}>
           <CheckCircle2 size={15} /> View latest lead
         </button>
-      </div>
-    </div>
+      }
+      className="lead-chat-card"
+      icon={<MessageCircle size={16} />}
+      title="No exact lead match"
+      tone="lead"
+    >
+      <p className="lead-chat-reply">
+        I did not find that exact lead in the recent inbox. I can show the latest lead instead, but I need your confirmation first.
+      </p>
+    </AgentOutputCard>
   );
 }
 
@@ -1202,10 +1308,20 @@ function LeadStatusConfirmCard({
   }
 
   return (
-    <div className="lead-chat-card">
-      <div className="card-title">
-        <CheckCircle2 size={16} /> Confirm lead update
-      </div>
+    <AgentOutputCard
+      actions={
+        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
+          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm update"}
+        </button>
+      }
+      className="lead-chat-card"
+      hint="Confirm before I update this lead."
+      icon={<CheckCircle2 size={16} />}
+      status={status}
+      summary={preview.urgency ? `Urgency will be set to ${preview.urgency}.` : undefined}
+      title="Confirm lead update"
+      tone="lead"
+    >
       <div className="lead-chat-row standalone">
         <div>
           <strong>{preview.lead.full_name || "Unnamed buyer"}</strong>
@@ -1219,14 +1335,7 @@ function LeadStatusConfirmCard({
           {preview.status ?? preview.lead.status}
         </span>
       </div>
-      {preview.urgency ? <p className="agent-draft-status">Urgency will be set to {preview.urgency}.</p> : null}
-      <div className="card-actions">
-        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm update"}
-        </button>
-      </div>
-      {status ? <p className="agent-draft-status">{status}</p> : null}
-    </div>
+    </AgentOutputCard>
   );
 }
 
@@ -1282,10 +1391,19 @@ function LeadDetailsConfirmCard({
   }
 
   return (
-    <div className="lead-chat-card">
-      <div className="card-title">
-        <Pencil size={16} /> Confirm lead details update
-      </div>
+    <AgentOutputCard
+      actions={
+        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
+          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm update"}
+        </button>
+      }
+      className="lead-chat-card"
+      hint="Review the changed fields, then confirm."
+      icon={<Pencil size={16} />}
+      status={status}
+      title="Confirm lead details"
+      tone="lead"
+    >
       <div className="lead-chat-row standalone">
         <div>
           <strong>{preview.lead.full_name || "Unnamed buyer"}</strong>
@@ -1305,13 +1423,7 @@ function LeadDetailsConfirmCard({
           </div>
         ))}
       </div>
-      <div className="card-actions">
-        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm update"}
-        </button>
-      </div>
-      {status ? <p className="agent-draft-status">{status}</p> : null}
-    </div>
+    </AgentOutputCard>
   );
 }
 
@@ -1355,10 +1467,19 @@ function LeadCreateConfirmCard({
   }
 
   return (
-    <div className="lead-chat-card">
-      <div className="card-title">
-        <UserPlus size={16} /> Confirm new lead
-      </div>
+    <AgentOutputCard
+      actions={
+        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
+          <CheckCircle2 size={15} /> {isSaving ? "Saving..." : "Confirm & save"}
+        </button>
+      }
+      className="lead-chat-card"
+      hint="Confirm before I save this lead."
+      icon={<UserPlus size={16} />}
+      status={status}
+      title="Confirm new lead"
+      tone="lead"
+    >
       <div className="listing-update-list">
         {[
           ["Name", preview.payload.full_name],
@@ -1378,13 +1499,7 @@ function LeadCreateConfirmCard({
             </div>
           ))}
       </div>
-      <div className="card-actions">
-        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaving ? "Saving..." : "Confirm & save"}
-        </button>
-      </div>
-      {status ? <p className="agent-draft-status">{status}</p> : null}
-    </div>
+    </AgentOutputCard>
   );
 }
 
@@ -1436,15 +1551,31 @@ function LeadBatchStatusConfirmCard({
   }
 
   return (
-    <div className="lead-chat-card">
-      <div className="card-title">
-        <CheckCircle2 size={16} /> Confirm batch lead update
-      </div>
-      <p className="agent-draft-status">
-        {preview.leads.length} lead{preview.leads.length === 1 ? "" : "s"} will be changed to{" "}
-        {preview.status ?? "the selected status"}
-        {preview.urgency ? ` with ${preview.urgency} urgency` : ""}.
-      </p>
+    <AgentOutputCard
+      actions={
+        <button
+          className="primary-button small"
+          type="button"
+          disabled={isSaving || !preview.status}
+          onClick={handleConfirm}
+        >
+          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm batch update"}
+        </button>
+      }
+      className="lead-chat-card"
+      hint="Review the selected leads before updating them."
+      icon={<CheckCircle2 size={16} />}
+      status={status}
+      summary={
+        <>
+          {preview.leads.length} lead{preview.leads.length === 1 ? "" : "s"} will be changed to{" "}
+          {preview.status ?? "the selected status"}
+          {preview.urgency ? ` with ${preview.urgency} urgency` : ""}.
+        </>
+      }
+      title="Confirm batch update"
+      tone="lead"
+    >
       <div className="lead-chat-list">
         {preview.leads.slice(0, 6).map((lead) => (
           <div className="lead-chat-row" key={lead.id}>
@@ -1458,18 +1589,7 @@ function LeadBatchStatusConfirmCard({
           </div>
         ))}
       </div>
-      <div className="card-actions">
-        <button
-          className="primary-button small"
-          type="button"
-          disabled={isSaving || !preview.status}
-          onClick={handleConfirm}
-        >
-          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm batch update"}
-        </button>
-      </div>
-      {status ? <p className="agent-draft-status">{status}</p> : null}
-    </div>
+    </AgentOutputCard>
   );
 }
 
@@ -1526,10 +1646,19 @@ function LeadListingConfirmCard({
   }
 
   return (
-    <div className="lead-chat-card">
-      <div className="card-title">
-        <House size={16} /> Confirm lead listing
-      </div>
+    <AgentOutputCard
+      actions={
+        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
+          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm listing"}
+        </button>
+      }
+      className="lead-chat-card"
+      hint="Confirm before I change this lead's primary listing."
+      icon={<House size={16} />}
+      status={status}
+      title="Confirm lead listing"
+      tone="lead"
+    >
       <div className="lead-chat-row standalone">
         <div>
           <strong>{preview.lead.full_name || preview.lead.phone || "Unnamed buyer"}</strong>
@@ -1551,13 +1680,7 @@ function LeadListingConfirmCard({
           </div>
         </div>
       </div>
-      <div className="card-actions">
-        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm listing"}
-        </button>
-      </div>
-      {status ? <p className="agent-draft-status">{status}</p> : null}
-    </div>
+    </AgentOutputCard>
   );
 }
 
@@ -1622,10 +1745,19 @@ function ListingUpdateConfirmCard({
   }
 
   return (
-    <div className="listing-update-card">
-      <div className="card-title">
-        <Pencil size={16} /> Confirm listing update
-      </div>
+    <AgentOutputCard
+      actions={
+        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
+          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm update"}
+        </button>
+      }
+      className="listing-update-card"
+      hint="Review the listing changes, then confirm."
+      icon={<Pencil size={16} />}
+      status={status}
+      title="Confirm listing update"
+      tone="listing"
+    >
       <div className="promotion-target-card">
         <strong>{preview.listing.title || "Untitled listing"}</strong>
         <span>
@@ -1644,13 +1776,7 @@ function ListingUpdateConfirmCard({
           </div>
         ))}
       </div>
-      <div className="card-actions">
-        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm update"}
-        </button>
-      </div>
-      {status ? <p className="agent-draft-status">{status}</p> : null}
-    </div>
+    </AgentOutputCard>
   );
 }
 
@@ -1662,13 +1788,14 @@ function ListingUpdateSelectionCard({
   onSelect: (listing: RecentListingSummary) => void;
 }) {
   return (
-    <div className="listing-update-card">
-      <div className="card-title">
-        <House size={16} /> Choose listing to update
-      </div>
-      <p className="agent-draft-status">
-        I found multiple matching listings. Select the exact property, then I will show the update for confirmation.
-      </p>
+    <AgentOutputCard
+      className="listing-update-card"
+      hint="Select one listing to continue."
+      icon={<House size={16} />}
+      summary="I found multiple matching listings. Select the exact property, then I will show the update for confirmation."
+      title="Choose listing to update"
+      tone="listing"
+    >
       <div className="listing-choice-grid">
         {preview.candidates.map((listing) => (
           <article className="listing-choice-card" key={listing.id}>
@@ -1690,7 +1817,7 @@ function ListingUpdateSelectionCard({
           </article>
         ))}
       </div>
-    </div>
+    </AgentOutputCard>
   );
 }
 
@@ -1710,11 +1837,21 @@ function EntitySelectionCard({
     : "I found multiple matching leads. Select the exact buyer before I continue.";
 
   return (
-    <div className={isListingTarget ? "listing-update-card" : "lead-chat-card"}>
-      <div className="card-title">
-        {isListingTarget ? <House size={16} /> : <MessageCircle size={16} />} {title}
-      </div>
-      <p className="agent-draft-status">{helper}</p>
+    <AgentOutputCard
+      actions={
+        onSkip ? (
+          <button className="outline-button small" type="button" onClick={onSkip}>
+            Continue without binding
+          </button>
+        ) : null
+      }
+      className={isListingTarget ? "listing-update-card" : "lead-chat-card"}
+      hint="Select one record to continue."
+      icon={isListingTarget ? <House size={16} /> : <MessageCircle size={16} />}
+      summary={helper}
+      title={title}
+      tone={isListingTarget ? "listing" : "lead"}
+    >
       <div className={isListingTarget ? "listing-choice-grid" : "lead-chat-list"}>
         {preview.candidates.map((candidate) => {
           const listing = isListingTarget ? resolutionCandidateToListing(candidate) : null;
@@ -1758,14 +1895,7 @@ function EntitySelectionCard({
           ) : null;
         })}
       </div>
-      {onSkip ? (
-        <div className="card-actions">
-          <button className="outline-button small" type="button" onClick={onSkip}>
-            Continue without binding
-          </button>
-        </div>
-      ) : null}
-    </div>
+    </AgentOutputCard>
   );
 }
 
@@ -1778,21 +1908,25 @@ function LeadReplyCard({ draft }: { draft: LeadReplyDraftWithLink }) {
   }
 
   return (
-    <div className="lead-chat-card">
-      <div className="card-title">
-        <MessageCircle size={16} /> WhatsApp reply draft
-      </div>
+    <AgentOutputCard
+      actions={
+        <>
+          <button className="outline-button small" type="button" onClick={() => void handleCopy()}>
+            <Copy size={14} /> {copied ? "Copied" : "Copy"}
+          </button>
+          <a className="primary-button small" href={draft.whatsapp_url} target="_blank" rel="noreferrer">
+            <Phone size={14} /> Open WhatsApp
+          </a>
+        </>
+      }
+      className="lead-chat-card"
+      icon={<MessageCircle size={16} />}
+      summary={draft.next_step}
+      title="WhatsApp reply draft"
+      tone="lead"
+    >
       <p className="lead-chat-reply">{draft.reply_text}</p>
-      <small>{draft.next_step}</small>
-      <div className="card-actions">
-        <button className="outline-button small" type="button" onClick={() => void handleCopy()}>
-          <Copy size={14} /> {copied ? "Copied" : "Copy"}
-        </button>
-        <a className="primary-button small" href={draft.whatsapp_url} target="_blank" rel="noreferrer">
-          <Phone size={14} /> Open WhatsApp
-        </a>
-      </div>
-    </div>
+    </AgentOutputCard>
   );
 }
 
@@ -1807,7 +1941,7 @@ function DraftPreviewCard({
   onAttachMedia: () => void;
   onRemoveMedia: (mediaId: string) => void;
   pendingMedia: PendingMedia[];
-  onSaved: (uploadedCount: number, listingId: string) => void;
+  onSaved: (uploadedCount: number, listingId: string, mediaPreview: ListingSavedMediaPreview[]) => void;
 }) {
   const router = useRouter();
   const [form, setForm] = useState(() => draftToFormState(draft));
@@ -1849,13 +1983,23 @@ function DraftPreviewCard({
     }
 
     try {
-      const uploadedCount = await uploadListingMedia(listingId, pendingMedia);
+      const uploadedMedia = await uploadListingMedia(listingId, pendingMedia);
+      const uploadedCount = uploadedMedia.length;
       setStatus(
         uploadedCount
           ? `Added to listing library with ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}.`
           : "Added to listing library."
       );
-      onSaved(uploadedCount, listingId);
+      onSaved(
+        uploadedCount,
+        listingId,
+        uploadedMedia.slice(0, 3).map((item, index) => ({
+          id: item.id,
+          name: `Uploaded media ${index + 1}`,
+          previewUrl: item.signed_url ?? "",
+          mediaType: item.media_type
+        }))
+      );
       router.refresh();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Listing saved, but media upload failed.");
@@ -1866,10 +2010,24 @@ function DraftPreviewCard({
   }
 
   return (
-    <div className="agent-draft-card">
-      <div className="card-title">
-        <Sparkles size={16} /> Listing preview
-      </div>
+    <AgentOutputCard
+      actions={
+        <>
+          <button className="primary-button small" type="button" onClick={handleConfirm} disabled={isSaving}>
+            <CheckCircle2 size={15} /> {isSaving ? "Adding..." : "Confirm & add"}
+          </button>
+          <button className="outline-button small" type="button" onClick={() => setIsEditing(!isEditing)}>
+            <Pencil size={14} /> {isEditing ? "Preview" : "Edit card"}
+          </button>
+        </>
+      }
+      className="agent-draft-card"
+      icon={<Sparkles size={16} />}
+      status={status}
+      summary={isEditing ? "Edit the parsed listing fields before saving." : "Review the key listing details before adding it to your library."}
+      title="Listing preview"
+      tone="listing"
+    >
 
       {isEditing ? (
         <div className="agent-draft-form">
@@ -1997,10 +2155,6 @@ function DraftPreviewCard({
       )}
 
       <div className="agent-media-panel" aria-label="Listing photos and video">
-        <div className="agent-media-panel-header">
-          <span>Photos & video</span>
-          <small>{pendingMedia.length ? `${pendingMedia.length} media ready` : "Optional before saving"}</small>
-        </div>
         {pendingMedia.length ? (
           <div className="agent-media-preview">
             {pendingMedia.map((item) => (
@@ -2021,25 +2175,80 @@ function DraftPreviewCard({
                 </button>
               </div>
             ))}
+            <button className="agent-media-add" type="button" onClick={onAttachMedia}>
+              <Upload size={14} /> Add more
+            </button>
           </div>
         ) : (
-          <p>Add listing photos or a walkthrough video here before confirming the listing.</p>
+          <button className="agent-media-add empty" type="button" onClick={onAttachMedia}>
+            <ImagePlus size={16} /> Add photos / video
+          </button>
         )}
-        <button className="outline-button small agent-media-add" type="button" onClick={onAttachMedia}>
-          <Upload size={14} /> Add photos/video
-        </button>
       </div>
+    </AgentOutputCard>
+  );
+}
 
-      <div className="card-actions">
-        <button className="primary-button small" type="button" onClick={handleConfirm} disabled={isSaving}>
-          <CheckCircle2 size={15} /> {isSaving ? "Adding..." : "Confirm & add"}
-        </button>
-        <button className="outline-button small" type="button" onClick={() => setIsEditing(!isEditing)}>
-          <Pencil size={14} /> {isEditing ? "Preview" : "Edit card"}
-        </button>
+function ListingSavedCard({
+  mediaPreview = [],
+  onAskAgent,
+  preview
+}: {
+  mediaPreview?: ListingSavedMediaPreview[];
+  onAskAgent?: (preview: ListingSavedPreview, mediaPreview: ListingSavedMediaPreview[]) => void;
+  preview: ListingSavedPreview;
+}) {
+  const visibleMedia = mediaPreview.filter((item) => item.previewUrl).slice(0, 3);
+
+  return (
+    <AgentOutputCard
+      actions={
+        <>
+          <a className="primary-button small" href={preview.libraryHref}>
+            <House size={14} /> Open listing
+          </a>
+          <button className="outline-button small" type="button" onClick={() => onAskAgent?.(preview, mediaPreview)}>
+            <MessageCircle size={14} /> Ask Agent
+          </button>
+        </>
+      }
+      className="listing-saved-card"
+      icon={<CheckCircle2 size={16} />}
+      title="Listing saved"
+      tone="listing"
+    >
+      <div className="listing-saved-summary">
+        <div>
+          <strong>{preview.title || "Saved listing"}</strong>
+          {preview.location ? <span>{preview.location}</span> : null}
+        </div>
+        <div className="listing-saved-media" aria-label="Saved listing media">
+          {visibleMedia.length ? (
+            <>
+              <div className="listing-saved-thumbs">
+                {visibleMedia.map((item) => (
+                  <span className="listing-saved-thumb" key={item.id}>
+                    {item.mediaType === "image" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img alt={item.name} src={item.previewUrl} />
+                    ) : (
+                      <video muted playsInline src={item.previewUrl} />
+                    )}
+                  </span>
+                ))}
+              </div>
+              <span>
+                {preview.uploadedCount} media file{preview.uploadedCount === 1 ? "" : "s"}
+              </span>
+            </>
+          ) : (
+            <span className="listing-saved-badge">
+              <ImageIcon size={14} /> No media added
+            </span>
+          )}
+        </div>
       </div>
-      {status ? <p className="agent-draft-status">{status}</p> : null}
-    </div>
+    </AgentOutputCard>
   );
 }
 
@@ -2088,10 +2297,25 @@ function SchedulePreviewCard({
   }
 
   return (
-    <div className="schedule-preview-card">
-      <div className="card-title">
-        <CalendarClock size={16} /> Schedule preview
-      </div>
+    <AgentOutputCard
+      actions={
+        <>
+          <button className="primary-button small" type="button" onClick={handleConfirm} disabled={isSaving}>
+            <CheckCircle2 size={15} /> {isSaving ? "Adding..." : "Confirm schedule"}
+          </button>
+          <button className="outline-button small" type="button" onClick={() => setIsEditing(!isEditing)}>
+            <Pencil size={14} /> {isEditing ? "Preview" : "Edit card"}
+          </button>
+        </>
+      }
+      className="schedule-preview-card"
+      hint={isEditing ? "Edit the timing before saving." : "Review the schedule item before adding it."}
+      icon={<CalendarClock size={16} />}
+      status={status}
+      summary={isEditing ? "Edit timing and references before saving." : "Review the schedule item before adding it."}
+      title="Schedule preview"
+      tone="schedule"
+    >
 
       {isEditing ? (
         <div className="agent-draft-form">
@@ -2190,26 +2414,18 @@ function SchedulePreviewCard({
           </div>
         </div>
       )}
-
-      <div className="card-actions">
-        <button className="primary-button small" type="button" onClick={handleConfirm} disabled={isSaving}>
-          <CheckCircle2 size={15} /> {isSaving ? "Adding..." : "Confirm schedule"}
-        </button>
-        <button className="outline-button small" type="button" onClick={() => setIsEditing(!isEditing)}>
-          <Pencil size={14} /> {isEditing ? "Preview" : "Edit card"}
-        </button>
-      </div>
-      {status ? <p className="agent-draft-status">{status}</p> : null}
-    </div>
+    </AgentOutputCard>
   );
 }
 
 function ScheduleResultsCard({ events, timeZone }: { events: BrokerEventRecord[]; timeZone?: string | null }) {
   return (
-    <div className="chat-card schedule-results-card">
-      <div className="card-title">
-        <CalendarClock size={16} /> Schedule items
-      </div>
+    <AgentOutputCard
+      className="chat-card schedule-results-card"
+      icon={<CalendarClock size={16} />}
+      title="Schedule items"
+      tone="schedule"
+    >
       {events.length === 0 ? (
         <p>No matching schedule items.</p>
       ) : (
@@ -2234,7 +2450,7 @@ function ScheduleResultsCard({ events, timeZone }: { events: BrokerEventRecord[]
           ))}
         </div>
       )}
-    </div>
+    </AgentOutputCard>
   );
 }
 
@@ -2254,6 +2470,7 @@ export function AgentWorkspace({
   const [contextAttachments, setContextAttachments] = useState<ChatContextAttachment[]>(initialContextAttachments);
   const [contextPickerMode, setContextPickerMode] = useState<"listing" | "lead" | null>(null);
   const [pendingMedia, setPendingMedia] = useState<PendingMedia[]>([]);
+  const [draftMediaByMessageId, setDraftMediaByMessageId] = useState<Record<string, PendingMedia[]>>({});
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [activeListingId, setActiveListingId] = useState<string | null>(
     initialContextAttachments.find((item) => item.type === "listing")?.entity_id ?? recentListings[0]?.id ?? null
@@ -2290,6 +2507,7 @@ export function AgentWorkspace({
   const composerMediaRef = useRef<PendingMedia[]>([]);
   const pendingMediaRef = useRef<PendingMedia[]>([]);
   const mediaSelectionTargetRef = useRef<"composer" | "draft">("composer");
+  const mediaSelectionDraftIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     setUserTimeZone(getResolvedTimeZone());
@@ -2504,8 +2722,38 @@ export function AgentWorkspace({
       id: item.id,
       type: item.type,
       label: item.label,
-      summary: item.summary
+      summary: item.summary,
+      media: item.media
     }));
+  }
+
+  function addSavedListingContext(preview: ListingSavedPreview, mediaPreview: ListingSavedMediaPreview[] = []) {
+    const nextAttachment: ChatContextAttachment = {
+      id: `listing:${preview.listingId}`,
+      type: "listing",
+      entity_id: preview.listingId,
+      label: preview.title || "Saved listing",
+      summary: [
+        preview.location,
+        preview.uploadedCount
+          ? `${preview.uploadedCount} media file${preview.uploadedCount === 1 ? "" : "s"}`
+          : null
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      media: mediaPreview.filter((item) => item.previewUrl).slice(0, 3),
+      snapshot: {
+        title: preview.title,
+        location: preview.location,
+        media_count: preview.uploadedCount
+      }
+    };
+
+    setActiveListingId(preview.listingId);
+    setContextAttachments((current) => [
+      ...current.filter((item) => !(item.type === "listing" && item.entity_id === preview.listingId)),
+      nextAttachment
+    ]);
   }
 
   async function persistAssistantMessage(message: ChatMessage) {
@@ -3633,7 +3881,14 @@ export function AgentWorkspace({
     setContextAttachments([]);
     setIsSubmitting(true);
     if (hasOutgoingMedia) {
-      setPendingMedia((current) => [...current, ...outgoingMedia]);
+      if (activeDraftId) {
+        setDraftMediaByMessageId((current) => ({
+          ...current,
+          [activeDraftId]: [...(current[activeDraftId] ?? []), ...outgoingMedia]
+        }));
+      } else {
+        setPendingMedia((current) => [...current, ...outgoingMedia]);
+      }
     }
     const userMessage = appendUserMessage(visibleUserMessageContent, {
       attachments: outgoingMedia,
@@ -3798,6 +4053,14 @@ export function AgentWorkspace({
 
       if (draft) {
         setActiveDraftId(assistantMessageId);
+        const carriedMedia = [...pendingMedia, ...outgoingMedia];
+        if (carriedMedia.length) {
+          setDraftMediaByMessageId((current) => ({
+            ...current,
+            [assistantMessageId]: carriedMedia
+          }));
+          setPendingMedia([]);
+        }
       }
 
       appendAssistantMessage({
@@ -3963,18 +4226,20 @@ export function AgentWorkspace({
         content: "I can attach images or videos to a listing. Please choose media files."
       });
       mediaSelectionTargetRef.current = "composer";
+      mediaSelectionDraftIdRef.current = null;
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
       return;
     }
 
-    if (mediaSelectionTargetRef.current === "draft" && activeDraftId) {
-      setPendingMedia((current) => [...current, ...accepted]);
-      appendAssistantMessage({
-        content:
-          "I added these media files to the current listing preview. They will upload when you confirm the listing."
-      });
+    const targetDraftId = mediaSelectionDraftIdRef.current;
+    if (mediaSelectionTargetRef.current === "draft" && targetDraftId) {
+      setActiveDraftId(targetDraftId);
+      setDraftMediaByMessageId((current) => ({
+        ...current,
+        [targetDraftId]: [...(current[targetDraftId] ?? []), ...accepted]
+      }));
     } else {
       setComposerMedia((current) => [...current, ...accepted]);
     }
@@ -3983,6 +4248,7 @@ export function AgentWorkspace({
       fileInputRef.current.value = "";
     }
     mediaSelectionTargetRef.current = "composer";
+    mediaSelectionDraftIdRef.current = null;
   }
 
   function handleDocumentSelected(files: FileList | null) {
@@ -4004,6 +4270,7 @@ export function AgentWorkspace({
 
   function openComposerMediaPicker() {
     mediaSelectionTargetRef.current = "composer";
+    mediaSelectionDraftIdRef.current = null;
     fileInputRef.current?.click();
   }
 
@@ -4011,8 +4278,10 @@ export function AgentWorkspace({
     documentFileInputRef.current?.click();
   }
 
-  function openDraftMediaPicker() {
+  function openDraftMediaPicker(draftMessageId: string) {
     mediaSelectionTargetRef.current = "draft";
+    mediaSelectionDraftIdRef.current = draftMessageId;
+    setActiveDraftId(draftMessageId);
     fileInputRef.current?.click();
   }
 
@@ -4026,14 +4295,19 @@ export function AgentWorkspace({
     });
   }
 
-  function removePendingMedia(mediaId: string) {
-    setPendingMedia((current) => {
-      return current.filter((media) => media.id !== mediaId);
-    });
-  }
+  function removeDraftMedia(draftMessageId: string, mediaId: string) {
+    setDraftMediaByMessageId((current) => {
+      const currentMedia = current[draftMessageId] ?? [];
+      const item = currentMedia.find((media) => media.id === mediaId);
+      if (item) {
+        URL.revokeObjectURL(item.previewUrl);
+      }
 
-  function clearPendingMedia() {
-    setPendingMedia([]);
+      return {
+        ...current,
+        [draftMessageId]: currentMedia.filter((media) => media.id !== mediaId)
+      };
+    });
   }
 
   return (
@@ -4057,10 +4331,16 @@ export function AgentWorkspace({
           </button>
         ) : null}
 
-        {messages.map((message, index) => (
-          index === 0 ? null : (
-          <article className={`message ${message.role}`} data-message-id={message.id} key={message.id}>
-            <p>{message.content}</p>
+        {messages.map((message, index) => {
+          const hasOutputCard = message.role === "assistant" && hasStructuredOutput(message);
+
+          return index === 0 ? null : (
+          <article
+            className={`message ${message.role} ${hasOutputCard ? "has-output-card" : ""}`.trim()}
+            data-message-id={message.id}
+            key={message.id}
+          >
+            {message.content ? <p>{message.content}</p> : null}
             {message.attachments?.length ? (
               <div className="message-media-preview" aria-label="Sent media">
                 {message.attachments.map((item) => (
@@ -4096,19 +4376,34 @@ export function AgentWorkspace({
                 {message.draft ? (
                   <DraftPreviewCard
                     draft={message.draft}
-                    onAttachMedia={openDraftMediaPicker}
-                    onRemoveMedia={removePendingMedia}
-                    pendingMedia={message.id === activeDraftId ? pendingMedia : []}
-                    onSaved={(uploadedCount, listingId) => {
-                      clearPendingMedia();
-                      setActiveDraftId(null);
+                    onAttachMedia={() => openDraftMediaPicker(message.id)}
+                    onRemoveMedia={(mediaId) => removeDraftMedia(message.id, mediaId)}
+                    pendingMedia={draftMediaByMessageId[message.id] ?? []}
+                    onSaved={(uploadedCount, listingId, mediaPreview) => {
+                      const location = [message.draft?.location_area, message.draft?.city].filter(Boolean).join(", ");
                       setActiveListingId(listingId);
                       appendAssistantMessage({
                         content: uploadedCount
-                          ? `Done. I added it to your listing library with ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}. You can open Listings from the sidebar to review and edit.`
-                          : "Done. I added it to your listing library. You can open Listings from the sidebar to review media and edit details."
+                          ? `Done. I added it to your listing library with ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}.`
+                          : "Done. I added it to your listing library.",
+                        listingSaved: {
+                          listingId,
+                          title: message.draft?.title ?? null,
+                          location: location || null,
+                          uploadedCount,
+                          libraryHref: `/listings#listing-${listingId}`,
+                          agentHref: `/?listing=${listingId}`
+                        },
+                        listingSavedMedia: mediaPreview
                       });
                     }}
+                  />
+                ) : null}
+                {message.listingSaved ? (
+                  <ListingSavedCard
+                    mediaPreview={message.listingSavedMedia}
+                    onAskAgent={addSavedListingContext}
+                    preview={message.listingSaved}
                   />
                 ) : null}
                 {message.scheduleEvent ? (
@@ -4249,8 +4544,8 @@ export function AgentWorkspace({
               </>
             ) : null}
           </article>
-          )
-        ))}
+          );
+        })}
 
         {isSubmitting ? (
           <div className="message assistant thinking-message" role="status" aria-live="polite">

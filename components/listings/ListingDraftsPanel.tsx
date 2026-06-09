@@ -322,7 +322,7 @@ export function ListingDraftsPanel({ className = "", collapsed = false, listings
                 </div>
               </form>
             ) : (
-              <article className="listing-row" key={listing.id}>
+              <article className="listing-row" id={`listing-${listing.id}`} key={listing.id}>
                 <div className="listing-row-main">
                   <div className="listing-row-titleline">
                     <strong>{listing.title || "Untitled listing"}</strong>
