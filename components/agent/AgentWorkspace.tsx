@@ -2532,6 +2532,7 @@ function SchedulePreviewCard({
             </label>
             <label>
               <span>Lead</span>
+              {form.lead_id ? <small>Bound lead</small> : null}
               <input
                 value={form.lead_name}
                 onChange={(event) => setForm({ ...form, lead_name: event.target.value })}
@@ -2539,6 +2540,7 @@ function SchedulePreviewCard({
             </label>
             <label>
               <span>Listing</span>
+              {form.listing_id ? <small>Bound listing</small> : null}
               <input
                 value={form.listing_reference}
                 onChange={(event) => setForm({ ...form, listing_reference: event.target.value })}

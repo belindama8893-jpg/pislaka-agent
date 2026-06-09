@@ -407,9 +407,9 @@ async function resolveScheduleEventEntities(
       };
     }
 
-    nextPayload.lead_name = payload.lead_name ?? leadLabel(matchedLead);
+    nextPayload.lead_name = leadLabel(matchedLead);
     sourcePayload.resolved_lead = toResolutionCandidate(matchedLead);
-  } else if (selectedLeadId && scheduleEventNeedsParticipant(payload)) {
+  } else if (selectedLeadId) {
     const matchedLead = leads.find((lead) => lead.id === selectedLeadId);
     if (!matchedLead) {
       return {
@@ -422,7 +422,7 @@ async function resolveScheduleEventEntities(
     }
 
     nextPayload.lead_id = matchedLead.id;
-    nextPayload.lead_name = payload.lead_name ?? leadLabel(matchedLead);
+    nextPayload.lead_name = leadLabel(matchedLead);
     sourcePayload.resolved_lead = toResolutionCandidate(matchedLead);
   } else {
     const leadQuery = scheduleLeadQueryFromPayload(payload);
@@ -483,7 +483,7 @@ async function resolveScheduleEventEntities(
       };
     }
 
-    nextPayload.listing_reference = payload.listing_reference ?? listingLabel(matchedListing);
+    nextPayload.listing_reference = listingLabel(matchedListing);
     sourcePayload.resolved_listing = toListingResolutionCandidate(matchedListing);
   } else if (selectedListingId) {
     const matchedListing = listings.find((listing) => listing.id === selectedListingId);
@@ -498,7 +498,7 @@ async function resolveScheduleEventEntities(
     }
 
     nextPayload.listing_id = matchedListing.id;
-    nextPayload.listing_reference = payload.listing_reference ?? listingLabel(matchedListing);
+    nextPayload.listing_reference = listingLabel(matchedListing);
     sourcePayload.resolved_listing = toListingResolutionCandidate(matchedListing);
   } else if (options.currentListingId && mentionsCurrentListing) {
     const matchedListing = listings.find((listing) => listing.id === options.currentListingId);
@@ -513,7 +513,7 @@ async function resolveScheduleEventEntities(
     }
 
     nextPayload.listing_id = matchedListing.id;
-    nextPayload.listing_reference = payload.listing_reference ?? listingLabel(matchedListing);
+    nextPayload.listing_reference = listingLabel(matchedListing);
     sourcePayload.resolved_listing = toListingResolutionCandidate(matchedListing);
   } else if (payload.listing_reference || payload.location_text) {
     const scoredListings = listings

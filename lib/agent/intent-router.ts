@@ -191,7 +191,12 @@ export function extractLeadName(message: string) {
     (englishName ? [, englishName] : null) ??
     message.match(/(?:客户|跟进|提醒|回复|回消息)\s*([\p{L}\p{N} ]{2,24})/u);
 
-  return match?.[1]?.trim();
+  const candidate = match?.[1]?.trim();
+  if (!candidate || /^\d{1,2}(?::\d{2})?$/u.test(candidate)) {
+    return undefined;
+  }
+
+  return candidate;
 }
 
 export function extractLeadStatus(message: string): LeadStatusPatch {
