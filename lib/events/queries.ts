@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { BrokerEventRecord, BrokerEventStatus, BrokerEventType } from "@/lib/events/types";
 
 export const brokerEventSelect =
-  "id, broker_id, event_category, event_type, title, description, start_at, end_at, reminder_at, recurrence_rule, status, lead_id, listing_id, lead_name, listing_reference, location_text, source_payload, created_from, created_at, updated_at";
+  "id, broker_id, event_category, event_type, title, description, start_at, end_at, reminder_at, in_app_reminded_at, in_app_reminder_dismissed_at, recurrence_rule, status, lead_id, listing_id, lead_name, listing_reference, location_text, source_payload, created_from, created_at, updated_at";
 
 export type BrokerEventQueryOptions = {
   status?: BrokerEventStatus | "all";

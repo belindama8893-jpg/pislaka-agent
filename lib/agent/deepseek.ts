@@ -209,6 +209,12 @@ function addHours(isoDate: string, hours: number) {
   return date.toISOString();
 }
 
+function addMinutes(isoDate: string, minutes: number) {
+  const date = new Date(isoDate);
+  date.setMinutes(date.getMinutes() + minutes);
+  return date.toISOString();
+}
+
 function parseLocalLeadStatusUpdate(message: string): AgentAction {
   const leadName = extractLeadName(message);
   const status = extractLeadStatus(message);
@@ -421,6 +427,19 @@ function parseLocalGeneralReply(message: string): AgentAction {
 
 function extractScheduleTime(message: string, timeZone?: string | null) {
   const lower = message.toLowerCase();
+  const relativeMatch =
+    lower.match(/\bin\s+(\d{1,3})\s*(minute|minutes|min|mins|hour|hours|hr|hrs)\b/) ??
+    message.match(/(\d{1,3})\s*(分钟|分|小时|个小时)\s*后/u);
+
+  if (relativeMatch) {
+    const amount = Number(relativeMatch[1]);
+    const unit = relativeMatch[2];
+    if (Number.isFinite(amount) && amount > 0) {
+      const minutes = /hour|hr|小时/u.test(unit) ? amount * 60 : amount;
+      return addMinutes(new Date().toISOString(), minutes);
+    }
+  }
+
   const timeMatch = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?/);
   let hour = 10;
 
@@ -610,6 +629,17 @@ function extractJsonObject(content: string) {
   return trimmed.slice(firstBrace, lastBrace + 1);
 }
 
+function shouldNormalizeScheduleAsFollowUp(message: string) {
+  const hasCommunicationCue = /\b(call|callback|call back|phone|ring|follow[-\s]?up|follow up)\b|打电话|电话|回电|跟进|回访/i.test(
+    message
+  );
+  const hasAppointmentCue = /viewing|visit|showing|appointment|看房|预约看房|带看|参观|contract|sign|handover|签约|合同|交房/i.test(
+    message
+  );
+
+  return hasCommunicationCue && !hasAppointmentCue;
+}
+
 function normalizeAgentAction(action: AgentAction, message: string, context?: AgentRoutingContext): AgentAction {
   if (action.intent === "list_schedule_events") {
     const parsedPayload = scheduleEventListPayloadSchema.safeParse(action.payload);
@@ -626,14 +656,23 @@ function normalizeAgentAction(action: AgentAction, message: string, context?: Ag
     if (!parsedPayload.success) {
       return parseLocalScheduleEvent(message, context?.timeZone);
     }
+    const normalizedPayload = shouldNormalizeScheduleAsFollowUp(message)
+      ? {
+          ...parsedPayload.data,
+          event_category: "reminder" as const,
+          event_type: "follow_up" as const,
+          start_at: undefined,
+          end_at: undefined
+        }
+      : parsedPayload.data;
 
     return {
       ...action,
       requires_confirmation: true,
       payload: {
-        ...parsedPayload.data,
+        ...normalizedPayload,
         source_payload: {
-          ...(parsedPayload.data.source_payload ?? {}),
+          ...(normalizedPayload.source_payload ?? {}),
           original_message: message
         }
       }

@@ -2419,9 +2419,16 @@ function SchedulePreviewCard({
   const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const previewEvent = useMemo(() => formStateToEvent(form, timeZone), [form, timeZone]);
+  const hasScheduleTime = Boolean(previewEvent.start_at || previewEvent.reminder_at);
 
   async function handleConfirm() {
     if (isSaving) {
+      return;
+    }
+
+    if (!hasScheduleTime) {
+      setStatus("Please add a start or reminder time before saving.");
+      setIsEditing(true);
       return;
     }
 
@@ -2452,7 +2459,7 @@ function SchedulePreviewCard({
     <AgentOutputCard
       actions={
         <>
-          <button className="primary-button small" type="button" onClick={handleConfirm} disabled={isSaving}>
+          <button className="primary-button small" type="button" onClick={handleConfirm} disabled={isSaving || !hasScheduleTime}>
             <CheckCircle2 size={15} /> {isSaving ? "Adding..." : "Confirm schedule"}
           </button>
           <button className="outline-button small" type="button" onClick={() => setIsEditing(!isEditing)}>

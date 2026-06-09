@@ -13,7 +13,8 @@ import {
   Users,
   X
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { LeadListItem, LeadRecord } from "@/lib/leads/types";
 import type { LeadReplyDraft } from "@/lib/leads/reply-types";
@@ -26,6 +27,20 @@ type LeadListPanelProps = {
 type LeadReplyDraftWithLink = LeadReplyDraft & {
   whatsapp_url: string;
 };
+
+function LeadDetailPortal({ children }: { children: ReactNode }) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return null;
+  }
+
+  return createPortal(children, document.body);
+}
 
 function formatLeadAge(createdAt: string) {
   const minutes = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000));
@@ -105,6 +120,17 @@ export function LeadListPanel({ className = "", leads }: LeadListPanelProps) {
     () => localLeads.find((lead) => lead.id === selectedLeadId) ?? null,
     [localLeads, selectedLeadId]
   );
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setSelectedLeadId(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   function toggleLeadSelection(leadId: string) {
     setSelectedLeadIds((current) =>
@@ -286,7 +312,7 @@ export function LeadListPanel({ className = "", leads }: LeadListPanelProps) {
                   type="button"
                   onClick={() => setSelectedLeadId(lead.id)}
                 >
-                  View details
+                  Details
                 </button>
                 <button
                   className="outline-button small"
@@ -345,9 +371,10 @@ export function LeadListPanel({ className = "", leads }: LeadListPanelProps) {
       )}
 
       {selectedLead ? (
-        <div className="lead-detail-backdrop" role="presentation" onClick={() => setSelectedLeadId(null)}>
+        <LeadDetailPortal>
+        <div className="schedule-detail-backdrop" role="presentation" onClick={() => setSelectedLeadId(null)}>
           <aside
-            className="lead-detail-drawer"
+            className="schedule-detail-modal"
             aria-label="Lead details"
             onClick={(event) => event.stopPropagation()}
           >
@@ -450,6 +477,7 @@ export function LeadListPanel({ className = "", leads }: LeadListPanelProps) {
             </div>
           </aside>
         </div>
+        </LeadDetailPortal>
       ) : null}
 
       {status ? (

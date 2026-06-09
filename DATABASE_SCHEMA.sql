@@ -149,6 +149,8 @@ create table if not exists broker_events (
   start_at timestamptz,
   end_at timestamptz,
   reminder_at timestamptz,
+  in_app_reminded_at timestamptz,
+  in_app_reminder_dismissed_at timestamptz,
   recurrence_rule text,
   status text not null default 'scheduled' check (status in ('scheduled', 'completed', 'canceled', 'overdue')),
   lead_id uuid references leads(id) on delete set null,
@@ -201,6 +203,9 @@ create index if not exists campaign_links_listing_id_idx on campaign_links(listi
 create index if not exists click_events_campaign_link_id_idx on click_events(campaign_link_id);
 create index if not exists leads_broker_id_status_idx on leads(broker_id, status);
 create index if not exists broker_events_broker_time_idx on broker_events(broker_id, (coalesce(start_at, reminder_at)), status);
+create index if not exists broker_events_in_app_reminder_due_idx
+  on broker_events(broker_id, reminder_at, status)
+  where reminder_at is not null and in_app_reminded_at is null;
 create index if not exists broker_events_broker_category_idx on broker_events(broker_id, event_category, status);
 create index if not exists broker_events_lead_id_idx on broker_events(lead_id);
 create index if not exists broker_events_listing_id_idx on broker_events(listing_id);

@@ -2,6 +2,7 @@ import { BarChart3, CalendarClock, List, MessageCircle, Users } from "lucide-rea
 import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { ScheduleReminderToasts } from "@/components/schedule/ScheduleReminderToasts";
 import { AccountMenu } from "@/components/workspace/AccountMenu";
 import { SidebarAccount } from "@/components/workspace/SidebarAccount";
 
@@ -125,6 +126,7 @@ export function WorkspaceShell({
 
         <div className="workspace-content">{children}</div>
       </section>
+      <ScheduleReminderToasts />
     </main>
   );
 }

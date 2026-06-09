@@ -382,7 +382,7 @@ export function ListingDraftsPanel({ className = "", collapsed = false, listings
                     type="button"
                     onClick={() => router.push(`/?listing=${listing.id}&mode=edit`)}
                   >
-                    <Sparkles size={14} /> Edit with Agent
+                    <Sparkles size={14} /> AI Edit
                   </button>
                   <button className="outline-button small" type="button" onClick={() => startEditing(listing)}>
                     <Edit3 size={14} /> Edit

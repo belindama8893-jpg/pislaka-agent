@@ -40,7 +40,9 @@ export const brokerEventCreateSchema = brokerEventDraftInputSchema.extend({
 export const brokerEventUpdateSchema = brokerEventCreateSchema
   .partial()
   .extend({
-    id: z.string().uuid()
+    id: z.string().uuid(),
+    in_app_reminded_at: z.string().datetime().nullable().optional(),
+    in_app_reminder_dismissed_at: z.string().datetime().nullable().optional()
   })
   .refine((value) => Object.keys(value).some((key) => key !== "id"), {
     message: "At least one event field must be provided"
@@ -63,6 +65,8 @@ export type BrokerEventRecord = {
   start_at: string | null;
   end_at: string | null;
   reminder_at: string | null;
+  in_app_reminded_at: string | null;
+  in_app_reminder_dismissed_at: string | null;
   recurrence_rule: string | null;
   status: BrokerEventStatus;
   lead_id: string | null;

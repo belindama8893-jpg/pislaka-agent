@@ -680,6 +680,22 @@ a {
   font-size: 0.82rem;
 }
 
+.listing-row-actions .small,
+.lead-list-actions .small,
+.schedule-row-actions .small {
+  width: 128px;
+  min-height: 38px;
+  padding: 0 12px;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.listing-row-actions .small svg,
+.lead-list-actions .small svg,
+.schedule-row-actions .small svg {
+  flex: 0 0 auto;
+}
+
 .workspace-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2832,10 +2848,12 @@ a {
 }
 
 .listing-row-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr;
   gap: 8px;
+  justify-items: end;
   justify-content: flex-end;
+  width: 128px;
 }
 
 .promotion-pack {
@@ -3623,10 +3641,11 @@ a {
 }
 
 .lead-list-actions {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr;
   gap: 8px;
-  align-items: flex-end;
+  justify-items: end;
+  width: 128px;
 }
 
 .lead-reply-card {
@@ -3829,11 +3848,46 @@ a {
   min-width: 0;
 }
 
+.schedule-link-chip,
+.schedule-plain-chip {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 3px 8px;
+  color: var(--muted);
+  background: rgba(241, 245, 249, 0.82);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.76rem;
+  line-height: 1.2;
+}
+
+.schedule-link-chip {
+  color: var(--primary);
+  background: rgba(237, 248, 245, 0.82);
+  border-color: rgba(8, 127, 111, 0.18);
+  cursor: pointer;
+}
+
+.schedule-link-chip:hover {
+  background: rgba(215, 245, 238, 0.96);
+  border-color: rgba(8, 127, 111, 0.3);
+}
+
+.schedule-link-chip svg,
+.schedule-plain-chip svg {
+  flex: 0 0 auto;
+}
+
 .schedule-row-actions {
   display: flex;
   flex-direction: column;
   gap: 8px;
   align-items: flex-end;
+  width: 128px;
 }
 
 .schedule-edit-card {
@@ -3883,8 +3937,163 @@ a {
   gap: 10px;
 }
 
+.schedule-detail-media {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(247, 249, 251, 0.78);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+
+.schedule-detail-media .listing-media-thumb {
+  width: 58px;
+  height: 52px;
+}
+
+.schedule-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(4px);
+}
+
+.schedule-detail-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(640px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  padding: 20px;
+  overflow: auto;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.18);
+}
+
 .schedule-panel-status {
   margin-top: 12px;
+}
+
+.schedule-reminder-stack {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 80;
+  display: grid;
+  width: min(360px, calc(100vw - 28px));
+  gap: 10px;
+}
+
+.schedule-reminder-toast {
+  position: relative;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 30px;
+  gap: 12px;
+  padding: 14px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(25, 111, 126, 0.24);
+  border-radius: 8px;
+  box-shadow: 0 16px 42px rgba(22, 42, 58, 0.16);
+}
+
+.schedule-reminder-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  color: var(--primary);
+  background: rgba(25, 111, 126, 0.1);
+  border-radius: 8px;
+}
+
+.schedule-reminder-body {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.schedule-reminder-body span {
+  color: var(--primary);
+  font-size: 0.73rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.schedule-reminder-body strong {
+  overflow-wrap: anywhere;
+  font-size: 0.98rem;
+}
+
+.schedule-reminder-body time,
+.schedule-reminder-body p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.schedule-reminder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.schedule-reminder-actions a,
+.schedule-reminder-actions button,
+.schedule-reminder-close {
+  appearance: none;
+  border: 0;
+  font: inherit;
+}
+
+.schedule-reminder-actions a,
+.schedule-reminder-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.schedule-reminder-actions a {
+  color: #fff;
+  background: var(--primary);
+}
+
+.schedule-reminder-actions button {
+  color: var(--text);
+  background: rgba(236, 241, 244, 0.92);
+}
+
+.schedule-reminder-close {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  color: var(--muted);
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.schedule-reminder-close:hover {
+  color: var(--text);
+  background: rgba(236, 241, 244, 0.92);
 }
 
 .workspace-loading-panel {
@@ -4185,9 +4394,15 @@ a {
   }
 
   .schedule-row-actions {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    align-items: stretch;
+    justify-items: stretch;
+  }
+
+  .schedule-row-actions .small {
+    width: 100%;
   }
 
   .loading-filter-row,
@@ -5544,16 +5759,17 @@ a {
   }
 
   .listing-row-actions {
-    display: flex;
-    flex-wrap: nowrap;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     justify-content: flex-start;
+    width: 100%;
     padding-bottom: 2px;
-    overflow-x: auto;
+    overflow-x: visible;
   }
 
   .listing-row-actions .outline-button,
   .listing-row-actions .primary-button {
-    flex: 0 0 auto;
+    width: 100%;
     min-height: 34px;
     padding: 0 10px;
     font-size: 0.76rem;
@@ -5600,15 +5816,17 @@ a {
   }
 
   .lead-list-actions {
-    flex-direction: row;
-    flex-wrap: nowrap;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: stretch;
+    justify-items: stretch;
+    width: 100%;
     padding-bottom: 2px;
-    overflow-x: auto;
+    overflow-x: visible;
   }
 
   .lead-list-actions .outline-button {
-    flex: 0 0 auto;
+    width: 100%;
     min-height: 34px;
     padding: 0 10px;
     font-size: 0.76rem;

@@ -10,7 +10,11 @@ import {
 import { brokerEventSelect } from "@/lib/events/queries";
 
 function isMissingBrokerEventsTable(error: { message?: string; code?: string } | null) {
-  return error?.code === "42P01" || /broker_events/i.test(error?.message ?? "");
+  return (
+    error?.code === "42P01" ||
+    error?.code === "42703" ||
+    /broker_events|in_app_reminded_at|in_app_reminder_dismissed_at|schema cache/i.test(error?.message ?? "")
+  );
 }
 
 export async function GET(request: Request) {

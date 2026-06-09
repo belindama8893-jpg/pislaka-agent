@@ -6,12 +6,19 @@ import {
   Clock,
   Edit3,
   Filter,
+  Home,
+  ImageIcon,
   MapPin,
+  MessageCircle,
+  Phone,
   Search,
   UserRound,
+  Video,
+  X,
   XCircle
 } from "lucide-react";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { BrokerEventRecord } from "@/lib/events/types";
 import {
@@ -21,9 +28,13 @@ import {
   getResolvedTimeZone,
   toBrokerDatetimeLocal
 } from "@/lib/events/time";
+import type { LeadListItem } from "@/lib/leads/types";
+import type { ListingRecord } from "@/lib/listings/types";
 
 type SchedulePanelProps = {
   events: BrokerEventRecord[];
+  leads?: LeadListItem[];
+  listings?: ListingRecord[];
   className?: string;
   migrationRequired?: boolean;
 };
@@ -42,6 +53,20 @@ type EventEditState = {
   location_text: string;
   status: BrokerEventRecord["status"];
 };
+
+function ScheduleDetailPortal({ children }: { children: ReactNode }) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return null;
+  }
+
+  return createPortal(children, document.body);
+}
 
 const eventTypeOptions: Array<{ value: BrokerEventRecord["event_type"] | "all"; label: string }> = [
   { value: "all", label: "All types" },
@@ -137,7 +162,81 @@ function eventSearchText(event: BrokerEventRecord) {
     .toLowerCase();
 }
 
-export function SchedulePanel({ className = "", events, migrationRequired = false }: SchedulePanelProps) {
+function formatListingPrice(listing: ListingRecord) {
+  if (!listing.price_amount) {
+    return "Price not set";
+  }
+
+  const crore = listing.price_amount / 10000000;
+  if (crore >= 1) {
+    return `${listing.price_currency ?? "PKR"} ${crore.toFixed(crore % 1 === 0 ? 0 : 1)} Crore`;
+  }
+
+  return `${listing.price_currency ?? "PKR"} ${listing.price_amount.toLocaleString("en-PK")}`;
+}
+
+function getListingLocation(listing: ListingRecord) {
+  return [listing.location_area, listing.city].filter(Boolean).join(", ") || "Location not set";
+}
+
+function getLeadInterest(lead: LeadListItem) {
+  const listing = [lead.listing_title, lead.listing_area, lead.listing_city].filter(Boolean).join(", ");
+  const channel = lead.campaign_channel ?? lead.source_channel;
+
+  return [listing || "Listing not set", channel ? `via ${channel}` : null].filter(Boolean).join(" · ");
+}
+
+function normalizeLookupText(value: string | null | undefined) {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function getListingMatchForEvent(
+  event: BrokerEventRecord,
+  listings: ListingRecord[],
+  listingById: Map<string, ListingRecord>
+) {
+  if (event.listing_id) {
+    return listingById.get(event.listing_id);
+  }
+
+  const reference = normalizeLookupText(event.listing_reference);
+  if (!reference) {
+    return undefined;
+  }
+
+  const referenceTokens = new Set(reference.split(" ").filter((token) => token.length > 1));
+  const matches = listings.filter((listing) => {
+    const listingText = normalizeLookupText(
+      [listing.title, listing.location_area, listing.city, listing.property_type, listing.listing_type].filter(Boolean).join(" ")
+    );
+
+    if (!listingText) {
+      return false;
+    }
+
+    const listingTitle = normalizeLookupText(listing.title);
+    if (listingText.includes(reference) || (listingTitle && reference.includes(listingTitle))) {
+      return true;
+    }
+
+    const listingTokens = new Set(listingText.split(" ").filter((token) => token.length > 1));
+    const sharedTokenCount = [...referenceTokens].filter((token) => listingTokens.has(token)).length;
+    return sharedTokenCount >= 2 && Boolean(listing.location_area && reference.includes(normalizeLookupText(listing.location_area)));
+  });
+
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+export function SchedulePanel({
+  className = "",
+  events,
+  leads = [],
+  listings = [],
+  migrationRequired = false
+}: SchedulePanelProps) {
   const router = useRouter();
   const [userTimeZone, setUserTimeZone] = useState(() => getResolvedTimeZone());
   const [localEvents, setLocalEvents] = useState(events);
@@ -149,9 +248,28 @@ export function SchedulePanel({ className = "", events, migrationRequired = fals
   const [statusFilter, setStatusFilter] = useState<BrokerEventRecord["status"] | "all">("scheduled");
   const [typeFilter, setTypeFilter] = useState<BrokerEventRecord["event_type"] | "all">("all");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
+
+  const leadById = useMemo(() => new Map(leads.map((lead) => [lead.id, lead])), [leads]);
+  const listingById = useMemo(() => new Map(listings.map((listing) => [listing.id, listing])), [listings]);
+  const selectedLead = selectedLeadId ? leadById.get(selectedLeadId) ?? null : null;
+  const selectedListing = selectedListingId ? listingById.get(selectedListingId) ?? null : null;
 
   useEffect(() => {
     setUserTimeZone(getResolvedTimeZone());
+  }, []);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setSelectedLeadId(null);
+        setSelectedListingId(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   const filteredEvents = useMemo(() => {
@@ -450,61 +568,255 @@ export function SchedulePanel({ className = "", events, migrationRequired = fals
               </form>
             ) : (
               <article className={`schedule-row ${scheduleEvent.status}`} key={scheduleEvent.id}>
-                <time dateTime={getEventTime(scheduleEvent)}>
-                  <Clock size={14} /> {formatShortTime(scheduleEvent.start_at ?? scheduleEvent.reminder_at, userTimeZone)}
-                </time>
-                <div className="schedule-row-main">
-                  <div className="schedule-row-header">
-                    <strong>{scheduleEvent.title}</strong>
-                    <span className={`schedule-status ${scheduleEvent.status}`}>{scheduleEvent.status}</span>
-                  </div>
-                  <p>{scheduleEvent.description || "No notes yet."}</p>
-                  <div className="schedule-row-meta">
-                    <span>{scheduleEvent.event_type.replace(/_/g, " ")}</span>
-                    {scheduleEvent.lead_name ? (
-                      <span>
-                        <UserRound size={13} /> {scheduleEvent.lead_name}
-                      </span>
-                    ) : null}
-                    {scheduleEvent.listing_reference ? <span>{scheduleEvent.listing_reference}</span> : null}
-                    {scheduleEvent.location_text ? (
-                      <span>
-                        <MapPin size={13} /> {scheduleEvent.location_text}
-                      </span>
-                    ) : null}
-                    {scheduleEvent.reminder_at ? <span>Reminder {formatEventTime(scheduleEvent.reminder_at, userTimeZone)}</span> : null}
-                  </div>
-                </div>
-                <div className="schedule-row-actions">
-                  <button className="outline-button small" type="button" onClick={() => startEditing(scheduleEvent)}>
-                    <Edit3 size={14} /> Edit
-                  </button>
-                  {scheduleEvent.status === "scheduled" ? (
+                {(() => {
+                  const linkedLead = scheduleEvent.lead_id ? leadById.get(scheduleEvent.lead_id) : undefined;
+                  const linkedListing = getListingMatchForEvent(scheduleEvent, listings, listingById);
+
+                  return (
                     <>
-                      <button
-                        className="outline-button small"
-                        type="button"
-                        disabled={updatingId === scheduleEvent.id}
-                        onClick={() => void patchEvent(scheduleEvent.id, { status: "completed" }, "Marking complete...")}
-                      >
-                        <CheckCircle2 size={14} /> Done
-                      </button>
-                      <button
-                        className="outline-button small"
-                        type="button"
-                        disabled={updatingId === scheduleEvent.id}
-                        onClick={() => void patchEvent(scheduleEvent.id, { status: "canceled" }, "Canceling event...")}
-                      >
-                        <XCircle size={14} /> Cancel
-                      </button>
+                      <time dateTime={getEventTime(scheduleEvent)}>
+                        <Clock size={14} /> {formatShortTime(scheduleEvent.start_at ?? scheduleEvent.reminder_at, userTimeZone)}
+                      </time>
+                      <div className="schedule-row-main">
+                        <div className="schedule-row-header">
+                          <strong>{scheduleEvent.title}</strong>
+                          <span className={`schedule-status ${scheduleEvent.status}`}>{scheduleEvent.status}</span>
+                        </div>
+                        <p>{scheduleEvent.description || "No notes yet."}</p>
+                        <div className="schedule-row-meta">
+                          <span>{scheduleEvent.event_type.replace(/_/g, " ")}</span>
+                          {linkedLead ? (
+                            <button className="schedule-link-chip" type="button" onClick={() => setSelectedLeadId(linkedLead.id)}>
+                              <UserRound size={13} /> {linkedLead.full_name || linkedLead.phone || scheduleEvent.lead_name || "Lead"}
+                            </button>
+                          ) : scheduleEvent.lead_name ? (
+                            <span className="schedule-plain-chip">
+                              <UserRound size={13} /> {scheduleEvent.lead_name}
+                            </span>
+                          ) : null}
+                          {linkedListing ? (
+                            <button
+                              className="schedule-link-chip"
+                              type="button"
+                              onClick={() => setSelectedListingId(linkedListing.id)}
+                            >
+                              <Home size={13} /> {linkedListing.title || scheduleEvent.listing_reference || "Listing"}
+                            </button>
+                          ) : scheduleEvent.listing_reference ? (
+                            <span className="schedule-plain-chip">
+                              <Home size={13} /> {scheduleEvent.listing_reference}
+                            </span>
+                          ) : null}
+                          {scheduleEvent.location_text ? (
+                            <span>
+                              <MapPin size={13} /> {scheduleEvent.location_text}
+                            </span>
+                          ) : null}
+                          {scheduleEvent.reminder_at ? (
+                            <span>Reminder {formatEventTime(scheduleEvent.reminder_at, userTimeZone)}</span>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="schedule-row-actions">
+                        <button className="outline-button small" type="button" onClick={() => startEditing(scheduleEvent)}>
+                          <Edit3 size={14} /> Edit
+                        </button>
+                        {scheduleEvent.status === "scheduled" ? (
+                          <>
+                            <button
+                              className="outline-button small"
+                              type="button"
+                              disabled={updatingId === scheduleEvent.id}
+                              onClick={() => void patchEvent(scheduleEvent.id, { status: "completed" }, "Marking complete...")}
+                            >
+                              <CheckCircle2 size={14} /> Done
+                            </button>
+                            <button
+                              className="outline-button small"
+                              type="button"
+                              disabled={updatingId === scheduleEvent.id}
+                              onClick={() => void patchEvent(scheduleEvent.id, { status: "canceled" }, "Canceling event...")}
+                            >
+                              <XCircle size={14} /> Cancel
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
                     </>
-                  ) : null}
-                </div>
+                  );
+                })()}
               </article>
             )
           )}
         </div>
       )}
+
+      {selectedLead ? (
+        <ScheduleDetailPortal>
+          <div className="schedule-detail-backdrop" role="presentation" onClick={() => setSelectedLeadId(null)}>
+            <aside className="schedule-detail-modal" aria-label="Lead details" onClick={(event) => event.stopPropagation()}>
+            <div className="lead-detail-header">
+              <div>
+                <span>Lead details</span>
+                <h3>{selectedLead.full_name || "Unnamed buyer"}</h3>
+              </div>
+              <button
+                aria-label="Close lead details"
+                className="icon-button compact"
+                type="button"
+                onClick={() => setSelectedLeadId(null)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="lead-detail-section">
+              <strong>Summary</strong>
+              <p>{selectedLead.ai_summary || selectedLead.message || "No summary yet."}</p>
+            </div>
+
+            <div className="lead-detail-grid">
+              <div>
+                <span>Phone</span>
+                <strong>{selectedLead.phone || "Not provided"}</strong>
+              </div>
+              <div>
+                <span>Email</span>
+                <strong>{selectedLead.email || "Not provided"}</strong>
+              </div>
+              <div>
+                <span>Status</span>
+                <strong>{selectedLead.status}</strong>
+              </div>
+              <div>
+                <span>Channel</span>
+                <strong>{selectedLead.campaign_channel ?? selectedLead.source_channel ?? "Unknown"}</strong>
+              </div>
+              <div>
+                <span>Interest</span>
+                <strong>{getLeadInterest(selectedLead)}</strong>
+              </div>
+              <div>
+                <span>Created</span>
+                <strong>{formatBrokerDateTime(selectedLead.created_at, userTimeZone)}</strong>
+              </div>
+            </div>
+
+            <div className="lead-detail-section">
+              <strong>Original message</strong>
+              <pre>{selectedLead.message || "No message provided."}</pre>
+            </div>
+
+            <div className="lead-detail-actions">
+              <button className="primary-button small" type="button" onClick={() => router.push(`/?lead=${selectedLead.id}`)}>
+                <MessageCircle size={14} /> Ask Agent
+              </button>
+              {selectedLead.phone ? (
+                <a className="outline-button small" href={`tel:${selectedLead.phone}`}>
+                  <Phone size={14} /> Call
+                </a>
+              ) : null}
+            </div>
+            </aside>
+          </div>
+        </ScheduleDetailPortal>
+      ) : null}
+
+      {selectedListing ? (
+        <ScheduleDetailPortal>
+          <div className="schedule-detail-backdrop" role="presentation" onClick={() => setSelectedListingId(null)}>
+            <aside className="schedule-detail-modal" aria-label="Listing details" onClick={(event) => event.stopPropagation()}>
+            <div className="lead-detail-header">
+              <div>
+                <span>Listing details</span>
+                <h3>{selectedListing.title || "Untitled listing"}</h3>
+              </div>
+              <button
+                aria-label="Close listing details"
+                className="icon-button compact"
+                type="button"
+                onClick={() => setSelectedListingId(null)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="lead-detail-section">
+              <strong>Description</strong>
+              <p>{selectedListing.description || "No description yet."}</p>
+            </div>
+
+            {selectedListing.media?.length ? (
+              <div className="schedule-detail-media" aria-label="Listing media">
+                {selectedListing.media.slice(0, 6).map((media) => (
+                  <div className="listing-media-thumb" key={media.id}>
+                    {media.signed_url && media.media_type === "image" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img alt="" src={media.signed_url} />
+                    ) : media.signed_url && media.media_type === "video" ? (
+                      <video muted playsInline preload="metadata" src={media.signed_url} />
+                    ) : media.media_type === "video" ? (
+                      <Video size={16} />
+                    ) : (
+                      <ImageIcon size={16} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="lead-detail-grid">
+              <div>
+                <span>Price</span>
+                <strong>{formatListingPrice(selectedListing)}</strong>
+              </div>
+              <div>
+                <span>Status</span>
+                <strong>{selectedListing.status}</strong>
+              </div>
+              <div>
+                <span>Location</span>
+                <strong>{getListingLocation(selectedListing)}</strong>
+              </div>
+              <div>
+                <span>Type</span>
+                <strong>{[selectedListing.property_type, selectedListing.listing_type].filter(Boolean).join(" · ") || "Not set"}</strong>
+              </div>
+              <div>
+                <span>Area</span>
+                <strong>
+                  {selectedListing.area_value
+                    ? `${selectedListing.area_value} ${selectedListing.area_unit ?? ""}`.trim()
+                    : "Not set"}
+                </strong>
+              </div>
+              <div>
+                <span>Beds / Baths</span>
+                <strong>
+                  {selectedListing.bedrooms ?? "-"} beds · {selectedListing.bathrooms ?? "-"} baths
+                </strong>
+              </div>
+            </div>
+
+            {selectedListing.features?.length ? (
+              <div className="lead-detail-section">
+                <strong>Features</strong>
+                <p>{selectedListing.features.join(", ")}</p>
+              </div>
+            ) : null}
+
+            <div className="lead-detail-actions">
+              <button className="primary-button small" type="button" onClick={() => router.push(`/?listing=${selectedListing.id}`)}>
+                <MessageCircle size={14} /> Ask Agent
+              </button>
+              <button className="outline-button small" type="button" onClick={() => router.push(`/listings#listing-${selectedListing.id}`)}>
+                <Home size={14} /> Open Listing
+              </button>
+            </div>
+            </aside>
+          </div>
+        </ScheduleDetailPortal>
+      ) : null}
 
       {status ? <p className="agent-draft-status schedule-panel-status">{status}</p> : null}
     </section>
