@@ -353,13 +353,15 @@ function parseLocalListingUpdate(message: string): AgentAction {
   const lakhMatches = Array.from(lower.matchAll(/(\d+(?:\.\d+)?)\s*lakh/g));
   const croreMatch = croreMatches.at(-1);
   const lakhMatch = lakhMatches.at(-1);
-  const areaChangeMatch = lower.match(/(?:area|size|面积)[^,.，。]*(\d+(?:\.\d+)?)\s*(kanal|marla|sqft|sqm)/);
+  const areaChangeMatch =
+    lower.match(/(?:area|size|面积)[^,.，。]*(\d+(?:\.\d+)?)\s*(kanal|marla|sqft|sqm)/) ??
+    lower.match(/(?:to|make|set|change|update|adjust|改成|改为|改到|换成|设为|设成|成|为)\s*(\d+(?:\.\d+)?)\s*(kanal|marla|sqft|sqm)/);
   const bedChangeMatch =
-    lower.match(/(?:bed|beds|bedroom|bedrooms|卧室)[^,.，。]*(?:to|=|改成|成|为)\s*(\d+)/) ??
-    lower.match(/(?:to|make|set|改成|成|为)\s*(\d+)\s*(?:bed|beds|bedroom|bedrooms|卧室)/);
+    lower.match(/(?:bed|beds|bedroom|bedrooms|卧室)[^,.，。]*(?:to|=|改成|改为|设为|设成|成|为)\s*(\d+)/) ??
+    lower.match(/(?:to|make|set|改成|改为|设为|设成|成|为)\s*(\d+)\s*(?:bed|beds|bedroom|bedrooms|卧室)/);
   const bathChangeMatch =
-    lower.match(/(?:bath|baths|bathroom|bathrooms|卫生间)[^,.，。]*(?:to|=|改成|成|为)\s*(\d+)/) ??
-    lower.match(/(?:to|make|set|改成|成|为)\s*(\d+)\s*(?:bath|baths|bathroom|bathrooms|卫生间)/);
+    lower.match(/(?:bath|baths|bathroom|bathrooms|卫生间)[^,.，。]*(?:to|=|改成|改为|设为|设成|成|为)\s*(\d+)/) ??
+    lower.match(/(?:to|make|set|改成|改为|设为|设成|成|为)\s*(\d+)\s*(?:bath|baths|bathroom|bathrooms|卫生间)/);
   const payload: Record<string, unknown> = {
     query: message
   };

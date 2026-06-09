@@ -103,15 +103,16 @@ export function isPromotionRequest(message: string) {
 }
 
 export function isListingUpdateRequest(message: string) {
-  const hasUpdateVerb = /\b(change|update|edit|modify|revise|set|make|correct|adjust)\b|修改|更改|改成|调整|编辑/iu.test(
-    message
-  );
+  const hasUpdateVerb =
+    /\b(change|update|edit|modify|revise|set|make|correct|adjust)\b|修改|更改|改成|改为|改到|换成|设为|设成|调整|编辑/iu.test(
+      message
+    );
   const hasListingTarget =
     /\b(this|current|latest|listing|property|house|home|villa|apartment|flat|penthouse|plot|shop|commercial)\b|这套|这个|刚才|房源|房子|公寓|地皮|商铺/iu.test(
       message
     );
   const hasListingField =
-    /\b(price|title|description|city|area|location|type|sale|rent|bed|beds|bedroom|bedrooms|bath|baths|bathroom|bathrooms|feature|features|status)\b|价格|标题|描述|城市|区域|面积|卧室|卫生间|状态|卖|租/iu.test(
+    /\b(price|title|description|city|area|location|type|sale|rent|bed|beds|bedroom|bedrooms|bath|baths|bathroom|bathrooms|feature|features|status)\b|\b\d+(?:\.\d+)?\s*(?:kanal|marla|sqft|sqm)\b|价格|标题|描述|城市|区域|面积|卧室|卫生间|状态|卖|租/iu.test(
       message
     );
 

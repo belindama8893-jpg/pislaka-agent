@@ -375,6 +375,17 @@ type PendingMedia = {
   mediaType: "image" | "video";
 };
 
+type FailedMediaUpload = {
+  id: string;
+  name: string;
+  error: string;
+};
+
+type ListingMediaUploadResult = {
+  uploadedMedia: ListingMediaRecord[];
+  failedMedia: FailedMediaUpload[];
+};
+
 type PendingFileAttachment = {
   id: string;
   file: File;
@@ -817,31 +828,51 @@ function getListingValue(listing: RecentListingSummary, field: keyof ListingUpda
   return listing[field as keyof RecentListingSummary];
 }
 
-async function uploadListingMedia(listingId: string, media: PendingMedia[]) {
+async function uploadListingMedia(listingId: string, media: PendingMedia[]): Promise<ListingMediaUploadResult> {
   const uploadedMedia: ListingMediaRecord[] = [];
+  const failedMedia: FailedMediaUpload[] = [];
 
   for (const item of media) {
     const formData = new FormData();
     formData.append("listing_id", listingId);
     formData.append("file", item.file);
 
-    const response = await fetch("/api/listings/media", {
-      method: "POST",
-      body: formData
-    });
+    try {
+      const response = await fetch("/api/listings/media", {
+        method: "POST",
+        body: formData
+      });
 
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(payload?.error ?? `Unable to upload ${item.file.name}`);
-    }
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        failedMedia.push({
+          id: item.id,
+          name: item.file.name,
+          error: payload?.error ?? "Unable to upload media"
+        });
+        continue;
+      }
 
-    const payload = (await response.json()) as { media?: ListingMediaRecord };
-    if (payload.media) {
-      uploadedMedia.push(payload.media);
+      const payload = (await response.json()) as { media?: ListingMediaRecord };
+      if (payload.media) {
+        uploadedMedia.push(payload.media);
+      } else {
+        failedMedia.push({
+          id: item.id,
+          name: item.file.name,
+          error: "Upload response did not include saved media"
+        });
+      }
+    } catch (error) {
+      failedMedia.push({
+        id: item.id,
+        name: item.file.name,
+        error: error instanceof Error ? error.message : "Network error while uploading media"
+      });
     }
   }
 
-  return uploadedMedia;
+  return { uploadedMedia, failedMedia };
 }
 
 function normalizeListingText(value: string) {
@@ -1941,17 +1972,23 @@ function DraftPreviewCard({
   onAttachMedia: () => void;
   onRemoveMedia: (mediaId: string) => void;
   pendingMedia: PendingMedia[];
-  onSaved: (uploadedCount: number, listingId: string, mediaPreview: ListingSavedMediaPreview[]) => void;
+  onSaved: (
+    uploadedCount: number,
+    listingId: string,
+    mediaPreview: ListingSavedMediaPreview[],
+    failedMedia: FailedMediaUpload[]
+  ) => void;
 }) {
   const router = useRouter();
   const [form, setForm] = useState(() => draftToFormState(draft));
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const previewDraft = useMemo(() => formStateToDraft(form), [form]);
 
   async function handleConfirm() {
-    if (isSaving) {
+    if (isSaving || isSaved) {
       return;
     }
 
@@ -1983,13 +2020,18 @@ function DraftPreviewCard({
     }
 
     try {
-      const uploadedMedia = await uploadListingMedia(listingId, pendingMedia);
+      const { uploadedMedia, failedMedia } = await uploadListingMedia(listingId, pendingMedia);
       const uploadedCount = uploadedMedia.length;
+      const failedCount = failedMedia.length;
+      const failedNames = failedMedia.slice(0, 3).map((item) => item.name).join(", ");
       setStatus(
-        uploadedCount
-          ? `Added to listing library with ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}.`
-          : "Added to listing library."
+        failedCount
+          ? `Listing saved. ${uploadedCount} media uploaded; ${failedCount} failed${failedNames ? `: ${failedNames}` : ""}.`
+          : uploadedCount
+            ? `Added to listing library with ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}.`
+            : "Added to listing library."
       );
+      setIsSaved(true);
       onSaved(
         uploadedCount,
         listingId,
@@ -1998,11 +2040,13 @@ function DraftPreviewCard({
           name: `Uploaded media ${index + 1}`,
           previewUrl: item.signed_url ?? "",
           mediaType: item.media_type
-        }))
+        })),
+        failedMedia
       );
       router.refresh();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Listing saved, but media upload failed.");
+      setIsSaved(true);
       router.refresh();
     } finally {
       setIsSaving(false);
@@ -2013,8 +2057,8 @@ function DraftPreviewCard({
     <AgentOutputCard
       actions={
         <>
-          <button className="primary-button small" type="button" onClick={handleConfirm} disabled={isSaving}>
-            <CheckCircle2 size={15} /> {isSaving ? "Adding..." : "Confirm & add"}
+          <button className="primary-button small" type="button" onClick={handleConfirm} disabled={isSaving || isSaved}>
+            <CheckCircle2 size={15} /> {isSaved ? "Saved" : isSaving ? "Adding..." : "Confirm & add"}
           </button>
           <button className="outline-button small" type="button" onClick={() => setIsEditing(!isEditing)}>
             <Pencil size={14} /> {isEditing ? "Preview" : "Edit card"}
@@ -4379,13 +4423,17 @@ export function AgentWorkspace({
                     onAttachMedia={() => openDraftMediaPicker(message.id)}
                     onRemoveMedia={(mediaId) => removeDraftMedia(message.id, mediaId)}
                     pendingMedia={draftMediaByMessageId[message.id] ?? []}
-                    onSaved={(uploadedCount, listingId, mediaPreview) => {
+                    onSaved={(uploadedCount, listingId, mediaPreview, failedMedia) => {
                       const location = [message.draft?.location_area, message.draft?.city].filter(Boolean).join(", ");
+                      const failedCount = failedMedia.length;
+                      const failedNames = failedMedia.slice(0, 3).map((item) => item.name).join(", ");
                       setActiveListingId(listingId);
                       appendAssistantMessage({
-                        content: uploadedCount
-                          ? `Done. I added it to your listing library with ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}.`
-                          : "Done. I added it to your listing library.",
+                        content: failedCount
+                          ? `Done. I saved the listing and uploaded ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}. ${failedCount} media file${failedCount === 1 ? "" : "s"} failed${failedNames ? `: ${failedNames}` : ""}.`
+                          : uploadedCount
+                            ? `Done. I added it to your listing library with ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}.`
+                            : "Done. I added it to your listing library.",
                         listingSaved: {
                           listingId,
                           title: message.draft?.title ?? null,
