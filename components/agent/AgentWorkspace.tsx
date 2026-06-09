@@ -4086,6 +4086,7 @@ export function AgentWorkspace({
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 25000);
+    let receivedAgentResponse = false;
 
     try {
       const response = await fetch("/api/agent/message", {
@@ -4117,6 +4118,14 @@ export function AgentWorkspace({
         action: AgentAction;
         conversationId?: string;
       };
+      if (!payload?.action?.intent) {
+        appendAssistantMessage({
+          content: "I received a response from the agent service, but it was missing the action details. Please try again."
+        });
+        return;
+      }
+
+      receivedAgentResponse = true;
       if (payload.conversationId) {
         setConversationId(payload.conversationId);
       }
@@ -4223,9 +4232,12 @@ export function AgentWorkspace({
         draft,
         scheduleEvent
       });
-    } catch {
+    } catch (error) {
+      console.error("Agent message handling failed", error);
       appendAssistantMessage({
-        content: "I could not reach the agent service. Please try again in a moment."
+        content: receivedAgentResponse
+          ? "I received the agent response, but could not show it in the chat. Please try again."
+          : "I could not reach the agent service. Please try again in a moment."
       });
     } finally {
       clearTimeout(timeout);

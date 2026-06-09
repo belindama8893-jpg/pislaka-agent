@@ -421,15 +421,16 @@ function parseLocalGeneralReply(message: string): AgentAction {
 
 function extractScheduleTime(message: string, timeZone?: string | null) {
   const lower = message.toLowerCase();
-  const timeMatch = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+  const timeMatch = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?/);
   let hour = 10;
 
   if (timeMatch) {
     hour = Number(timeMatch[1]);
-    if (timeMatch[3] === "pm" && hour < 12) {
+    const meridiem = timeMatch[3]?.replace(/\./g, "");
+    if (meridiem === "pm" && hour < 12) {
       hour += 12;
     }
-    if (timeMatch[3] === "am" && hour === 12) {
+    if (meridiem === "am" && hour === 12) {
       hour = 0;
     }
   } else if (/afternoon|下午/i.test(message)) {
