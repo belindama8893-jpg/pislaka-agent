@@ -79,6 +79,7 @@ export function AgentComposer({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const attachWrapRef = useRef<HTMLDivElement | null>(null);
   const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -120,6 +121,13 @@ export function AgentComposer({
   }, [isAttachMenuOpen]);
 
   function handleTextareaKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    const nativeEvent = event.nativeEvent as KeyboardEvent["nativeEvent"] & {
+      isComposing?: boolean;
+    };
+    if (isComposing || nativeEvent.isComposing || event.key === "Process") {
+      return;
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
@@ -245,6 +253,8 @@ export function AgentComposer({
             rows={1}
             value={value}
             onChange={(event) => onChange(event.target.value)}
+            onCompositionEnd={() => setIsComposing(false)}
+            onCompositionStart={() => setIsComposing(true)}
             onKeyDown={handleTextareaKeyDown}
           />
         )}
