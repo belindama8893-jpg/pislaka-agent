@@ -1465,10 +1465,41 @@ a {
   object-fit: cover;
 }
 
+.agent-media-thumb.uploading img,
+.agent-media-thumb.uploading video,
+.agent-media-thumb.uploaded img,
+.agent-media-thumb.uploaded video,
+.agent-media-thumb.failed img,
+.agent-media-thumb.failed video {
+  filter: brightness(0.72);
+}
+
+.agent-media-upload-state {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  background: rgba(15, 23, 42, 0.28);
+}
+
+.agent-media-thumb.uploaded .agent-media-upload-state {
+  color: #5eead4;
+  background: rgba(15, 118, 110, 0.34);
+}
+
+.agent-media-thumb.failed .agent-media-upload-state {
+  color: #fecaca;
+  background: rgba(153, 27, 27, 0.42);
+}
+
 .agent-media-remove {
   position: absolute;
   top: 4px;
   right: 4px;
+  z-index: 3;
   display: inline-flex;
   align-items: center;
   justify-content: center;

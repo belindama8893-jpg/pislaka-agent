@@ -10,6 +10,7 @@ import {
   House,
   ImageIcon,
   ImagePlus,
+  LoaderCircle,
   Megaphone,
   MessageCircle,
   Phone,
@@ -23,6 +24,7 @@ import { AgentComposer, type AgentComposerContextPreview } from "@/components/ag
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
 import { useRouter } from "next/navigation";
 import type { AgentChatMessageRecord } from "@/lib/agent/conversations";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { BrokerEventDraftInput, BrokerEventRecord } from "@/lib/events/types";
 import {
   formatBrokerDateTime,
@@ -380,6 +382,8 @@ type FailedMediaUpload = {
   name: string;
   error: string;
 };
+
+type PendingMediaUploadStatus = "pending" | "uploading" | "uploaded" | "failed";
 
 type ListingMediaUploadResult = {
   uploadedMedia: ListingMediaRecord[];
@@ -828,40 +832,114 @@ function getListingValue(listing: RecentListingSummary, field: keyof ListingUpda
   return listing[field as keyof RecentListingSummary];
 }
 
-async function uploadListingMedia(listingId: string, media: PendingMedia[]): Promise<ListingMediaUploadResult> {
+async function uploadListingMedia(
+  listingId: string,
+  media: PendingMedia[],
+  onStatusChange?: (mediaId: string, status: PendingMediaUploadStatus) => void
+): Promise<ListingMediaUploadResult> {
+  const supabase = createSupabaseBrowserClient();
   const uploadedMedia: ListingMediaRecord[] = [];
   const failedMedia: FailedMediaUpload[] = [];
 
   for (const item of media) {
-    const formData = new FormData();
-    formData.append("listing_id", listingId);
-    formData.append("file", item.file);
+    onStatusChange?.(item.id, "uploading");
 
     try {
-      const response = await fetch("/api/listings/media", {
+      const prepareResponse = await fetch("/api/listings/media", {
         method: "POST",
-        body: formData
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "prepare-upload",
+          content_type: item.file.type,
+          file_name: item.file.name,
+          file_size: item.file.size,
+          listing_id: listingId
+        })
       });
 
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!prepareResponse.ok) {
+        const payload = (await prepareResponse.json().catch(() => null)) as { error?: string } | null;
         failedMedia.push({
           id: item.id,
           name: item.file.name,
-          error: payload?.error ?? "Unable to upload media"
+          error: payload?.error ?? "Unable to prepare media upload"
         });
+        onStatusChange?.(item.id, "failed");
         continue;
       }
 
-      const payload = (await response.json()) as { media?: ListingMediaRecord };
+      const uploadPayload = (await prepareResponse.json()) as {
+        bucket?: string;
+        media_type?: "image" | "video";
+        storage_path?: string;
+        token?: string;
+      };
+
+      if (!uploadPayload.storage_path || !uploadPayload.token || !uploadPayload.media_type) {
+        failedMedia.push({
+          id: item.id,
+          name: item.file.name,
+          error: "Upload response did not include a signed upload URL"
+        });
+        onStatusChange?.(item.id, "failed");
+        continue;
+      }
+
+      const { error: uploadError } = await supabase.storage
+        .from(uploadPayload.bucket ?? "listing-media")
+        .uploadToSignedUrl(uploadPayload.storage_path, uploadPayload.token, item.file, {
+          contentType: item.file.type
+        });
+
+      if (uploadError) {
+        failedMedia.push({
+          id: item.id,
+          name: item.file.name,
+          error: uploadError.message
+        });
+        onStatusChange?.(item.id, "failed");
+        continue;
+      }
+
+      const completeResponse = await fetch("/api/listings/media", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "complete-upload",
+          content_type: item.file.type,
+          file_size: item.file.size,
+          listing_id: listingId,
+          media_type: uploadPayload.media_type,
+          storage_path: uploadPayload.storage_path
+        })
+      });
+
+      if (!completeResponse.ok) {
+        const payload = (await completeResponse.json().catch(() => null)) as { error?: string } | null;
+        failedMedia.push({
+          id: item.id,
+          name: item.file.name,
+          error: payload?.error ?? "Unable to save uploaded media"
+        });
+        onStatusChange?.(item.id, "failed");
+        continue;
+      }
+
+      const payload = (await completeResponse.json()) as { media?: ListingMediaRecord };
       if (payload.media) {
         uploadedMedia.push(payload.media);
+        onStatusChange?.(item.id, "uploaded");
       } else {
         failedMedia.push({
           id: item.id,
           name: item.file.name,
           error: "Upload response did not include saved media"
         });
+        onStatusChange?.(item.id, "failed");
       }
     } catch (error) {
       failedMedia.push({
@@ -869,6 +947,7 @@ async function uploadListingMedia(listingId: string, media: PendingMedia[]): Pro
         name: item.file.name,
         error: error instanceof Error ? error.message : "Network error while uploading media"
       });
+      onStatusChange?.(item.id, "failed");
     }
   }
 
@@ -1984,6 +2063,7 @@ function DraftPreviewCard({
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [mediaUploadStatus, setMediaUploadStatus] = useState<Record<string, PendingMediaUploadStatus>>({});
   const [status, setStatus] = useState<string | null>(null);
   const previewDraft = useMemo(() => formStateToDraft(form), [form]);
 
@@ -1993,6 +2073,7 @@ function DraftPreviewCard({
     }
 
     setIsSaving(true);
+    setMediaUploadStatus(Object.fromEntries(pendingMedia.map((item) => [item.id, "pending"])));
     setStatus(pendingMedia.length ? "Adding listing and media..." : "Adding to library...");
     const response = await fetch("/api/listings/draft", {
       method: "POST",
@@ -2020,13 +2101,21 @@ function DraftPreviewCard({
     }
 
     try {
-      const { uploadedMedia, failedMedia } = await uploadListingMedia(listingId, pendingMedia);
+      const { uploadedMedia, failedMedia } = await uploadListingMedia(listingId, pendingMedia, (mediaId, nextStatus) => {
+        setMediaUploadStatus((current) => ({
+          ...current,
+          [mediaId]: nextStatus
+        }));
+      });
       const uploadedCount = uploadedMedia.length;
       const failedCount = failedMedia.length;
-      const failedNames = failedMedia.slice(0, 3).map((item) => item.name).join(", ");
+      const failedDetails = failedMedia
+        .slice(0, 3)
+        .map((item) => `${item.name}: ${item.error}`)
+        .join("; ");
       setStatus(
         failedCount
-          ? `Listing saved. ${uploadedCount} media uploaded; ${failedCount} failed${failedNames ? `: ${failedNames}` : ""}.`
+          ? `Listing saved. ${uploadedCount} media uploaded; ${failedCount} failed${failedDetails ? `: ${failedDetails}` : ""}.`
           : uploadedCount
             ? `Added to listing library with ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}.`
             : "Added to listing library."
@@ -2201,25 +2290,44 @@ function DraftPreviewCard({
       <div className="agent-media-panel" aria-label="Listing photos and video">
         {pendingMedia.length ? (
           <div className="agent-media-preview">
-            {pendingMedia.map((item) => (
-              <div className="agent-media-thumb" key={item.id}>
-                {item.mediaType === "image" ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={item.previewUrl} alt={item.file.name} />
-                ) : (
-                  <video src={item.previewUrl} muted playsInline />
-                )}
-                <button
-                  aria-label={`Remove ${item.file.name}`}
-                  className="agent-media-remove"
-                  type="button"
-                  onClick={() => onRemoveMedia(item.id)}
-                >
-                  <X size={13} />
-                </button>
-              </div>
-            ))}
-            <button className="agent-media-add" type="button" onClick={onAttachMedia}>
+            {pendingMedia.map((item) => {
+              const uploadStatus = mediaUploadStatus[item.id] ?? "pending";
+              const isUploading = uploadStatus === "uploading";
+              const isUploaded = uploadStatus === "uploaded";
+              const isFailed = uploadStatus === "failed";
+
+              return (
+                <div className={`agent-media-thumb ${uploadStatus}`} key={item.id}>
+                  {item.mediaType === "image" ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={item.previewUrl} alt={item.file.name} />
+                  ) : (
+                    <video src={item.previewUrl} muted playsInline />
+                  )}
+                  {uploadStatus !== "pending" ? (
+                    <span className="agent-media-upload-state" aria-label={`${item.file.name} ${uploadStatus}`}>
+                      {isUploading ? (
+                        <LoaderCircle className="spin-icon" size={16} />
+                      ) : isUploaded ? (
+                        <CheckCircle2 size={16} />
+                      ) : isFailed ? (
+                        <X size={15} />
+                      ) : null}
+                    </span>
+                  ) : null}
+                  <button
+                    aria-label={`Remove ${item.file.name}`}
+                    className="agent-media-remove"
+                    disabled={isSaving}
+                    type="button"
+                    onClick={() => onRemoveMedia(item.id)}
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              );
+            })}
+            <button className="agent-media-add" type="button" disabled={isSaving} onClick={onAttachMedia}>
               <Upload size={14} /> Add more
             </button>
           </div>
