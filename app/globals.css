@@ -640,6 +640,7 @@ a {
   position: absolute;
   bottom: 28px;
   left: 50%;
+  z-index: 20;
   width: min(760px, calc(100% - 56px));
   transform: translateX(-50%);
 }
@@ -752,6 +753,8 @@ a {
 }
 
 .chat-panel {
+  --agent-composer-reserved: 132px;
+  --agent-composer-overlap: 56px;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -853,6 +856,14 @@ a {
   scrollbar-width: thin;
 }
 
+.chat-panel.has-thread .messages {
+  position: absolute;
+  inset: 0 0 var(--agent-composer-reserved);
+  flex: none;
+  padding-bottom: 0;
+  z-index: 1;
+}
+
 .chat-panel.has-thread .messages::before {
   content: "";
   flex: 0 0 clamp(72px, 22vh, 220px);
@@ -931,6 +942,10 @@ a {
   border: 0;
 }
 
+.message.assistant.progress {
+  color: rgba(33, 48, 68, 0.68);
+}
+
 .message.assistant.has-output-card {
   width: min(620px, 86%);
   max-width: min(620px, 86%);
@@ -950,13 +965,13 @@ a {
 }
 
 .messages-end-spacer {
-  flex: 0 0 24px;
+  flex: 0 0 calc(var(--agent-composer-overlap) + 96px);
   width: 100%;
   pointer-events: none;
 }
 
 .chat-panel.has-active-turn .messages-end-spacer {
-  flex-basis: clamp(360px, 62vh, 720px);
+  flex-basis: calc(var(--agent-composer-overlap) + 96px);
 }
 
 .message-media-preview {
@@ -1025,6 +1040,11 @@ a {
   gap: 4px;
   align-items: center;
   padding-top: 2px;
+}
+
+.thinking-dots.inline {
+  margin-left: 6px;
+  vertical-align: middle;
 }
 
 .thinking-dots i {
@@ -5399,6 +5419,7 @@ a {
   }
 
   .chat-panel {
+    --agent-composer-reserved: calc(132px + env(safe-area-inset-bottom));
     height: calc(100dvh - 96px);
     min-height: 0;
     max-height: none;
@@ -5446,6 +5467,11 @@ a {
     overscroll-behavior: contain;
   }
 
+  .chat-panel.has-thread .messages {
+    inset: 0 0 var(--agent-composer-reserved);
+    padding-bottom: 0;
+  }
+
   .chat-panel.is-empty .messages {
     display: grid;
     align-content: start;
@@ -5481,11 +5507,11 @@ a {
   }
 
   .messages-end-spacer {
-    flex-basis: 144px;
+    flex-basis: calc(var(--agent-composer-overlap) + 72px);
   }
 
   .chat-panel.has-active-turn .messages-end-spacer {
-    flex-basis: 144px;
+    flex-basis: calc(var(--agent-composer-overlap) + 72px);
   }
 
   .chat-card,

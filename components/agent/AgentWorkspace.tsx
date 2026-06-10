@@ -1,6 +1,6 @@
 "use client";
 
-import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarClock,
   CheckCircle2,
@@ -81,6 +81,7 @@ type ChatMessage = {
   createdAt?: string;
   role: "user" | "assistant";
   content: string;
+  isProgress?: boolean;
   isStreaming?: boolean;
   attachments?: PendingMedia[];
   contextAttachments?: ChatContextAttachment[];
@@ -780,6 +781,73 @@ function summarizeFileAttachments(fileAttachments: PendingFileAttachment[]) {
     .join(", ")}.`;
 }
 
+function getProgressCopy(
+  messageText: string,
+  options: {
+    hasFiles: boolean;
+    hasLeadContext: boolean;
+    hasListingContext: boolean;
+    hasMedia: boolean;
+  }
+) {
+  const normalized = messageText.toLowerCase();
+
+  if (options.hasMedia || /listing|property|房源|房子|出售|出租|租|卖|price|bed|marla|kanal|房价|面积/i.test(messageText)) {
+    return [
+      "Got it. I am organizing the property details.",
+      "I am identifying the location, size, price, and listing type.",
+      "Almost there. I am preparing a listing draft you can confirm.",
+      "Still working through the media and property details. I will show the result here shortly."
+    ];
+  }
+
+  if (
+    options.hasLeadContext ||
+    /lead|buyer|client|customer|whatsapp|reply|follow[-\s]?up|客户|买家|线索|回复|跟进|电话|手机号/i.test(messageText)
+  ) {
+    return [
+      "Got it. I am checking the lead context first.",
+      "I am matching the lead, contact details, and related listing.",
+      "I have the direction now. I am preparing the next step.",
+      "Still checking the lead details so I do not act on the wrong person."
+    ];
+  }
+
+  if (/schedule|viewing|meeting|reminder|tomorrow|today|appointment|日程|看房|提醒|明天|今天|会议|预约/i.test(messageText)) {
+    return [
+      "Got it. I am checking the scheduling request.",
+      "I am parsing the time, person, and related listing.",
+      "I am preparing a schedule preview you can confirm.",
+      "Still checking the timing details so the appointment is not placed incorrectly."
+    ];
+  }
+
+  if (/promote|campaign|facebook|instagram|portal|post|推广|广告|营销|发布/i.test(normalized) || options.hasListingContext) {
+    return [
+      "Got it. I am reviewing how this listing should be promoted.",
+      "I am checking the channels, selling points, and lead page needs.",
+      "I am preparing the next step for the promotion.",
+      "Still shaping the channel copy. I will show the result here shortly."
+    ];
+  }
+
+  if (options.hasFiles) {
+    return [
+      "Got it. I am reviewing the attached file first.",
+      "I am combining the file with the current conversation context.",
+      "I am preparing the next step you can act on.",
+      "The file still needs a little more processing. I will show the result here shortly."
+    ];
+  }
+
+  return [
+    "Got it. I am taking a look.",
+    "I am reading the current conversation to understand what you need.",
+    "I have the direction now. I am preparing the response.",
+    "Still working on it. I will show the result here shortly."
+  ];
+}
+
 function looksLikeBulkLeadWrite(message: string) {
   return /reply|follow[-\s]?up|follow up|mark|status|schedule|hot|warm|contacted|qualified|phone|mobile|number|email|name|contact|话术|回复|跟进|标记|状态|安排|回访|电话|手机号|邮箱|名字/i.test(message);
 }
@@ -1255,13 +1323,20 @@ function PromotionConfirmCard({
 }: {
   initialChannels?: PromotionChannel[];
   listing: RecentListingSummary;
-  onGenerate: (channels: PromotionChannel[]) => void;
+  onGenerate: (channels: PromotionChannel[]) => Promise<void> | void;
 }) {
   const [selectedChannels, setSelectedChannels] = useState<PromotionChannel[]>(
     initialChannels?.length ? initialChannels : ["whatsapp"]
   );
+  const [generationState, setGenerationState] = useState<"idle" | "generating" | "generated">("idle");
+  const hasGenerated = generationState === "generated";
+  const isGenerating = generationState === "generating";
 
   function toggleChannel(channel: PromotionChannel) {
+    if (hasGenerated) {
+      return;
+    }
+
     setSelectedChannels((current) =>
       current.includes(channel)
         ? current.filter((item) => item !== channel)
@@ -1274,11 +1349,20 @@ function PromotionConfirmCard({
       actions={
         <button
           className="primary-button small"
-          disabled={selectedChannels.length === 0}
+          disabled={selectedChannels.length === 0 || isGenerating || hasGenerated}
           type="button"
-          onClick={() => onGenerate(selectedChannels)}
+          onClick={async () => {
+            if (isGenerating || hasGenerated) {
+              return;
+            }
+
+            setGenerationState("generating");
+            await onGenerate(selectedChannels);
+            setGenerationState("generated");
+          }}
         >
-          <CheckCircle2 size={15} /> Generate promotion pack
+          <CheckCircle2 size={15} />{" "}
+          {hasGenerated ? "Generated" : isGenerating ? "Generating..." : "Generate promotion pack"}
         </button>
       }
       className="promotion-confirm-card"
@@ -1300,6 +1384,7 @@ function PromotionConfirmCard({
           <label key={item.channel} className={selectedChannels.includes(item.channel) ? "selected" : ""}>
             <input
               checked={selectedChannels.includes(item.channel)}
+              disabled={isGenerating || hasGenerated}
               type="checkbox"
               onChange={() => toggleChannel(item.channel)}
             />
@@ -1319,6 +1404,8 @@ function LeadResultsCard({
   leads: LeadListItem[];
   onSelect?: (lead: LeadListItem) => void;
 }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
   return (
     <AgentOutputCard
       className="lead-chat-card"
@@ -1340,8 +1427,16 @@ function LeadResultsCard({
               <div className="lead-chat-row-action">
                 <span className={`lead-status ${lead.status}`}>{lead.status}</span>
                 {onSelect ? (
-                  <button className="outline-button small" type="button" onClick={() => onSelect(lead)}>
-                    Select
+                  <button
+                    className="outline-button small"
+                    type="button"
+                    disabled={selectedId === lead.id}
+                    onClick={() => {
+                      setSelectedId(lead.id);
+                      onSelect(lead);
+                    }}
+                  >
+                    {selectedId === lead.id ? "Selected" : "Select"}
                   </button>
                 ) : null}
               </div>
@@ -1356,11 +1451,21 @@ function LeadResultsCard({
 }
 
 function LeadLatestOfferCard({ onConfirm }: { onConfirm: () => void }) {
+  const [isConfirmed, setIsConfirmed] = useState(false);
+
   return (
     <AgentOutputCard
       actions={
-        <button className="primary-button small" type="button" onClick={onConfirm}>
-          <CheckCircle2 size={15} /> View latest lead
+        <button
+          className="primary-button small"
+          type="button"
+          disabled={isConfirmed}
+          onClick={() => {
+            setIsConfirmed(true);
+            onConfirm();
+          }}
+        >
+          <CheckCircle2 size={15} /> {isConfirmed ? "Shown" : "View latest lead"}
         </button>
       }
       className="lead-chat-card"
@@ -1384,10 +1489,11 @@ function LeadStatusConfirmCard({
 }) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
   async function handleConfirm() {
-    if (isSaving) {
+    if (isSaving || isSaved) {
       return;
     }
 
@@ -1413,6 +1519,7 @@ function LeadStatusConfirmCard({
     }
 
     setStatus("Lead updated.");
+    setIsSaved(true);
     onUpdated();
     setIsSaving(false);
   }
@@ -1420,8 +1527,8 @@ function LeadStatusConfirmCard({
   return (
     <AgentOutputCard
       actions={
-        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm update"}
+        <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
+          <CheckCircle2 size={15} /> {isSaved ? "Updated" : isSaving ? "Updating..." : "Confirm update"}
         </button>
       }
       className="lead-chat-card"
@@ -1465,13 +1572,14 @@ function LeadDetailsConfirmCard({
 }) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const entries = Object.entries(preview.changes).filter(([, value]) => value !== undefined) as Array<
     [keyof LeadDetailsUpdateChanges, string | null]
   >;
 
   async function handleConfirm() {
-    if (isSaving) {
+    if (isSaving || isSaved) {
       return;
     }
 
@@ -1496,6 +1604,7 @@ function LeadDetailsConfirmCard({
     }
 
     setStatus("Lead updated.");
+    setIsSaved(true);
     onUpdated();
     setIsSaving(false);
   }
@@ -1503,8 +1612,8 @@ function LeadDetailsConfirmCard({
   return (
     <AgentOutputCard
       actions={
-        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm update"}
+        <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
+          <CheckCircle2 size={15} /> {isSaved ? "Updated" : isSaving ? "Updating..." : "Confirm update"}
         </button>
       }
       className="lead-chat-card"
@@ -1546,10 +1655,11 @@ function LeadCreateConfirmCard({
 }) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
   async function handleConfirm() {
-    if (isSaving) {
+    if (isSaving || isSaved) {
       return;
     }
 
@@ -1571,6 +1681,7 @@ function LeadCreateConfirmCard({
     }
 
     setStatus("Lead saved.");
+    setIsSaved(true);
     onSaved();
     router.refresh();
     setIsSaving(false);
@@ -1579,8 +1690,8 @@ function LeadCreateConfirmCard({
   return (
     <AgentOutputCard
       actions={
-        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaving ? "Saving..." : "Confirm & save"}
+        <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
+          <CheckCircle2 size={15} /> {isSaved ? "Saved" : isSaving ? "Saving..." : "Confirm & save"}
         </button>
       }
       className="lead-chat-card"
@@ -1622,10 +1733,11 @@ function LeadBatchStatusConfirmCard({
 }) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
   async function handleConfirm() {
-    if (isSaving || !preview.status) {
+    if (isSaving || isSaved || !preview.status) {
       return;
     }
 
@@ -1655,6 +1767,7 @@ function LeadBatchStatusConfirmCard({
     }
 
     setStatus("Leads updated.");
+    setIsSaved(true);
     onUpdated();
     router.refresh();
     setIsSaving(false);
@@ -1666,10 +1779,10 @@ function LeadBatchStatusConfirmCard({
         <button
           className="primary-button small"
           type="button"
-          disabled={isSaving || !preview.status}
+          disabled={isSaving || isSaved || !preview.status}
           onClick={handleConfirm}
         >
-          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm batch update"}
+          <CheckCircle2 size={15} /> {isSaved ? "Updated" : isSaving ? "Updating..." : "Confirm batch update"}
         </button>
       }
       className="lead-chat-card"
@@ -1712,6 +1825,7 @@ function LeadListingConfirmCard({
 }) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const currentListingLabel =
     [preview.lead.listing_title, preview.lead.listing_area, preview.lead.listing_city]
@@ -1725,7 +1839,7 @@ function LeadListingConfirmCard({
     "Untitled listing";
 
   async function handleConfirm() {
-    if (isSaving) {
+    if (isSaving || isSaved) {
       return;
     }
 
@@ -1750,6 +1864,7 @@ function LeadListingConfirmCard({
     }
 
     setStatus("Lead listing updated.");
+    setIsSaved(true);
     onUpdated();
     router.refresh();
     setIsSaving(false);
@@ -1758,8 +1873,8 @@ function LeadListingConfirmCard({
   return (
     <AgentOutputCard
       actions={
-        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm listing"}
+        <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
+          <CheckCircle2 size={15} /> {isSaved ? "Updated" : isSaving ? "Updating..." : "Confirm listing"}
         </button>
       }
       className="lead-chat-card"
@@ -1820,11 +1935,12 @@ function ListingUpdateConfirmCard({
 }) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const entries = Object.entries(preview.changes).filter(([, value]) => value !== undefined);
 
   async function handleConfirm() {
-    if (isSaving) {
+    if (isSaving || isSaved) {
       return;
     }
 
@@ -1849,6 +1965,7 @@ function ListingUpdateConfirmCard({
     }
 
     setStatus("Listing updated.");
+    setIsSaved(true);
     onUpdated();
     router.refresh();
     setIsSaving(false);
@@ -1857,8 +1974,8 @@ function ListingUpdateConfirmCard({
   return (
     <AgentOutputCard
       actions={
-        <button className="primary-button small" type="button" disabled={isSaving} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaving ? "Updating..." : "Confirm update"}
+        <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
+          <CheckCircle2 size={15} /> {isSaved ? "Updated" : isSaving ? "Updating..." : "Confirm update"}
         </button>
       }
       className="listing-update-card"
@@ -1897,6 +2014,8 @@ function ListingUpdateSelectionCard({
   preview: ListingUpdateChoicePreview;
   onSelect: (listing: RecentListingSummary) => void;
 }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
   return (
     <AgentOutputCard
       className="listing-update-card"
@@ -1921,8 +2040,16 @@ function ListingUpdateSelectionCard({
                 {listing.status ? ` · ${listing.status}` : ""}
               </small>
             </div>
-            <button className="primary-button small" type="button" onClick={() => onSelect(listing)}>
-              <CheckCircle2 size={15} /> Select
+            <button
+              className="primary-button small"
+              type="button"
+              disabled={Boolean(selectedId)}
+              onClick={() => {
+                setSelectedId(listing.id);
+                onSelect(listing);
+              }}
+            >
+              <CheckCircle2 size={15} /> {selectedId === listing.id ? "Selected" : "Select"}
             </button>
           </article>
         ))}
@@ -1945,13 +2072,24 @@ function EntitySelectionCard({
   const helper = isListingTarget
     ? "I found multiple matching listings. Select the exact property before I continue."
     : "I found multiple matching leads. Select the exact buyer before I continue.";
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [skipped, setSkipped] = useState(false);
+  const isDone = Boolean(selectedId) || skipped;
 
   return (
     <AgentOutputCard
       actions={
         onSkip ? (
-          <button className="outline-button small" type="button" onClick={onSkip}>
-            Continue without binding
+          <button
+            className="outline-button small"
+            type="button"
+            disabled={isDone}
+            onClick={() => {
+              setSkipped(true);
+              onSkip();
+            }}
+          >
+            {skipped ? "Continued" : "Continue without binding"}
           </button>
         ) : null
       }
@@ -1981,8 +2119,16 @@ function EntitySelectionCard({
                   {listing.status ? ` · ${listing.status}` : ""}
                 </small>
               </div>
-              <button className="primary-button small" type="button" onClick={() => onSelect(candidate)}>
-                <CheckCircle2 size={15} /> Select
+              <button
+                className="primary-button small"
+                type="button"
+                disabled={isDone}
+                onClick={() => {
+                  setSelectedId(candidate.id);
+                  onSelect(candidate);
+                }}
+              >
+                <CheckCircle2 size={15} /> {selectedId === candidate.id ? "Selected" : "Select"}
               </button>
             </article>
           ) : lead ? (
@@ -1997,8 +2143,16 @@ function EntitySelectionCard({
               </div>
               <div className="lead-chat-row-action">
                 <span className={`lead-status ${lead.status}`}>{lead.status}</span>
-                <button className="primary-button small" type="button" onClick={() => onSelect(candidate)}>
-                  <CheckCircle2 size={15} /> Select
+                <button
+                  className="primary-button small"
+                  type="button"
+                  disabled={isDone}
+                  onClick={() => {
+                    setSelectedId(candidate.id);
+                    onSelect(candidate);
+                  }}
+                >
+                  <CheckCircle2 size={15} /> {selectedId === candidate.id ? "Selected" : "Select"}
                 </button>
               </div>
             </div>
@@ -2149,7 +2303,12 @@ function DraftPreviewCard({
           <button className="primary-button small" type="button" onClick={handleConfirm} disabled={isSaving || isSaved}>
             <CheckCircle2 size={15} /> {isSaved ? "Saved" : isSaving ? "Adding..." : "Confirm & add"}
           </button>
-          <button className="outline-button small" type="button" onClick={() => setIsEditing(!isEditing)}>
+          <button
+            className="outline-button small"
+            type="button"
+            disabled={isSaving || isSaved}
+            onClick={() => setIsEditing(!isEditing)}
+          >
             <Pencil size={14} /> {isEditing ? "Preview" : "Edit card"}
           </button>
         </>
@@ -2318,7 +2477,7 @@ function DraftPreviewCard({
                   <button
                     aria-label={`Remove ${item.file.name}`}
                     className="agent-media-remove"
-                    disabled={isSaving}
+                    disabled={isSaving || isSaved}
                     type="button"
                     onClick={() => onRemoveMedia(item.id)}
                   >
@@ -2327,12 +2486,12 @@ function DraftPreviewCard({
                 </div>
               );
             })}
-            <button className="agent-media-add" type="button" disabled={isSaving} onClick={onAttachMedia}>
+            <button className="agent-media-add" type="button" disabled={isSaving || isSaved} onClick={onAttachMedia}>
               <Upload size={14} /> Add more
             </button>
           </div>
         ) : (
-          <button className="agent-media-add empty" type="button" onClick={onAttachMedia}>
+          <button className="agent-media-add empty" type="button" disabled={isSaving || isSaved} onClick={onAttachMedia}>
             <ImagePlus size={16} /> Add photos / video
           </button>
         )}
@@ -2417,12 +2576,13 @@ function SchedulePreviewCard({
   const [form, setForm] = useState(() => eventToFormState(event, timeZone));
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const previewEvent = useMemo(() => formStateToEvent(form, timeZone), [form, timeZone]);
   const hasScheduleTime = Boolean(previewEvent.start_at || previewEvent.reminder_at);
 
   async function handleConfirm() {
-    if (isSaving) {
+    if (isSaving || isSaved) {
       return;
     }
 
@@ -2450,6 +2610,7 @@ function SchedulePreviewCard({
     }
 
     setStatus("Added to Schedule.");
+    setIsSaved(true);
     onSaved();
     router.refresh();
     setIsSaving(false);
@@ -2459,10 +2620,20 @@ function SchedulePreviewCard({
     <AgentOutputCard
       actions={
         <>
-          <button className="primary-button small" type="button" onClick={handleConfirm} disabled={isSaving || !hasScheduleTime}>
-            <CheckCircle2 size={15} /> {isSaving ? "Adding..." : "Confirm schedule"}
+          <button
+            className="primary-button small"
+            type="button"
+            onClick={handleConfirm}
+            disabled={isSaving || isSaved || !hasScheduleTime}
+          >
+            <CheckCircle2 size={15} /> {isSaved ? "Added" : isSaving ? "Adding..." : "Confirm schedule"}
           </button>
-          <button className="outline-button small" type="button" onClick={() => setIsEditing(!isEditing)}>
+          <button
+            className="outline-button small"
+            type="button"
+            disabled={isSaving || isSaved}
+            onClick={() => setIsEditing(!isEditing)}
+          >
             <Pencil size={14} /> {isEditing ? "Preview" : "Edit card"}
           </button>
         </>
@@ -2659,12 +2830,15 @@ export function AgentWorkspace({
   const [voiceLevels, setVoiceLevels] = useState(idleVoiceLevels);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const documentFileInputRef = useRef<HTMLInputElement | null>(null);
+  const chatPanelRef = useRef<HTMLElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const activeTurnAnchorRef = useRef<string | null>(null);
   const activeOutputRef = useRef<string | null>(null);
   const hasPositionedInitialThreadRef = useRef(false);
   const assistantStreamTimersRef = useRef<Map<string, number>>(new Map());
+  const pendingProgressMessageIdRef = useRef<string | null>(null);
+  const positionedOutputIdsRef = useRef<Set<string>>(new Set());
   const composerMediaRef = useRef<PendingMedia[]>([]);
   const pendingMediaRef = useRef<PendingMedia[]>([]);
   const mediaSelectionTargetRef = useRef<"composer" | "draft">("composer");
@@ -2732,7 +2906,46 @@ export function AgentWorkspace({
     }
   ];
 
-  function positionTurnAnchor(messageId: string) {
+  useLayoutEffect(() => {
+    const panelElement = chatPanelRef.current;
+    if (!panelElement) {
+      return;
+    }
+    const panelNode: HTMLElement = panelElement;
+
+    function updateComposerReserve() {
+      const composer = panelNode.querySelector<HTMLElement>(".workspace-agent-composer");
+      if (!composer) {
+        return;
+      }
+
+      const panelRect = panelNode.getBoundingClientRect();
+      const composerRect = composer.getBoundingClientRect();
+      const composerMidpoint = composerRect.top + composerRect.height * 0.5;
+      const reserve = Math.max(0, Math.round(panelRect.bottom - composerMidpoint));
+      const overlap = Math.max(0, Math.round(composerMidpoint - composerRect.top));
+      panelNode.style.setProperty("--agent-composer-reserved", `${reserve}px`);
+      panelNode.style.setProperty("--agent-composer-overlap", `${overlap}px`);
+    }
+
+    updateComposerReserve();
+
+    const observer = new ResizeObserver(updateComposerReserve);
+    observer.observe(panelNode);
+
+    const composer = panelNode.querySelector<HTMLElement>(".workspace-agent-composer");
+    if (composer) {
+      observer.observe(composer);
+    }
+
+    window.addEventListener("resize", updateComposerReserve);
+    return () => {
+      window.removeEventListener("resize", updateComposerReserve);
+      observer.disconnect();
+    };
+  }, [hasStarted, composerFiles.length, composerMedia.length, contextAttachments.length, isListening, isTranscribing]);
+
+  function positionMessageStart(messageId: string, offsetRatio: number, behavior: ScrollBehavior = "smooth") {
     const container = messagesContainerRef.current;
     const messageElement = container?.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
 
@@ -2742,15 +2955,27 @@ export function AgentWorkspace({
 
     const containerRect = container.getBoundingClientRect();
     const messageRect = messageElement.getBoundingClientRect();
-    const isDesktop = window.matchMedia("(min-width: 900px)").matches;
-    const anchorOffset = isDesktop ? containerRect.height * 0.2 : containerRect.height * 0.42;
+    const anchorOffset = containerRect.height * offsetRatio;
     const currentMessageTop = messageRect.top - containerRect.top;
     const nextScrollTop = container.scrollTop + currentMessageTop - anchorOffset;
 
     container.scrollTo({
       top: Math.max(0, nextScrollTop),
-      behavior: "smooth"
+      behavior
     });
+  }
+
+  function scheduleMessagePosition(messageId: string, offsetRatio: number, behavior: ScrollBehavior = "smooth") {
+    window.requestAnimationFrame(() => {
+      positionMessageStart(messageId, offsetRatio, behavior);
+      window.requestAnimationFrame(() => positionMessageStart(messageId, offsetRatio, behavior));
+    });
+    window.setTimeout(() => positionMessageStart(messageId, offsetRatio, behavior), 90);
+  }
+
+  function positionTurnAnchor(messageId: string) {
+    const isDesktop = window.matchMedia("(min-width: 900px)").matches;
+    scheduleMessagePosition(messageId, isDesktop ? 0.18 : 0.3);
   }
 
   function keepOutputVisible(messageId: string) {
@@ -2766,11 +2991,31 @@ export function AgentWorkspace({
     const isDesktop = window.matchMedia("(min-width: 900px)").matches;
     const composerElement = document.querySelector<HTMLElement>(".workspace-agent-composer");
     const composerRect = composerElement?.getBoundingClientRect();
-    const composerOverlap =
-      composerRect && composerRect.top < containerRect.bottom ? containerRect.bottom - composerRect.top : 0;
-    const bottomReserve = Math.max(isDesktop ? 160 : 112, composerOverlap + 28);
-    const visibleBottom = containerRect.height - bottomReserve;
+    const readableBottom = composerRect
+      ? Math.max(0, composerRect.top - containerRect.top - (isDesktop ? 28 : 20))
+      : containerRect.height - (isDesktop ? 36 : 28);
+    const topReserve = isDesktop ? containerRect.height * 0.28 : containerRect.height * 0.36;
+    const visibleTop = Math.max(24, topReserve);
+    const visibleBottom = Math.max(visibleTop + 80, readableBottom);
+    const messageTop = messageRect.top - containerRect.top;
     const messageBottom = messageRect.bottom - containerRect.top;
+
+    if (!positionedOutputIdsRef.current.has(messageId)) {
+      positionedOutputIdsRef.current.add(messageId);
+      const isComfortablyVisible = messageTop >= 24 && messageTop <= visibleBottom;
+      if (!isComfortablyVisible) {
+        scheduleMessagePosition(messageId, isDesktop ? 0.34 : 0.42);
+      }
+      return;
+    }
+
+    if (messageTop < 24) {
+      container.scrollTo({
+        top: Math.max(0, container.scrollTop + messageTop - 24),
+        behavior: "smooth"
+      });
+      return;
+    }
 
     if (messageBottom > visibleBottom) {
       container.scrollTo({
@@ -2790,15 +3035,20 @@ export function AgentWorkspace({
       return;
     }
 
-    const activeOutput = activeOutputRef.current;
-    if (activeOutput) {
-      window.requestAnimationFrame(() => keepOutputVisible(activeOutput));
+    const activeTurnAnchor = activeTurnAnchorRef.current;
+    if (activeTurnAnchor) {
+      positionTurnAnchor(activeTurnAnchor);
+      activeTurnAnchorRef.current = null;
+      const activeOutputAfterTurn = activeOutputRef.current;
+      if (activeOutputAfterTurn) {
+        window.setTimeout(() => keepOutputVisible(activeOutputAfterTurn), 220);
+      }
       return;
     }
 
-    const activeTurnAnchor = activeTurnAnchorRef.current;
-    if (activeTurnAnchor) {
-      window.requestAnimationFrame(() => positionTurnAnchor(activeTurnAnchor));
+    const activeOutput = activeOutputRef.current;
+    if (activeOutput) {
+      window.requestAnimationFrame(() => keepOutputVisible(activeOutput));
       return;
     }
 
@@ -2806,6 +3056,8 @@ export function AgentWorkspace({
       hasPositionedInitialThreadRef.current = true;
       window.requestAnimationFrame(() => messagesEndRef.current?.scrollIntoView({ block: "end" }));
     }
+    // The scroll targets are stored in refs so this effect runs only when the rendered message list changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, hasStarted]);
 
   useEffect(() => {
@@ -3040,21 +3292,57 @@ export function AgentWorkspace({
     assistantStreamTimersRef.current.set(messageId, timer);
   }
 
+  function appendProgressMessage(content: string) {
+    const progressMessage: ChatMessage = {
+      id: createId(),
+      role: "assistant",
+      content,
+      isProgress: true,
+      isStreaming: true
+    };
+
+    pendingProgressMessageIdRef.current = progressMessage.id;
+    activeOutputRef.current = progressMessage.id;
+    setActiveOutputId(progressMessage.id);
+    setMessages((current) => [...current, progressMessage]);
+
+    return progressMessage.id;
+  }
+
+  function updateProgressMessage(messageId: string, content: string) {
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === messageId && message.isProgress ? { ...message, content } : message
+      )
+    );
+  }
+
   function appendAssistantMessage(message: Omit<ChatMessage, "id" | "role"> & { id?: string }) {
+    const progressMessageId = pendingProgressMessageIdRef.current;
     const nextMessage: ChatMessage = {
       ...message,
-      id: message.id ?? createId(),
+      id: message.id ?? progressMessageId ?? createId(),
       role: "assistant"
     };
     const streamingMessage: ChatMessage = {
       ...nextMessage,
       content: "",
+      isProgress: false,
       isStreaming: true
     };
 
     activeOutputRef.current = nextMessage.id;
     setActiveOutputId(nextMessage.id);
-    setMessages((current) => [...current, streamingMessage]);
+    if (progressMessageId) {
+      pendingProgressMessageIdRef.current = null;
+      setMessages((current) =>
+        current.map((currentMessage) =>
+          currentMessage.id === progressMessageId ? streamingMessage : currentMessage
+        )
+      );
+    } else {
+      setMessages((current) => [...current, streamingMessage]);
+    }
     window.setTimeout(() => animateAssistantMessage(nextMessage.id, nextMessage.content), 80);
     void persistAssistantMessage(nextMessage);
 
@@ -4093,6 +4381,18 @@ export function AgentWorkspace({
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 25000);
+    const progressCopy = getProgressCopy(agentMessageContent, {
+      hasFiles: hasOutgoingFiles,
+      hasLeadContext: outgoingContext.some((item) => item.type === "lead"),
+      hasListingContext: outgoingContext.some((item) => item.type === "listing") || Boolean(currentListingId),
+      hasMedia: hasOutgoingMedia
+    });
+    const progressMessageId = appendProgressMessage(progressCopy[0]);
+    const progressTimers = [
+      window.setTimeout(() => updateProgressMessage(progressMessageId, progressCopy[1]), 900),
+      window.setTimeout(() => updateProgressMessage(progressMessageId, progressCopy[2]), 2600),
+      window.setTimeout(() => updateProgressMessage(progressMessageId, progressCopy[3]), 7000)
+    ];
     let receivedAgentResponse = false;
 
     try {
@@ -4248,6 +4548,10 @@ export function AgentWorkspace({
       });
     } finally {
       clearTimeout(timeout);
+      progressTimers.forEach((timer) => window.clearTimeout(timer));
+      if (pendingProgressMessageIdRef.current === progressMessageId) {
+        pendingProgressMessageIdRef.current = null;
+      }
       setIsSubmitting(false);
     }
   }
@@ -4484,7 +4788,10 @@ export function AgentWorkspace({
   }
 
   return (
-    <section className={`chat-panel ${hasStarted ? "has-thread" : "is-empty"} ${activeTurnAnchorId || activeOutputId ? "has-active-turn" : ""}`}>
+    <section
+      className={`chat-panel ${hasStarted ? "has-thread" : "is-empty"} ${activeTurnAnchorId || activeOutputId ? "has-active-turn" : ""}`}
+      ref={chatPanelRef}
+    >
       <div className="messages" ref={messagesContainerRef}>
         {!hasStarted ? (
           <div className="agent-start">
@@ -4509,11 +4816,22 @@ export function AgentWorkspace({
 
           return index === 0 ? null : (
           <article
-            className={`message ${message.role} ${hasOutputCard ? "has-output-card" : ""}`.trim()}
+            className={`message ${message.role} ${hasOutputCard ? "has-output-card" : ""} ${message.isProgress ? "progress" : ""}`.trim()}
             data-message-id={message.id}
             key={message.id}
           >
-            {message.content ? <p>{message.content}</p> : null}
+            {message.content ? (
+              <p>
+                {message.content}
+                {message.isProgress ? (
+                  <span className="thinking-dots inline" aria-hidden="true">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                ) : null}
+              </p>
+            ) : null}
             {message.attachments?.length ? (
               <div className="message-media-preview" aria-label="Sent media">
                 {message.attachments.map((item) => (
@@ -4710,7 +5028,7 @@ export function AgentWorkspace({
                     initialChannels={message.promotionChannels}
                     listing={message.promotionTarget}
                     onGenerate={(channels) =>
-                      void generatePromotionForListing(
+                      generatePromotionForListing(
                         message.promotionTarget as RecentListingSummary,
                         message.promotionInstruction ?? "",
                         channels
@@ -4723,17 +5041,6 @@ export function AgentWorkspace({
           </article>
           );
         })}
-
-        {isSubmitting ? (
-          <div className="message assistant thinking-message" role="status" aria-live="polite">
-            <span>Thinking</span>
-            <span className="thinking-dots" aria-hidden="true">
-              <i />
-              <i />
-              <i />
-            </span>
-          </div>
-        ) : null}
 
         <div className="messages-end-spacer" ref={messagesEndRef} />
       </div>
