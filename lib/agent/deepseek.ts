@@ -15,7 +15,8 @@ import {
   classifyLocalIntent,
   extractLeadName,
   extractLeadStatus,
-  extractLeadStatusFilter
+  extractLeadStatusFilter,
+  isPromotionRequest
 } from "@/lib/agent/intent-router";
 import {
   buildLocationEnhancedRoutingMessage,
@@ -54,7 +55,6 @@ Supported intents:
 - create_listing_draft
 - create_lead
 - update_listing_draft
-- publish_listing
 - create_campaign_links
 - list_leads
 - draft_lead_reply
@@ -65,6 +65,10 @@ Supported intents:
 - update_lead_listing
 - show_basic_attribution
 - general_reply
+
+Routing rules:
+- If the broker asks to share, post, publish, or send a listing to WhatsApp, Facebook, Instagram, portals, Zameen, OLX, or another external channel, return create_campaign_links. Pislaka generates channel copy and trackable lead-page links; it does not silently publish externally.
+- Do not use publish_listing for external channels.
 
 Listing output shape:
 {
@@ -640,7 +644,24 @@ function shouldNormalizeScheduleAsFollowUp(message: string) {
   return hasCommunicationCue && !hasAppointmentCue;
 }
 
+function shouldNormalizeExternalPublishAsPromotion(message: string) {
+  const hasExternalActionVerb = /\b(?:share|post|publish|send)\b|发布|分享|发送/iu.test(message);
+  const hasExternalChannel =
+    /\b(?:whats\s*app|whatsapp|wa|facebook|fb|instagram|insta|ig|portal|zameen|olx)\b|门户|平台/iu.test(
+      message
+    );
+
+  return hasExternalActionVerb && hasExternalChannel && isPromotionRequest(message);
+}
+
 function normalizeAgentAction(action: AgentAction, message: string, context?: AgentRoutingContext): AgentAction {
+  if (
+    action.intent === "publish_listing" &&
+    shouldNormalizeExternalPublishAsPromotion(message)
+  ) {
+    return parseLocalPromotionRequest(message);
+  }
+
   if (action.intent === "list_schedule_events") {
     const parsedPayload = scheduleEventListPayloadSchema.safeParse(action.payload);
 

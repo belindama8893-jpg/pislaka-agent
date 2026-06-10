@@ -108,6 +108,13 @@ type ChatMessage = {
   promotionChannels?: PromotionChannel[];
 };
 
+type PendingPromotionAction = {
+  messageId: string;
+  listing: RecentListingSummary;
+  instruction: string;
+  channels: PromotionChannel[];
+};
+
 type ListingSavedPreview = {
   listingId: string;
   title: string | null;
@@ -345,6 +352,12 @@ const promotionChannels: Array<{ channel: PromotionChannel; label: string }> = [
   { channel: "portal", label: "Portal" }
 ];
 
+function isConfirmationMessage(messageText: string) {
+  return /^(?:yes|y|ok|okay|confirm|confirmed|go ahead|do it|proceed|sure|haan|han|ji|是|对|确认|可以|好的)$/i.test(
+    messageText.trim()
+  );
+}
+
 function extractPromotionChannels(messageText: string): PromotionChannel[] {
   const normalized = messageText.toLowerCase();
   const channels: PromotionChannel[] = [];
@@ -363,6 +376,15 @@ function extractPromotionChannels(messageText: string): PromotionChannel[] {
   }
 
   return channels;
+}
+
+function looksLikeExternalChannelPromotion(messageText: string) {
+  return (
+    /\b(?:share|post|publish|send)\b|发布|分享|发送/iu.test(messageText) &&
+    /\b(?:whats\s*app|whatsapp|wa|facebook|fb|instagram|insta|ig|portal|zameen|olx)\b|门户|平台/iu.test(
+      messageText
+    )
+  );
 }
 
 const waveformBarCount = 48;
@@ -1323,7 +1345,7 @@ function PromotionConfirmCard({
 }: {
   initialChannels?: PromotionChannel[];
   listing: RecentListingSummary;
-  onGenerate: (channels: PromotionChannel[]) => Promise<void> | void;
+  onGenerate: (channels: PromotionChannel[]) => Promise<boolean> | boolean;
 }) {
   const [selectedChannels, setSelectedChannels] = useState<PromotionChannel[]>(
     initialChannels?.length ? initialChannels : ["whatsapp"]
@@ -1357,8 +1379,8 @@ function PromotionConfirmCard({
             }
 
             setGenerationState("generating");
-            await onGenerate(selectedChannels);
-            setGenerationState("generated");
+            const generated = await onGenerate(selectedChannels);
+            setGenerationState(generated ? "generated" : "idle");
           }}
         >
           <CheckCircle2 size={15} />{" "}
@@ -2821,6 +2843,7 @@ export function AgentWorkspace({
     },
     ...initialMessages.map(chatMessageFromRecord)
   ]);
+  const [consumedPendingActionIds, setConsumedPendingActionIds] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTurnAnchorId, setActiveTurnAnchorId] = useState<string | null>(null);
   const [activeOutputId, setActiveOutputId] = useState<string | null>(null);
@@ -3095,6 +3118,33 @@ export function AgentWorkspace({
         role: message.role,
         content: message.content
       }));
+  }
+
+  function latestPendingPromotionAction(): PendingPromotionAction | null {
+    for (const message of [...messages].reverse()) {
+      if (message.role !== "assistant") {
+        continue;
+      }
+
+      if (message.role === "assistant" && message.promotion) {
+        return null;
+      }
+
+      if (message.promotionTarget && !consumedPendingActionIds.includes(message.id)) {
+        return {
+          messageId: message.id,
+          listing: message.promotionTarget,
+          instruction: message.promotionInstruction ?? "",
+          channels: message.promotionChannels?.length ? message.promotionChannels : ["whatsapp"]
+        };
+      }
+
+      if (!message.isProgress) {
+        return null;
+      }
+    }
+
+    return null;
   }
 
   function addContextAttachment(attachment: ChatContextAttachment) {
@@ -4271,33 +4321,50 @@ export function AgentWorkspace({
     listing: RecentListingSummary,
     instruction: string,
     channels: PromotionChannel[]
-  ) {
+  ): Promise<boolean> {
     setActiveListingId(listing.id);
     appendAssistantMessage({
       content: `Confirmed. I am creating ${channels.length} channel campaign link${channels.length === 1 ? "" : "s"} and promotion copy for ${listing.title || "this listing"}...`
     });
 
-    const response = await fetch("/api/agent/promote-listing", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ listing_id: listing.id, instruction, channels })
-    });
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 25000);
 
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      appendAssistantMessage({
-        content: payload?.error ?? "I could not generate the promotion pack yet. Please try again."
+    try {
+      const response = await fetch("/api/agent/promote-listing", {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ listing_id: listing.id, instruction, channels })
       });
-      return;
-    }
 
-    const payload = (await response.json()) as { promotion: ListingPromotion };
-    appendAssistantMessage({
-      content: "Here is the promotion pack. Each channel has its own lead page, so later we can attribute leads by listing and channel.",
-      promotion: payload.promotion
-    });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        appendAssistantMessage({
+          content: payload?.error ?? "I could not generate the promotion pack yet. Please try again."
+        });
+        return false;
+      }
+
+      const payload = (await response.json()) as { promotion: ListingPromotion };
+      appendAssistantMessage({
+        content: "Here is the promotion pack. Each channel has its own lead page, so later we can attribute leads by listing and channel.",
+        promotion: payload.promotion
+      });
+      return true;
+    } catch (error) {
+      appendAssistantMessage({
+        content:
+          error instanceof DOMException && error.name === "AbortError"
+            ? "Promotion generation took too long. Please try again in a moment."
+            : "I could not reach the promotion service. Please try again in a moment."
+      });
+      return false;
+    } finally {
+      window.clearTimeout(timeout);
+    }
   }
 
   async function submitMessage(messageText: string) {
@@ -4359,6 +4426,31 @@ export function AgentWorkspace({
             : "I can use these as listing media. Please add the property details, and I will draft the listing with these files attached."
           : "I attached that context. Tell me what you want to do with it, for example edit it, draft a reply, promote it, or schedule a follow-up."
       });
+      setIsSubmitting(false);
+      return;
+    }
+
+    const pendingPromotionAction = latestPendingPromotionAction();
+    if (
+      pendingPromotionAction &&
+      isConfirmationMessage(trimmed) &&
+      !hasOutgoingMedia &&
+      !hasOutgoingFiles &&
+      !hasOutgoingContext
+    ) {
+      setConsumedPendingActionIds((current) => [...current, pendingPromotionAction.messageId]);
+      const generated = await generatePromotionForListing(
+        pendingPromotionAction.listing,
+        pendingPromotionAction.instruction,
+        pendingPromotionAction.channels
+      );
+
+      if (!generated) {
+        setConsumedPendingActionIds((current) =>
+          current.filter((messageId) => messageId !== pendingPromotionAction.messageId)
+        );
+      }
+
       setIsSubmitting(false);
       return;
     }
@@ -4494,6 +4586,14 @@ export function AgentWorkspace({
       }
 
       if (payload.action.intent === "create_campaign_links") {
+        proposePromotionFromMessage(agentMessageContent, payload.action.resolution);
+        return;
+      }
+
+      if (
+        payload.action.intent === "publish_listing" &&
+        looksLikeExternalChannelPromotion(agentMessageContent)
+      ) {
         proposePromotionFromMessage(agentMessageContent, payload.action.resolution);
         return;
       }

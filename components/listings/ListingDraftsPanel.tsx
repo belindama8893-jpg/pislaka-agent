@@ -5,18 +5,19 @@ import {
   Check,
   Copy,
   Edit3,
+  ExternalLink,
   Home,
   ImageIcon,
+  LoaderCircle,
   Megaphone,
   MessageCircle,
   Save,
-  Sparkles,
   Upload,
   Video
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { ListingRecord } from "@/lib/listings/types";
-import type { ListingPromotion } from "@/lib/promotions/types";
+import type { ListingPromotion, PromotionCard, PromotionChannel } from "@/lib/promotions/types";
 
 type ListingDraftsPanelProps = {
   listings: ListingRecord[];
@@ -32,6 +33,15 @@ type EditState = {
   bathrooms: string;
   status: ListingRecord["status"];
 };
+
+const promotionChannelOptions: Array<{ channel: PromotionChannel; label: string }> = [
+  { channel: "whatsapp", label: "WhatsApp" },
+  { channel: "facebook", label: "Facebook" },
+  { channel: "instagram", label: "Instagram" },
+  { channel: "portal", label: "Portal" }
+];
+
+const defaultPromotionChannels: PromotionChannel[] = ["whatsapp"];
 
 function formatPrice(listing: ListingRecord) {
   if (!listing.price_amount) {
@@ -57,6 +67,12 @@ function getInitialEditState(listing: ListingRecord): EditState {
   };
 }
 
+function formatPromotionCopy(card: PromotionCard) {
+  return [card.title, card.body, card.cta, card.landing_url ? `Link: ${card.landing_url}` : null]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export function ListingDraftsPanel({ className = "", collapsed = false, listings }: ListingDraftsPanelProps) {
   const router = useRouter();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -64,7 +80,10 @@ export function ListingDraftsPanel({ className = "", collapsed = false, listings
   const [status, setStatus] = useState<string | null>(null);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [promotingId, setPromotingId] = useState<string | null>(null);
+  const [activePromotionSetupId, setActivePromotionSetupId] = useState<string | null>(null);
+  const [promotionChannelDrafts, setPromotionChannelDrafts] = useState<Record<string, PromotionChannel[]>>({});
   const [promotions, setPromotions] = useState<Record<string, ListingPromotion>>({});
+  const [copiedPromotionKey, setCopiedPromotionKey] = useState<string | null>(null);
 
   function startEditing(listing: ListingRecord) {
     setEditingId(listing.id);
@@ -141,34 +160,85 @@ export function ListingDraftsPanel({ className = "", collapsed = false, listings
     router.refresh();
   }
 
-  async function handlePromote(listingId: string) {
-    setPromotingId(listingId);
-    setStatus("Generating promotion pack...");
+  function togglePromotionSetup(listingId: string) {
+    setActivePromotionSetupId((current) => (current === listingId ? null : listingId));
+    setPromotionChannelDrafts((current) => ({
+      ...current,
+      [listingId]: current[listingId]?.length ? current[listingId] : defaultPromotionChannels
+    }));
+    setStatus("Choose promotion channels.");
+  }
 
-    const response = await fetch("/api/agent/promote-listing", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ listing_id: listingId })
+  function togglePromotionChannel(listingId: string, channel: PromotionChannel) {
+    setPromotionChannelDrafts((current) => {
+      const selected = current[listingId]?.length ? current[listingId] : defaultPromotionChannels;
+      const next = selected.includes(channel)
+        ? selected.filter((item) => item !== channel)
+        : [...selected, channel];
+
+      return {
+        ...current,
+        [listingId]: next
+      };
     });
+  }
 
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      setStatus(payload?.error ?? "Unable to generate promotion pack");
-      setPromotingId(null);
+  async function handlePromote(listingId: string, channels: PromotionChannel[]) {
+    if (!channels.length) {
+      setStatus("Choose at least one promotion channel.");
       return;
     }
 
-    const payload = (await response.json()) as { promotion: ListingPromotion };
-    setPromotions((current) => ({ ...current, [listingId]: payload.promotion }));
-    setStatus("Promotion pack ready.");
-    setPromotingId(null);
+    setPromotingId(listingId);
+    setStatus(`Generating ${channels.length} channel promotion pack...`);
+    setPromotions((current) => {
+      const next = { ...current };
+      delete next[listingId];
+      return next;
+    });
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 25000);
+
+    try {
+      const response = await fetch("/api/agent/promote-listing", {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ listing_id: listingId, channels })
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        setStatus(payload?.error ?? "Unable to generate promotion pack");
+        return;
+      }
+
+      const payload = (await response.json()) as { promotion: ListingPromotion };
+      setPromotions((current) => ({ ...current, [listingId]: payload.promotion }));
+      setStatus("Promotion pack ready.");
+      setActivePromotionSetupId(null);
+    } catch (error) {
+      setStatus(
+        error instanceof DOMException && error.name === "AbortError"
+          ? "Promotion generation took too long. Please try again."
+          : "Unable to reach promotion service. Please try again."
+      );
+    } finally {
+      window.clearTimeout(timeout);
+      setPromotingId(null);
+    }
   }
 
-  async function copyPromotionText(text: string) {
+  async function copyPromotionText(text: string, copyKey: string) {
     await navigator.clipboard.writeText(text);
+    setCopiedPromotionKey(copyKey);
     setStatus("Copied promotion copy.");
+    window.setTimeout(() => {
+      setCopiedPromotionKey((current) => (current === copyKey ? null : current));
+    }, 2000);
   }
 
   const header = (
@@ -197,6 +267,8 @@ export function ListingDraftsPanel({ className = "", collapsed = false, listings
               : "Area not set";
             const mediaItems = listing.media ?? [];
             const mediaCount = mediaItems.length;
+            const selectedPromotionChannels = promotionChannelDrafts[listing.id] ?? defaultPromotionChannels;
+            const isPromotionSetupOpen = activePromotionSetupId === listing.id;
 
             return editingId === listing.id && editState ? (
               <form
@@ -377,25 +449,84 @@ export function ListingDraftsPanel({ className = "", collapsed = false, listings
                   >
                     <MessageCircle size={14} /> Ask Agent
                   </button>
-                  <button
-                    className="outline-button small"
-                    type="button"
-                    onClick={() => router.push(`/?listing=${listing.id}&mode=edit`)}
-                  >
-                    <Sparkles size={14} /> AI Edit
-                  </button>
                   <button className="outline-button small" type="button" onClick={() => startEditing(listing)}>
                     <Edit3 size={14} /> Edit
                   </button>
                   <button
-                    className="outline-button small"
+                    className="outline-button small promote-action-button"
                     type="button"
-                    onClick={() => void handlePromote(listing.id)}
+                    onClick={() => togglePromotionSetup(listing.id)}
                     disabled={promotingId === listing.id}
+                    aria-label={promotingId === listing.id ? "Generating promotion pack" : "Promote listing"}
                   >
-                    <Megaphone size={14} /> {promotingId === listing.id ? "Generating..." : "Promote"}
+                    {promotingId === listing.id ? (
+                      <LoaderCircle className="button-spinner" size={14} />
+                    ) : (
+                      <>
+                        <Megaphone size={14} />
+                        Promote
+                      </>
+                    )}
                   </button>
                 </div>
+
+                {isPromotionSetupOpen ? (
+                  <div className="promotion-channel-panel">
+                    <div className="promotion-channel-panel-header">
+                      <strong>Promotion channels</strong>
+                      <span>Generate only the channels you need.</span>
+                    </div>
+                    <div className="promotion-channel-options">
+                      {promotionChannelOptions.map((item) => (
+                        <label
+                          className={selectedPromotionChannels.includes(item.channel) ? "selected" : ""}
+                          key={item.channel}
+                        >
+                          <input
+                            checked={selectedPromotionChannels.includes(item.channel)}
+                            disabled={promotingId === listing.id}
+                            type="checkbox"
+                            onChange={() => togglePromotionChannel(listing.id, item.channel)}
+                          />
+                          <span>{item.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="promotion-channel-actions">
+                      <button
+                        className="primary-button small"
+                        disabled={promotingId === listing.id || selectedPromotionChannels.length === 0}
+                        type="button"
+                        onClick={() => void handlePromote(listing.id, selectedPromotionChannels)}
+                      >
+                        {promotingId === listing.id ? (
+                          <LoaderCircle className="button-spinner" size={14} />
+                        ) : (
+                          <Megaphone size={14} />
+                        )}
+                        Generate
+                      </button>
+                      <button
+                        className="outline-button small"
+                        disabled={promotingId === listing.id}
+                        type="button"
+                        onClick={() => setActivePromotionSetupId(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {promotingId === listing.id ? (
+                  <div className="promotion-loading-panel" role="status">
+                    <LoaderCircle className="button-spinner" size={15} />
+                    <span>
+                      Preparing {selectedPromotionChannels.length} channel
+                      {selectedPromotionChannels.length === 1 ? "" : "s"} and trackable links...
+                    </span>
+                  </div>
+                ) : null}
 
                 {promotions[listing.id] ? (
                   <div className="promotion-pack">
@@ -405,24 +536,55 @@ export function ListingDraftsPanel({ className = "", collapsed = false, listings
                         const selectedMedia = listing.media?.find(
                           (media) => media.id === card.selected_media_id
                         );
+                        const copyKey = `${listing.id}:${card.channel}`;
+                        const isCopied = copiedPromotionKey === copyKey;
                         return (
                           <article className="promotion-card" key={card.channel}>
                             <div className="promotion-card-header">
                               <span>{card.channel}</span>
                               <button
-                                className="icon-button compact"
+                                className={`icon-button compact promotion-copy-button${isCopied ? " copied" : ""}`}
                                 type="button"
-                                aria-label={`Copy ${card.channel} promotion`}
-                                onClick={() =>
-                                  void copyPromotionText(`${card.title}\n\n${card.body}\n\n${card.cta}`)
+                                aria-label={
+                                  isCopied ? `${card.channel} promotion copied` : `Copy ${card.channel} promotion`
                                 }
+                                onClick={() => void copyPromotionText(formatPromotionCopy(card), copyKey)}
                               >
-                                <Copy size={14} />
+                                {isCopied ? (
+                                  <>
+                                    <Check size={14} />
+                                    <span>Copied</span>
+                                  </>
+                                ) : (
+                                  <Copy size={14} />
+                                )}
                               </button>
                             </div>
                             <strong>{card.title}</strong>
                             <p>{card.body}</p>
                             <small>{card.cta}</small>
+                            {card.landing_url ? (
+                              <a
+                                className="promotion-inline-link"
+                                href={card.landing_url}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                <ExternalLink size={13} />
+                                <span>{card.landing_url}</span>
+                              </a>
+                            ) : null}
+                            {card.whatsapp_share_url ? (
+                              <a
+                                className="promotion-action-button secondary"
+                                href={card.whatsapp_share_url}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                <MessageCircle size={15} />
+                                <span>Share to WhatsApp</span>
+                              </a>
+                            ) : null}
                             <div className="promotion-media-brief">
                               {selectedMedia?.signed_url ? (
                                 <div className="listing-media-thumb">

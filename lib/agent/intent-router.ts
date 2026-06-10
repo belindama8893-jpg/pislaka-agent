@@ -99,7 +99,19 @@ export function isPromotionRequest(message: string) {
     return false;
   }
 
-  return /promote|promotion|marketing|advertise|campaign|推广|宣传|营销|发布文案|渠道文案/i.test(message);
+  const hasDirectPromotionCue =
+    /promote|promotion|marketing|advertise|campaign|facebook|instagram|portal|推广|宣传|营销|发布文案|渠道文案/i.test(
+      message
+    );
+  const hasExternalChannelPublishCue =
+    /\b(?:share|post|publish|send)\b.*\b(?:whats\s*app|whatsapp|wa|facebook|fb|instagram|insta|ig|portal|zameen|olx)\b/i.test(
+      message
+    ) ||
+    /\b(?:whats\s*app|whatsapp|wa|facebook|fb|instagram|insta|ig|portal|zameen|olx)\b.*\b(?:share|post|publish|send)\b/i.test(
+      message
+    );
+
+  return hasDirectPromotionCue || hasExternalChannelPublishCue;
 }
 
 export function isListingUpdateRequest(message: string) {
