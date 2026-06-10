@@ -400,6 +400,11 @@ type PendingMedia = {
   mediaType: "image" | "video";
 };
 
+type RemoteListingImage = {
+  url: string;
+  alt?: string;
+};
+
 type FailedMediaUpload = {
   id: string;
   name: string;
@@ -1038,6 +1043,100 @@ async function uploadListingMedia(
         error: error instanceof Error ? error.message : "Network error while uploading media"
       });
       onStatusChange?.(item.id, "failed");
+    }
+  }
+
+  return { uploadedMedia, failedMedia };
+}
+
+function getDraftRemoteImages(draft: ListingDraftInput): RemoteListingImage[] {
+  const payload = draft.ai_extracted_payload;
+  const remoteImages = payload?.remote_images;
+
+  if (!Array.isArray(remoteImages)) {
+    return [];
+  }
+
+  return remoteImages
+    .flatMap((item): RemoteListingImage[] => {
+      if (!item || typeof item !== "object") {
+        return [];
+      }
+
+      const record = item as Record<string, unknown>;
+      const url = typeof record.url === "string" ? record.url : "";
+      if (!url) {
+        return [];
+      }
+
+      const image: RemoteListingImage = { url };
+      if (typeof record.alt === "string") {
+        image.alt = record.alt;
+      }
+
+      return [image];
+    });
+}
+
+function getRemoteImagePreviewUrl(url: string) {
+  return `/api/listings/remote-image?url=${encodeURIComponent(url)}`;
+}
+
+async function importRemoteListingImages(
+  listingId: string,
+  images: RemoteListingImage[],
+  onStatusChange?: (mediaId: string, status: PendingMediaUploadStatus) => void
+): Promise<ListingMediaUploadResult> {
+  const uploadedMedia: ListingMediaRecord[] = [];
+  const failedMedia: FailedMediaUpload[] = [];
+
+  for (const [index, image] of images.entries()) {
+    const id = `remote-${index}`;
+    onStatusChange?.(id, "uploading");
+
+    try {
+      const response = await fetch("/api/listings/media", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "import-remote",
+          listing_id: listingId,
+          url: image.url
+        })
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        failedMedia.push({
+          id,
+          name: image.alt || `Imported image ${index + 1}`,
+          error: payload?.error ?? "Unable to import remote image"
+        });
+        onStatusChange?.(id, "failed");
+        continue;
+      }
+
+      const payload = (await response.json()) as { media?: ListingMediaRecord };
+      if (payload.media) {
+        uploadedMedia.push(payload.media);
+        onStatusChange?.(id, "uploaded");
+      } else {
+        failedMedia.push({
+          id,
+          name: image.alt || `Imported image ${index + 1}`,
+          error: "Import response did not include saved media"
+        });
+        onStatusChange?.(id, "failed");
+      }
+    } catch (error) {
+      failedMedia.push({
+        id,
+        name: image.alt || `Imported image ${index + 1}`,
+        error: error instanceof Error ? error.message : "Network error while importing image"
+      });
+      onStatusChange?.(id, "failed");
     }
   }
 
@@ -2242,21 +2341,34 @@ function DraftPreviewCard({
   const [mediaUploadStatus, setMediaUploadStatus] = useState<Record<string, PendingMediaUploadStatus>>({});
   const [status, setStatus] = useState<string | null>(null);
   const previewDraft = useMemo(() => formStateToDraft(form), [form]);
+  const remoteImages = useMemo(() => getDraftRemoteImages(draft), [draft]);
 
   async function handleConfirm() {
     if (isSaving || isSaved) {
       return;
     }
 
+    const draftToSave: ListingDraftInput = {
+      ...previewDraft,
+      ai_extracted_payload: draft.ai_extracted_payload
+        ? {
+            ...draft.ai_extracted_payload,
+            edited_in_agent_workspace: isEditing
+          }
+        : previewDraft.ai_extracted_payload,
+      ai_confidence: draft.ai_confidence ?? previewDraft.ai_confidence
+    };
+    const remoteStatusEntries = remoteImages.map((_, index) => [`remote-${index}`, "pending"] as const);
+
     setIsSaving(true);
-    setMediaUploadStatus(Object.fromEntries(pendingMedia.map((item) => [item.id, "pending"])));
-    setStatus(pendingMedia.length ? "Adding listing and media..." : "Adding to library...");
+    setMediaUploadStatus(Object.fromEntries([...pendingMedia.map((item) => [item.id, "pending"] as const), ...remoteStatusEntries]));
+    setStatus(pendingMedia.length || remoteImages.length ? "Adding listing and media..." : "Adding to library...");
     const response = await fetch("/api/listings/draft", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(previewDraft)
+      body: JSON.stringify(draftToSave)
     });
 
     if (!response.ok) {
@@ -2277,12 +2389,16 @@ function DraftPreviewCard({
     }
 
     try {
-      const { uploadedMedia, failedMedia } = await uploadListingMedia(listingId, pendingMedia, (mediaId, nextStatus) => {
+      const updateMediaStatus = (mediaId: string, nextStatus: PendingMediaUploadStatus) => {
         setMediaUploadStatus((current) => ({
           ...current,
           [mediaId]: nextStatus
         }));
-      });
+      };
+      const localUploadResult = await uploadListingMedia(listingId, pendingMedia, updateMediaStatus);
+      const remoteUploadResult = await importRemoteListingImages(listingId, remoteImages, updateMediaStatus);
+      const uploadedMedia = [...localUploadResult.uploadedMedia, ...remoteUploadResult.uploadedMedia];
+      const failedMedia = [...localUploadResult.failedMedia, ...remoteUploadResult.failedMedia];
       const uploadedCount = uploadedMedia.length;
       const failedCount = failedMedia.length;
       const failedDetails = failedMedia
@@ -2469,8 +2585,37 @@ function DraftPreviewCard({
       )}
 
       <div className="agent-media-panel" aria-label="Listing photos and video">
-        {pendingMedia.length ? (
+        {pendingMedia.length || remoteImages.length ? (
           <div className="agent-media-preview">
+            {remoteImages.map((item, index) => {
+              const uploadStatus = mediaUploadStatus[`remote-${index}`] ?? "pending";
+              const isUploading = uploadStatus === "uploading";
+              const isUploaded = uploadStatus === "uploaded";
+              const isFailed = uploadStatus === "failed";
+
+              return (
+                <div className={`agent-media-thumb ${uploadStatus}`} key={item.url}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={getRemoteImagePreviewUrl(item.url)}
+                    alt={item.alt || `Imported property image ${index + 1}`}
+                    referrerPolicy="no-referrer"
+                  />
+                  <span className="agent-media-source">Link</span>
+                  {uploadStatus !== "pending" ? (
+                    <span className="agent-media-upload-state" aria-label={`Imported image ${index + 1} ${uploadStatus}`}>
+                      {isUploading ? (
+                        <LoaderCircle className="spin-icon" size={16} />
+                      ) : isUploaded ? (
+                        <CheckCircle2 size={16} />
+                      ) : isFailed ? (
+                        <X size={15} />
+                      ) : null}
+                    </span>
+                  ) : null}
+                </div>
+              );
+            })}
             {pendingMedia.map((item) => {
               const uploadStatus = mediaUploadStatus[item.id] ?? "pending";
               const isUploading = uploadStatus === "uploading";

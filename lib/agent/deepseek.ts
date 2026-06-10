@@ -30,6 +30,7 @@ import {
   getResolvedTimeZone,
   toBrokerDatetimeLocal
 } from "@/lib/events/time";
+import { getListingImportUrl, importListingDraftFromUrl } from "@/lib/listings/import-from-url";
 
 const deepseekRequestTimeoutMs = 8000;
 
@@ -895,6 +896,31 @@ function formatRecentContext(context?: AgentRoutingContext) {
 }
 
 export async function routeAgentMessage(message: string, context?: AgentRoutingContext): Promise<AgentAction> {
+  const listingImportUrl = getListingImportUrl(message);
+  if (listingImportUrl) {
+    try {
+      const draft = await importListingDraftFromUrl(listingImportUrl);
+      const imageCount = draft.ai_extracted_payload.remote_images.length;
+
+      return {
+        intent: "create_listing_draft",
+        requires_confirmation: true,
+        response: `I imported the listing details from that link and found ${imageCount} image${imageCount === 1 ? "" : "s"}. Please review before adding it to your library.`,
+        payload: draft
+      };
+    } catch {
+      return {
+        intent: "general_reply",
+        requires_confirmation: false,
+        response:
+          "I found the listing link, but I could not read that page yet. Please paste the key property details, or try the link again.",
+        payload: {
+          source_url: listingImportUrl
+        }
+      };
+    }
+  }
+
   const routingMessage = buildLocationEnhancedRoutingMessage(message, context?.locationContext);
   const localIntent = classifyLocalIntent(routingMessage);
 

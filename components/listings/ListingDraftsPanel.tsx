@@ -442,13 +442,9 @@ export function ListingDraftsPanel({ className = "", collapsed = false, listings
                 </div>
 
                 <div className="listing-row-actions">
-                  <button
-                    className="outline-button small"
-                    type="button"
-                    onClick={() => router.push(`/?listing=${listing.id}`)}
-                  >
+                  <a className="outline-button small" href={`/?listing=${listing.id}`}>
                     <MessageCircle size={14} /> Ask Agent
-                  </button>
+                  </a>
                   <button className="outline-button small" type="button" onClick={() => startEditing(listing)}>
                     <Edit3 size={14} /> Edit
                   </button>

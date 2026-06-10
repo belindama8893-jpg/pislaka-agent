@@ -5,6 +5,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 const bucketName = "listing-media";
 const maxImageBytes = 12 * 1024 * 1024;
 const maxVideoBytes = 120 * 1024 * 1024;
+const allowedRemoteImageHosts = new Set(["image.pislaka.com", "media.zameen.com"]);
 
 function getSafeExtension(fileName: string, fallback: string) {
   const extension = fileName.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -33,6 +34,31 @@ function getMediaTypeFromContentType(contentType: string) {
   }
 
   return null;
+}
+
+function getExtensionFromContentType(contentType: string) {
+  if (contentType.includes("png")) {
+    return "png";
+  }
+  if (contentType.includes("webp")) {
+    return "webp";
+  }
+  if (contentType.includes("gif")) {
+    return "gif";
+  }
+  return "jpg";
+}
+
+function validateRemoteImageUrl(value: string) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || !allowedRemoteImageHosts.has(url.hostname)) {
+      return null;
+    }
+    return url;
+  } catch {
+    return null;
+  }
 }
 
 async function getOwnedListing(
@@ -122,13 +148,14 @@ export async function POST(request: Request) {
     if (contentType.includes("application/json")) {
       const body = (await request.json().catch(() => null)) as
         | {
-            action?: "prepare-upload" | "complete-upload";
+            action?: "prepare-upload" | "complete-upload" | "import-remote";
             content_type?: string;
             file_name?: string;
             file_size?: number;
             listing_id?: string;
             media_type?: "image" | "video";
             storage_path?: string;
+            url?: string;
           }
         | null;
       const action = body?.action;
@@ -210,6 +237,65 @@ export async function POST(request: Request) {
 
         if (result.error || !result.media) {
           return NextResponse.json({ error: result.error ?? "Unable to save media" }, { status: 500 });
+        }
+
+        return NextResponse.json({
+          media: {
+            ...result.media,
+            signed_url: result.signedUrl
+          }
+        });
+      }
+
+      if (action === "import-remote") {
+        const remoteUrl = typeof body?.url === "string" ? validateRemoteImageUrl(body.url) : null;
+        if (!remoteUrl) {
+          return NextResponse.json({ error: "Unsupported remote image URL" }, { status: 400 });
+        }
+
+        const remoteResponse = await fetch(remoteUrl, {
+          signal: AbortSignal.timeout(15000)
+        });
+
+        if (!remoteResponse.ok) {
+          return NextResponse.json({ error: "Unable to download remote image" }, { status: 502 });
+        }
+
+        const fileContentType = remoteResponse.headers.get("content-type") ?? "";
+        const mediaType = getMediaTypeFromContentType(fileContentType);
+        if (mediaType !== "image") {
+          return NextResponse.json({ error: "Remote URL is not an image" }, { status: 400 });
+        }
+
+        const fileBuffer = Buffer.from(await remoteResponse.arrayBuffer());
+        if (fileBuffer.byteLength > maxImageBytes) {
+          return NextResponse.json({ error: "Remote image is too large" }, { status: 400 });
+        }
+
+        const service = createServiceClient();
+        const extension = getExtensionFromContentType(fileContentType);
+        const storagePath = `${broker.id}/${listingId}/${crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await service.storage.from(bucketName).upload(storagePath, fileBuffer, {
+          contentType: fileContentType,
+          upsert: false
+        });
+
+        if (uploadError) {
+          return NextResponse.json({ error: uploadError.message }, { status: 500 });
+        }
+
+        const result = await createMediaRecord({
+          brokerId: broker.id,
+          contentType: fileContentType,
+          fileSize: fileBuffer.byteLength,
+          listingId,
+          mediaType,
+          storagePath,
+          supabase
+        });
+
+        if (result.error || !result.media) {
+          return NextResponse.json({ error: result.error ?? "Unable to save remote image" }, { status: 500 });
         }
 
         return NextResponse.json({
