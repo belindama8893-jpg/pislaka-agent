@@ -3506,6 +3506,14 @@ a {
   box-shadow: 0 0 0 3px var(--primary-light);
 }
 
+.lead-capture-form input:disabled,
+.lead-capture-form select:disabled,
+.lead-capture-form textarea:disabled {
+  color: var(--muted);
+  background: rgba(248, 250, 252, 0.9);
+  cursor: not-allowed;
+}
+
 .lead-capture-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3521,6 +3529,20 @@ a {
   width: 100%;
   min-height: 44px;
   justify-content: center;
+}
+
+.lead-capture-form .primary-button:disabled {
+  cursor: not-allowed;
+}
+
+.lead-capture-form .form-status {
+  grid-column: 1 / -1;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.lead-capture-form .form-status.success {
+  color: var(--primary);
 }
 
 .lead-row {

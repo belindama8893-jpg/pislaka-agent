@@ -1,10 +1,12 @@
 "use client";
 
 import { type FormEvent, useState } from "react";
+import { Check } from "lucide-react";
 
 export function LeadCaptureForm({ campaignCode }: { campaignCode: string }) {
   const [status, setStatus] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
 
   function buildLeadMessage(formData: FormData) {
     const message = String(formData.get("message") || "").trim();
@@ -24,6 +26,10 @@ export function LeadCaptureForm({ campaignCode }: { campaignCode: string }) {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSubmitted) {
+      return;
+    }
+
     const form = event.currentTarget;
     const formData = new FormData(form);
 
@@ -51,7 +57,7 @@ export function LeadCaptureForm({ campaignCode }: { campaignCode: string }) {
       return;
     }
 
-    form.reset();
+    setIsSubmitted(true);
     setStatus("Inquiry sent. The broker will follow up soon.");
     setIsSubmitting(false);
   }
@@ -60,24 +66,31 @@ export function LeadCaptureForm({ campaignCode }: { campaignCode: string }) {
     <form className="lead-capture-form" onSubmit={handleSubmit}>
       <label>
         <span>Name</span>
-        <input name="full_name" autoComplete="name" required />
+        <input name="full_name" autoComplete="name" disabled={isSubmitting || isSubmitted} required />
       </label>
       <label>
         <span>Phone / WhatsApp</span>
-        <input name="phone" type="tel" inputMode="tel" autoComplete="tel" required />
+        <input
+          name="phone"
+          type="tel"
+          inputMode="tel"
+          autoComplete="tel"
+          disabled={isSubmitting || isSubmitted}
+          required
+        />
       </label>
       <label>
         <span>Email</span>
-        <input name="email" type="email" autoComplete="email" />
+        <input name="email" type="email" autoComplete="email" disabled={isSubmitting || isSubmitted} />
       </label>
       <div className="lead-capture-grid">
         <label>
           <span>Budget</span>
-          <input name="budget" placeholder="PKR 1 Crore" />
+          <input name="budget" placeholder="PKR 1 Crore" disabled={isSubmitting || isSubmitted} />
         </label>
         <label>
           <span>Viewing</span>
-          <select name="viewing_window" defaultValue="">
+          <select name="viewing_window" defaultValue="" disabled={isSubmitting || isSubmitted}>
             <option value="">Select timing</option>
             <option value="Today">Today</option>
             <option value="Tomorrow">Tomorrow</option>
@@ -87,7 +100,7 @@ export function LeadCaptureForm({ campaignCode }: { campaignCode: string }) {
         </label>
         <label>
           <span>Need</span>
-          <select name="buyer_intent" defaultValue="">
+          <select name="buyer_intent" defaultValue="" disabled={isSubmitting || isSubmitted}>
             <option value="">Select need</option>
             <option value="Buying for self">Buying for self</option>
             <option value="Investment">Investment</option>
@@ -97,7 +110,7 @@ export function LeadCaptureForm({ campaignCode }: { campaignCode: string }) {
         </label>
         <label>
           <span>Contact</span>
-          <select name="contact_preference" defaultValue="WhatsApp">
+          <select name="contact_preference" defaultValue="WhatsApp" disabled={isSubmitting || isSubmitted}>
             <option value="WhatsApp">WhatsApp</option>
             <option value="Phone call">Phone call</option>
             <option value="SMS">SMS</option>
@@ -109,12 +122,21 @@ export function LeadCaptureForm({ campaignCode }: { campaignCode: string }) {
         <textarea
           name="message"
           defaultValue="I am interested in this property. Please share more details."
+          disabled={isSubmitting || isSubmitted}
         />
       </label>
-      <button className="primary-button" type="submit" disabled={isSubmitting}>
-        {isSubmitting ? "Sending..." : "Send inquiry"}
+      <button className="primary-button" type="submit" disabled={isSubmitting || isSubmitted}>
+        {isSubmitted ? (
+          <>
+            <Check size={16} /> Sent
+          </>
+        ) : isSubmitting ? (
+          "Sending..."
+        ) : (
+          "Send inquiry"
+        )}
       </button>
-      {status ? <p className="form-status">{status}</p> : null}
+      {status ? <p className={`form-status${isSubmitted ? " success" : ""}`}>{status}</p> : null}
     </form>
   );
 }
