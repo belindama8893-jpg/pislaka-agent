@@ -95,6 +95,9 @@ export const agentActionSchema = z.object({
     "update_listing_draft",
     "publish_listing",
     "create_campaign_links",
+    "list_today_followups",
+    "record_lead_followup",
+    "create_followup_from_chat",
     "list_leads",
     "draft_lead_reply",
     "create_schedule_event",
@@ -142,6 +145,11 @@ export const leadOperationPayloadSchema = z.object({
   lead_name: z.string().optional(),
   status: z.enum(["new", "contacted", "qualified", "closed", "lost"]).optional(),
   urgency: z.enum(["low", "normal", "high"]).optional(),
+  activity_type: z
+    .enum(["message_sent", "status_changed", "note_added", "whatsapp_opened", "followup_summary_saved"])
+    .optional(),
+  summary: z.string().optional(),
+  message_draft: z.string().optional(),
   query: z.string().optional(),
   status_filter: z.enum(["new", "contacted", "qualified", "closed", "lost", "all"]).optional(),
   channel_filter: z.string().optional()

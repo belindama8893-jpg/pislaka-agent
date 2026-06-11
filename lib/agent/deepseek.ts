@@ -57,6 +57,9 @@ Supported intents:
 - create_lead
 - update_listing_draft
 - create_campaign_links
+- list_today_followups
+- record_lead_followup
+- create_followup_from_chat
 - list_leads
 - draft_lead_reply
 - create_schedule_event
@@ -155,6 +158,19 @@ Lead operation output shape:
   }
 }
 
+Follow-up record output shape:
+{
+  "intent": "record_lead_followup",
+  "requires_confirmation": true,
+  "response": "I found a follow-up update. Please confirm before I update the lead record.",
+  "payload": {
+    "lead_name": "Ahmed",
+    "activity_type": "message_sent",
+    "status": "contacted",
+    "summary": "Sent WhatsApp message to Ahmed"
+  }
+}
+
 Lead creation output shape:
 {
   "intent": "create_lead",
@@ -187,12 +203,16 @@ Lead rules:
 - Use create_lead when the user asks to add, create, record, or save a lead/customer/buyer.
 - Use update_lead_listing when the user asks to link, attach, associate, move, change, or assign a lead/customer/buyer to a listing/property.
 - Use list_leads when the user asks who/which leads/customers/buyers to follow up, new leads, hot leads, or today's leads.
+- Use list_today_followups when the user asks specifically who to follow up today or today's follow-ups.
+- Use record_lead_followup when the user says they sent a message, contacted a lead, the lead is interested/hot, or the lead is not interested.
 - Use draft_lead_reply when the user asks to reply to a lead/customer/buyer.
 - Use update_lead_status when the user asks to mark/change/update a lead status.
 - Use update_lead_details when the user asks to edit a lead's phone, email, name, or message.
 - If the user says hot lead, set status to qualified and urgency to high.
 - Never update a lead without confirmation.
 - Never update lead contact details without confirmation.
+- Open WhatsApp and reply draft do not mean sent. Only record message_sent when the broker says it was sent or clicks Sent.
+- Interested or hot maps to status qualified and urgency high. Not interested maps to status lost.
 - Use update_listing_draft when the user asks to change/edit/update/correct an existing listing or this/current listing.
 - Never save listing edits without confirmation.
 
@@ -232,6 +252,50 @@ function parseLocalLeadStatusUpdate(message: string): AgentAction {
       lead_name: leadName,
       ...status,
       query: message
+    }
+  };
+}
+
+function parseLocalTodayFollowUps(message: string): AgentAction {
+  return {
+    intent: "list_today_followups",
+    requires_confirmation: false,
+    response: "Here are the leads that need follow-up today.",
+    payload: {
+      query: message,
+      status_filter: "all"
+    }
+  };
+}
+
+function parseLocalLeadFollowUpRecord(message: string): AgentAction {
+  const leadName = extractLeadName(message);
+  const status = extractLeadStatus(message);
+  const isNotInterested = /not interested|said no|不感兴趣|没兴趣/i.test(message);
+  const isInterested = /interested|seems hot|hot|有兴趣|高意向/i.test(message) && !isNotInterested;
+  const isSent = /sent (?:the )?(?:message|whatsapp)|message sent|mark .*contacted|contacted|已发送|已经联系/i.test(
+    message
+  );
+  const activityType = isSent ? "message_sent" : "status_changed";
+  const mappedStatus = isNotInterested
+    ? ({ status: "lost" as const })
+    : isInterested
+      ? ({ status: "qualified" as const, urgency: "high" as const })
+      : status;
+
+  return {
+    intent: "record_lead_followup",
+    requires_confirmation: activityType === "status_changed",
+    response:
+      activityType === "message_sent"
+        ? "I found a sent-message follow-up. Click Sent to record it."
+        : "I prepared a lead status follow-up. Please confirm before I update the lead record.",
+    payload: {
+      lead_name: leadName,
+      activity_type: activityType,
+      summary: message,
+      query: message,
+      ...mappedStatus
     }
   };
 }
@@ -704,7 +768,9 @@ function normalizeAgentAction(action: AgentAction, message: string, context?: Ag
   if (
     action.intent === "create_lead" ||
     action.intent === "list_leads" ||
+    action.intent === "list_today_followups" ||
     action.intent === "draft_lead_reply" ||
+    action.intent === "record_lead_followup" ||
     action.intent === "update_lead_status" ||
     action.intent === "update_lead_details" ||
     action.intent === "update_lead_listing"
@@ -760,6 +826,10 @@ function normalizeAgentAction(action: AgentAction, message: string, context?: Ag
 
     const parsedPayload = leadOperationPayloadSchema.safeParse(action.payload);
     if (!parsedPayload.success) {
+      if (action.intent === "record_lead_followup") {
+        return parseLocalLeadFollowUpRecord(message);
+      }
+
       if (action.intent === "update_lead_status") {
         return parseLocalLeadStatusUpdate(message);
       }
@@ -768,12 +838,18 @@ function normalizeAgentAction(action: AgentAction, message: string, context?: Ag
         return parseLocalLeadReplyRequest(message);
       }
 
+      if (action.intent === "list_today_followups") {
+        return parseLocalTodayFollowUps(message);
+      }
+
       return parseLocalLeadQuery(message);
     }
 
     return {
       ...action,
-      requires_confirmation: action.intent === "update_lead_status",
+      requires_confirmation:
+        action.intent === "update_lead_status" ||
+        (action.intent === "record_lead_followup" && parsedPayload.data.activity_type === "status_changed"),
       payload: parsedPayload.data
     };
   }
@@ -846,6 +922,8 @@ function parseLocalAgentAction(message: string, context?: AgentRoutingContext): 
   const intent = classifyLocalIntent(message);
 
   switch (intent) {
+    case "today_followups":
+      return parseLocalTodayFollowUps(message);
     case "lead_create":
       return parseLocalLeadCreate(message);
     case "lead_reply":
@@ -854,6 +932,8 @@ function parseLocalAgentAction(message: string, context?: AgentRoutingContext): 
       return parseLocalLeadDetailsUpdate(message);
     case "lead_listing_update":
       return parseLocalLeadListingUpdate(message);
+    case "lead_followup_record":
+      return parseLocalLeadFollowUpRecord(message);
     case "lead_status_update":
       return parseLocalLeadStatusUpdate(message);
     case "schedule_event":

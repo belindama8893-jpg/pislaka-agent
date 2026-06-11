@@ -141,6 +141,10 @@ function leadQueryFromPayload(payload: Pick<LeadOperationPayload, "lead_name" | 
 }
 
 function scheduleLeadQueryFromPayload(payload: BrokerEventDraftInput) {
+  if (isPlaceholderParticipant(payload.lead_name)) {
+    return "";
+  }
+
   return [payload.lead_name].filter(Boolean).join(" ").trim();
 }
 
@@ -155,6 +159,73 @@ function scheduleEventNeedsParticipant(payload: BrokerEventDraftInput) {
     payload.event_type === "handover" ||
     payload.event_type === "follow_up"
   );
+}
+
+function isPlaceholderParticipant(value: string | null | undefined) {
+  return /^(?:him|her|them|he|she|they|client|lead|buyer|seller)$/i.test((value ?? "").trim());
+}
+
+function scheduleTitleHasPlaceholderParticipant(title: string | null | undefined) {
+  return /\b(?:with|for|to)\s+(?:him|her|them|client|lead|buyer|seller)\b/i.test(title ?? "");
+}
+
+function buildResolvedScheduleTitle(
+  payload: BrokerEventDraftInput,
+  participantName: string,
+  originalMessage?: string
+) {
+  const message = originalMessage ?? payload.description ?? "";
+
+  if (payload.event_type === "viewing") {
+    return `Viewing with ${participantName}`;
+  }
+
+  if (payload.event_type === "contract_signing") {
+    return `Contract signing with ${participantName}`;
+  }
+
+  if (payload.event_type === "handover") {
+    return `Handover with ${participantName}`;
+  }
+
+  if (payload.event_type === "follow_up") {
+    if (/\b(call|phone|ring|callback|call back)\b|打电话|回电|电话/i.test(message)) {
+      return `Call ${participantName}`;
+    }
+
+    return `Follow up with ${participantName}`;
+  }
+
+  return payload.title || payload.event_type.replace(/_/g, " ");
+}
+
+function shouldRefreshScheduleTitle(payload: BrokerEventDraftInput) {
+  if (!payload.title?.trim()) {
+    return true;
+  }
+
+  const normalizedTitle = payload.title.trim().toLowerCase();
+  if (
+    scheduleEventNeedsParticipant(payload) &&
+    (normalizedTitle === payload.event_type.replace(/_/g, " ") ||
+      normalizedTitle === "follow up" ||
+      normalizedTitle === "viewing" ||
+      normalizedTitle === "contract signing" ||
+      normalizedTitle === "handover")
+  ) {
+    return true;
+  }
+
+  if (scheduleTitleHasPlaceholderParticipant(payload.title)) {
+    return true;
+  }
+
+  const participantName = payload.lead_name;
+  if (participantName && isPlaceholderParticipant(participantName) && payload.title.toLowerCase().includes(participantName.toLowerCase())) {
+    return true;
+  }
+
+  return false;
 }
 
 function queryMentionsCurrentListing(query: string) {
@@ -407,7 +478,9 @@ async function resolveScheduleEventEntities(
       };
     }
 
-    nextPayload.lead_name = leadLabel(matchedLead);
+    nextPayload.lead_name = isPlaceholderParticipant(payload.lead_name)
+      ? leadLabel(matchedLead)
+      : (payload.lead_name ?? leadLabel(matchedLead));
     sourcePayload.resolved_lead = toResolutionCandidate(matchedLead);
   } else if (selectedLeadId) {
     const matchedLead = leads.find((lead) => lead.id === selectedLeadId);
@@ -422,7 +495,9 @@ async function resolveScheduleEventEntities(
     }
 
     nextPayload.lead_id = matchedLead.id;
-    nextPayload.lead_name = leadLabel(matchedLead);
+    nextPayload.lead_name = isPlaceholderParticipant(payload.lead_name)
+      ? leadLabel(matchedLead)
+      : (payload.lead_name ?? leadLabel(matchedLead));
     sourcePayload.resolved_lead = toResolutionCandidate(matchedLead);
   } else {
     const leadQuery = scheduleLeadQueryFromPayload(payload);
@@ -460,10 +535,20 @@ async function resolveScheduleEventEntities(
         }
 
         nextPayload.lead_id = best.lead.id;
-        nextPayload.lead_name = payload.lead_name ?? leadLabel(best.lead);
+        nextPayload.lead_name = isPlaceholderParticipant(payload.lead_name)
+          ? leadLabel(best.lead)
+          : (payload.lead_name ?? leadLabel(best.lead));
         sourcePayload.resolved_lead = toResolutionCandidate(best.lead);
       }
     }
+  }
+
+  if (
+    nextPayload.lead_name &&
+    !isPlaceholderParticipant(nextPayload.lead_name) &&
+    shouldRefreshScheduleTitle(payload)
+  ) {
+    nextPayload.title = buildResolvedScheduleTitle(payload, nextPayload.lead_name, options.originalMessage);
   }
 
   const listings = await getListingsForResolution(supabase, brokerId);
@@ -570,6 +655,7 @@ export async function resolveAgentActionEntities(
 ): Promise<AgentAction> {
   if (
     action.intent !== "draft_lead_reply" &&
+    action.intent !== "record_lead_followup" &&
     action.intent !== "create_lead" &&
     action.intent !== "update_lead_details" &&
     action.intent !== "update_lead_listing" &&
@@ -613,6 +699,55 @@ export async function resolveAgentActionEntities(
             status: "no_match",
             target_type: "listing"
           }
+    };
+  }
+
+  if (action.intent === "record_lead_followup") {
+    const parsedPayload = leadOperationPayloadSchema.safeParse(action.payload);
+    if (!parsedPayload.success) {
+      return action;
+    }
+
+    const leads = await getRecentLeadsForBroker(supabase, brokerId, 100, { includeClosed: true });
+    const leadResolution = resolveLeadFromPayload(
+      parsedPayload.data,
+      leads,
+      getSelectedContextId(options, "lead")
+    );
+
+    if (leadResolution.ambiguous) {
+      return {
+        ...action,
+        resolution: {
+          status: "ambiguous",
+          target_type: "lead",
+          candidates: leadResolution.candidates
+        }
+      };
+    }
+
+    if (!leadResolution.lead) {
+      return {
+        ...action,
+        resolution: {
+          status: "needs_clarification",
+          target_type: "lead"
+        }
+      };
+    }
+
+    return {
+      ...action,
+      payload: {
+        ...parsedPayload.data,
+        lead_id: leadResolution.lead.id
+      },
+      resolution: {
+        status: "matched",
+        target_type: "lead",
+        target_id: leadResolution.lead.id,
+        matched: toResolutionCandidate(leadResolution.lead)
+      }
     };
   }
 

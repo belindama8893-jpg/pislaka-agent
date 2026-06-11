@@ -4,6 +4,8 @@ export type LocalIntentKind =
   | "lead_status_update"
   | "lead_details_update"
   | "lead_listing_update"
+  | "today_followups"
+  | "lead_followup_record"
   | "schedule_event"
   | "schedule_query"
   | "lead_query"
@@ -66,6 +68,18 @@ export function isLeadStatusRequest(message: string) {
     /mark|set|change|update|status|contacted|qualified|closed|lost|hot|cold|标记|改成|状态|已联系|成交|丢失|无效|高意向/i.test(
       message
     ) && isLeadQueryRequest(message)
+  );
+}
+
+export function isTodayFollowUpsRequest(message: string) {
+  return /who should i follow up today|show today'?s follow[-\s]?ups|today'?s follow[-\s]?ups|any hot leads today|which clients need reply|今天.*跟.*客户|今天.*跟进|今日.*跟进/i.test(
+    message
+  );
+}
+
+export function isLeadFollowUpRecordRequest(message: string) {
+  return /sent (?:the )?(?:message|whatsapp)|message sent|mark .*contacted|replied interested|is interested|seems hot|not interested|said no|已发送|已经联系|有兴趣|高意向|不感兴趣|没兴趣/i.test(
+    message
   );
 }
 
@@ -145,6 +159,10 @@ export function isListingDraftRequest(message: string) {
 }
 
 export function classifyLocalIntent(message: string): LocalIntentKind {
+  if (isTodayFollowUpsRequest(message)) {
+    return "today_followups";
+  }
+
   if (isLeadCreateRequest(message)) {
     return "lead_create";
   }
@@ -159,6 +177,10 @@ export function classifyLocalIntent(message: string): LocalIntentKind {
 
   if (isLeadListingUpdateRequest(message)) {
     return "lead_listing_update";
+  }
+
+  if (isLeadFollowUpRecordRequest(message)) {
+    return "lead_followup_record";
   }
 
   if (isLeadStatusRequest(message)) {
@@ -196,11 +218,18 @@ export function extractLeadName(message: string) {
   const englishMatch = message.match(
     /\b(?:reply to|respond to|message back|message|with|for|follow up|call|remind me to call|to)\s+([\p{L}\p{N}'-]+(?:\s+[\p{L}\p{N}'-]+){0,2})/iu
   );
+  const subjectMatch = message.match(
+    /^\s*([\p{L}\p{N}'-]+(?:\s+[\p{L}\p{N}'-]+){0,2})\s+(?:replied|is|seems|said|has|有兴趣|不感兴趣|没兴趣)/iu
+  );
   const englishName = englishMatch?.[1]
     ?.replace(/\s+\b(?:today|tomorrow|tonight|next|this|at|for|about|on|in|with|my)\b.*$/iu, "")
     .trim();
+  const normalizedEnglishName = englishName?.toLowerCase();
   const match =
-    (englishName ? [, englishName] : null) ??
+    (englishName && !/^(?:him|her|them|he|she|they|client|lead|buyer|seller)$/i.test(normalizedEnglishName ?? "")
+      ? [, englishName]
+      : null) ??
+    (subjectMatch?.[1] ? [, subjectMatch[1]] : null) ??
     message.match(/(?:客户|跟进|提醒|回复|回消息)\s*([\p{L}\p{N} ]{2,24})/u);
 
   const candidate = match?.[1]?.trim();

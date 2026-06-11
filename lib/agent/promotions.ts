@@ -130,7 +130,7 @@ function fallbackPromotion(
           channel: "whatsapp",
           title,
           body: `${title}\n${facts}\nMessage me for details or a viewing slot.`,
-          cta: "Reply on WhatsApp to schedule a viewing.",
+          cta: "Reply to schedule a viewing.",
           image_brief: imageBrief,
           selected_media_id: pickMediaId(listing)
         },
@@ -138,7 +138,7 @@ function fallbackPromotion(
           channel: "facebook",
           title: `${title} - ${listing.location_area ?? listing.city ?? "Pakistan"}`,
           body: `${listing.description ?? title}\n\nKey details: ${facts}. Suitable for serious buyers looking for a clear, well-located option.`,
-          cta: "Send a message for price details and viewing availability.",
+          cta: "Message for price & viewing.",
           image_brief: "Use a clean hero image with the property facade or the most spacious interior angle.",
           selected_media_id: pickMediaId(listing)
         },
@@ -154,7 +154,7 @@ function fallbackPromotion(
           channel: "portal",
           title,
           body: `${listing.description ?? title}\n\n${facts}`,
-          cta: "Contact broker for viewing and availability.",
+          cta: "Contact for viewing.",
           image_brief: "Use straightforward listing images: exterior first, then living area, bedrooms, kitchen, and floor plan.",
           selected_media_id: pickMediaId(listing)
         }

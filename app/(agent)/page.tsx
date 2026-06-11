@@ -3,7 +3,7 @@ import { AgentWorkspace } from "@/components/agent/AgentWorkspace";
 import { ProfileCompletionForm } from "@/components/profile/ProfileCompletionForm";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
 import { getAgentChatMessages } from "@/lib/agent/conversations";
-import { getRecentLeadsForBroker } from "@/lib/leads/queries";
+import { getLeadsByIdsForBroker, getRecentLeadsForBroker } from "@/lib/leads/queries";
 import type { ListingMediaRecord, ListingRecord } from "@/lib/listings/types";
 import { createServiceClient, createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -165,6 +165,7 @@ export default async function Home({ searchParams }: HomeProps) {
   ]);
   const selectedListingId = getSearchParamValue(resolvedSearchParams, "listing");
   const selectedLeadId = getSearchParamValue(resolvedSearchParams, "lead");
+  const importMode = getSearchParamValue(resolvedSearchParams, "import");
   const selectedLeadIds = [
     selectedLeadId,
     ...(getSearchParamValue(resolvedSearchParams, "leads") ?? "")
@@ -172,11 +173,14 @@ export default async function Home({ searchParams }: HomeProps) {
       .map((item) => item.trim())
       .filter(Boolean)
   ].filter((item): item is string => Boolean(item));
+  const exactSelectedLeads = await getLeadsByIdsForBroker(supabase, broker.id, selectedLeadIds);
+  const leadsById = new Map([...leads, ...exactSelectedLeads].map((lead) => [lead.id, lead]));
+  const allLeads = Array.from(leadsById.values());
   const selectedListing = selectedListingId
     ? listings.find((listing) => listing.id === selectedListingId)
     : null;
   const selectedLeads = selectedLeadIds.length
-    ? leads.filter((lead) => selectedLeadIds.includes(lead.id))
+    ? selectedLeadIds.map((id) => leadsById.get(id)).filter((lead): lead is NonNullable<typeof lead> => Boolean(lead))
     : [];
   const selectedLeadAttachments = selectedLeads.map((selectedLead) => ({
     id: `lead:${selectedLead.id}`,
@@ -263,9 +267,10 @@ export default async function Home({ searchParams }: HomeProps) {
             conversationId={chatHistory.conversationId}
             firstName={firstName}
             hasOlderMessages={chatHistory.hasMore}
+            initialWhatsAppImportOpen={importMode === "whatsapp"}
             initialContextAttachments={initialContextAttachments}
             initialMessages={chatHistory.messages}
-            recentLeads={leads}
+            recentLeads={allLeads}
             recentListings={listings.map((listing) => ({
               id: listing.id,
               status: listing.status,

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { generateLeadSummary } from "@/lib/agent/lead-summaries";
 import { requireCurrentBroker } from "@/lib/auth/current-user";
-import { getRecentLeadsForBroker } from "@/lib/leads/queries";
+import { getRecentLeadsForBroker, leadBaseSelect } from "@/lib/leads/queries";
 import type { ListingRecord } from "@/lib/listings/types";
 import { createServiceClient } from "@/lib/supabase/server";
 
@@ -37,7 +37,14 @@ const leadUpdateSchema = z.object({
   email: z.string().email().nullable().optional(),
   message: z.string().max(1000).nullable().optional(),
   status: z.enum(["new", "contacted", "qualified", "closed", "lost"]).optional(),
-  urgency: z.enum(["low", "normal", "high"]).optional()
+  urgency: z.enum(["low", "normal", "high"]).optional(),
+  last_contacted_at: z.string().datetime().nullable().optional(),
+  next_follow_up_at: z.string().datetime().nullable().optional(),
+  last_note: z.string().max(4000).nullable().optional(),
+  interested_listing_id: z.string().uuid().nullable().optional(),
+  interested_area: z.string().max(200).nullable().optional(),
+  budget_min: z.number().nullable().optional(),
+  budget_max: z.number().nullable().optional()
 }).refine((value) => Object.keys(value).some((key) => key !== "id"), {
   message: "At least one lead field must be provided"
 });
@@ -103,7 +110,7 @@ export async function POST(request: Request) {
           urgency: parsedManualLead.data.urgency,
           status: parsedManualLead.data.status
         })
-        .select("id, broker_id, listing_id, campaign_link_id, source_channel, full_name, phone, email, message, status, urgency, ai_summary, created_at, updated_at")
+        .select(leadBaseSelect)
         .single();
 
       if (leadError || !lead) {
@@ -206,7 +213,7 @@ export async function PATCH(request: Request) {
 
     const { data: existingLead, error: readError } = await supabase
       .from("leads")
-      .select("id, broker_id, listing_id, campaign_link_id, source_channel, full_name, phone, email, message, status, urgency, ai_summary, created_at, updated_at")
+      .select(leadBaseSelect)
       .eq("id", id)
       .eq("broker_id", broker.id)
       .single();
@@ -223,7 +230,7 @@ export async function PATCH(request: Request) {
       })
       .eq("id", id)
       .eq("broker_id", broker.id)
-      .select("id, broker_id, listing_id, campaign_link_id, source_channel, full_name, phone, email, message, status, urgency, ai_summary, created_at, updated_at")
+      .select(leadBaseSelect)
       .single();
 
     if (error || !lead) {

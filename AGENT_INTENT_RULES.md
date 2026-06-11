@@ -13,6 +13,49 @@ Pislaka Agent is an intent router for Pakistani real estate brokers. The chat bo
 5. High-risk actions require explicit confirmation.
 6. Search and update must be scoped to the current broker.
 7. Ambiguity must stop execution. The agent can ask a follow-up question or show candidates, but cannot choose silently.
+8. Open WhatsApp is not sent. `reply_drafted` and `whatsapp_opened` never update `last_contacted_at`; only `message_sent` does.
+
+## Interaction Protocol
+
+The agent workflow is:
+
+1. Understand context.
+2. Classify intent.
+3. Resolve the exact entity.
+4. Show one action card.
+5. Execute only after the broker confirms or clicks the explicit action.
+
+Natural-language analysis belongs in the assistant reply, not inside the action card. Cards should show deterministic fields, confirmed entities, and the single choice or action available at that step. A card must not contain a whole nested workflow.
+
+After the broker clicks an action, the previous card is considered completed and should not be used for repeated decisions or duplicate writes. The agent should continue with a new assistant message and, when needed, a new single-purpose card.
+
+When a broker uploads or pastes a WhatsApp chat without an explicit instruction, the default first step is analysis plus an immediately generated reply card. Reply drafting is the broker's most common first need and does not write business state. Follow-up management is a separate next-step path after the lead is resolved.
+
+WhatsApp chat import must reconcile against the existing lead library before proposing follow-up actions:
+
+1. Extract customer identity signals from the chat, such as name, phone number, listing link, area, budget, and buyer wording.
+2. Search broker-owned leads for exact and high-confidence matches.
+3. If a matching lead exists, read the lead's current state and recent progress: status, urgency, last note, last contacted time, next follow-up time, interested area/listing, budget, and recent follow-up activities.
+4. Compare the new chat against the existing lead state before recommending an action. The assistant should explain what is new, what changed, and what still needs confirmation.
+5. If no matching lead exists, treat the chat as a first-contact conversation and offer reply drafting plus optional lead creation.
+
+This comparison is what makes the workflow a follow-up assistant rather than a generic chat summarizer. The agent should not recommend status changes, reminders, or saved follow-up notes from the new chat alone when an existing lead history is available.
+
+When the broker gives an explicit instruction with the chat, route directly to the matching action:
+
+- "Help me reply" goes to a reply draft card.
+- "Save this as follow-up" goes to a follow-up note confirmation card.
+- "Set a reminder" goes to a reminder confirmation card.
+- "Update this customer's status" goes to a status confirmation card.
+- "Analyze this" returns natural-language analysis and no database write.
+
+All cards should be reusable across flows. For example, a matched lead should use the same compact lead card style whether it appears after chat import, entity resolution, reminder setup, or status update.
+
+Next-step suggestions must be selective, not a fixed menu. The agent should show only the highest-probability action supported by chat content and lead history. Examples: show reminder only when the chat mentions timing, viewing, or a requested callback; show status update only when there is a strong interested/not-interested signal; show note save only when the chat adds meaningful new follow-up context. Lower-probability actions should remain available through natural-language commands.
+
+When the suggested action is a lead status update, phrase it as a yes/no recommendation. The confirmation should both save the chat summary as follow-up context and apply the suggested status/urgency update in one click. If the broker chooses No, make no database write and let the broker continue with natural language.
+
+Confirmation card titles should be the decision question, not a generic section heading. The card body should show the exact deterministic fields that will be written, such as current status, proposed status, follow-up record text, and follow-up time. Avoid explanatory paragraphs when the field table already makes the action clear.
 
 ## Intent Domains
 
@@ -25,6 +68,8 @@ This domain creates, queries, or updates broker-owned records.
 | `create_listing_draft` | "Create a 10 marla villa in DHA Phase 5" | Listing facts | Editable listing preview | Required before save |
 | `update_listing_draft` | "Change this listing price to 1.2 crore" | Listing target + changed fields | Editable update preview | Required |
 | `list_leads` | "Show my hot leads" | Lead filters | Lead list or no-match message | Not required for read |
+| `list_today_followups` | "Who should I follow up today?" | Broker-owned leads | Ranked follow-up list | Not required for read |
+| `record_lead_followup` | "I sent message to Ahmed" | Exact lead target | Follow-up activity preview/action | Required for status changes; Sent button is explicit action |
 | `update_lead_status` | "Mark Ahmed as hot lead" | Exact lead target + new status | Status update preview | Required |
 | `create_schedule_event` | "Schedule viewing with Ahmed tomorrow 3pm" | Event type + time + participant | Calendar preview | Required |
 | `list_schedule_events` | "What do I have today?" | Date/filter | Event list | Not required for read |
@@ -167,6 +212,8 @@ Schedule is an independent workflow and does not require every event to bind a l
 | Message | Correct intent | Notes |
 | --- | --- | --- |
 | "Reply to Ahmed on WhatsApp" | `draft_lead_reply` | WhatsApp is a channel parameter |
+| "Who should I follow up today?" | `list_today_followups` | Read-only ranked follow-up recommendations |
+| "I sent message to Ahmed" | `record_lead_followup` | Resolve Ahmed before writing `message_sent` |
 | "Mark Ahmed as hot lead" | `update_lead_status` | Must exact-match Ahmed first |
 | "Show hot leads" | `list_leads` | Read-only |
 | "Promote my DHA 5 10 marla villa on WhatsApp and Facebook" | `create_campaign_links` | Requires listing confirmation and channel selection |
@@ -250,6 +297,8 @@ Implemented now:
 - Frontend sends `current_listing_id` when the broker has an active listing context.
 - Frontend still has local lead scoring as a compatibility fallback when `resolution` is missing.
 - Frontend still has local listing scoring as a compatibility fallback when `resolution` is missing.
+- Follow-up Lite P0 records `reply_drafted`, `whatsapp_opened`, `message_sent`, and `status_changed` as database activities.
+- WhatsApp chat import P0 supports pasted text and `.txt` upload as preview-only summaries. Zip import is P0.5.
 
 Not implemented yet:
 

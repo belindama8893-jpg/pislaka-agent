@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { generateLeadReplyDraft } from "@/lib/agent/lead-replies";
 import { requireCurrentBroker } from "@/lib/auth/current-user";
+import { leadBaseSelect } from "@/lib/leads/queries";
 import type { LeadListItem, LeadRecord } from "@/lib/leads/types";
 import type { ListingRecord } from "@/lib/listings/types";
 
@@ -51,9 +52,7 @@ export async function POST(request: Request) {
     const { supabase, broker } = await requireCurrentBroker();
     const { data: lead, error: leadError } = await supabase
       .from("leads")
-      .select(
-        "id, broker_id, listing_id, campaign_link_id, source_channel, full_name, phone, email, message, status, urgency, ai_summary, created_at, updated_at"
-      )
+      .select(leadBaseSelect)
       .eq("id", parsed.data.lead_id)
       .eq("broker_id", broker.id)
       .single();
@@ -115,11 +114,29 @@ export async function POST(request: Request) {
       }
     });
 
+    await supabase.from("follow_up_activities").insert({
+      broker_id: broker.id,
+      lead_id: leadRow.id,
+      related_listing_id: leadRow.listing_id,
+      activity_type: "reply_drafted",
+      channel: "whatsapp",
+      summary: draft.next_step,
+      message_draft: draft.reply_text,
+      old_status: leadRow.status,
+      new_status: null,
+      source_type: "agent_chat",
+      original_chat_saved: false,
+      original_chat_text: null
+    });
+
     return NextResponse.json({
       draft: {
         ...draft,
-        whatsapp_url
-      }
+        whatsapp_url,
+        lead_id: leadRow.id
+      },
+      lead: leadContext,
+      listing: (listing as ListingRecord | null) ?? null
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";

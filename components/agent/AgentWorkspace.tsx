@@ -26,6 +26,7 @@ import { useRouter } from "next/navigation";
 import type { AgentChatMessageRecord } from "@/lib/agent/conversations";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { BrokerEventDraftInput, BrokerEventRecord } from "@/lib/events/types";
+import { formatLeadStatusLabel, getLeadStatusClassName } from "@/lib/leads/display";
 import {
   formatBrokerDateTime,
   fromBrokerDatetimeLocal,
@@ -44,6 +45,7 @@ import type {
   ListingUpdatePayload,
   ScheduleEventListPayload
 } from "@/lib/agent/types";
+import { isScheduleRequest } from "@/lib/agent/intent-router";
 import type { ListingDraftInput, ListingDraftUpdateInput, ListingMediaRecord } from "@/lib/listings/types";
 import type { ListingPromotion, PromotionChannel } from "@/lib/promotions/types";
 
@@ -70,6 +72,7 @@ type AgentWorkspaceProps = {
   conversationId: string;
   firstName: string;
   hasOlderMessages: boolean;
+  initialWhatsAppImportOpen?: boolean;
   initialMessages: AgentChatMessageRecord[];
   initialContextAttachments?: ChatContextAttachment[];
   recentListings: RecentListingSummary[];
@@ -97,6 +100,13 @@ type ChatMessage = {
   leadListingUpdate?: LeadListingUpdatePreview;
   leadStatusUpdate?: LeadStatusUpdatePreview;
   leadReply?: LeadReplyDraftWithLink;
+  chatImport?: ChatImportPreview;
+  chatReplyAction?: ChatReplyActionPreview;
+  chatFollowupManage?: ChatFollowupManagePreview;
+  chatFollowupNote?: ChatFollowupManagePreview;
+  chatReminder?: ChatFollowupManagePreview;
+  chatStatus?: ChatFollowupManagePreview;
+  chatLeadChoice?: ChatLeadChoicePreview;
   listingUpdate?: ListingUpdatePreview;
   listingUpdateChoices?: ListingUpdateChoicePreview;
   entitySelection?: EntitySelectionPreview;
@@ -135,6 +145,8 @@ type LeadStatusUpdatePreview = {
   lead: LeadListItem;
   status?: LeadRecord["status"];
   urgency?: LeadRecord["urgency"];
+  activityType?: "message_sent" | "status_changed";
+  summary?: string;
 };
 
 type LeadDetailsUpdateChanges = Partial<Pick<LeadDetailsUpdatePayload, "full_name" | "phone" | "email" | "message">>;
@@ -146,6 +158,13 @@ type LeadDetailsUpdatePreview = {
 
 type LeadCreatePreview = {
   payload: LeadCreatePayload;
+  followUp?: LeadCreateFollowUpPreview;
+};
+
+type LeadCreateFollowUpPreview = {
+  summary: string;
+  sourceType: ChatFollowupSummary["source_type"];
+  messageDraft?: string;
 };
 
 type LeadBatchStatusUpdatePreview = {
@@ -183,7 +202,68 @@ type EntitySelectionPreview = {
 
 type LeadReplyDraftWithLink = LeadReplyDraft & {
   whatsapp_url: string;
+  lead_id?: string;
 };
+
+type ChatFollowupSummary = {
+  source_type: "whatsapp_paste" | "whatsapp_txt_upload" | "whatsapp_zip_upload";
+  save_original_chat_text: boolean;
+  original_chat_text: string | null;
+  resolution_status: "matched" | "ambiguous" | "no_match" | "needs_clarification";
+  matched_lead: LeadListItem | null;
+  candidate_leads: LeadListItem[];
+  detected_customer_name: string | null;
+  detected_phone: string | null;
+  chat_summary: string;
+  customer_needs: string[];
+  interested_area: string | null;
+  interested_listing_text: string | null;
+  budget: {
+    min: number | null;
+    max: number | null;
+    text: string | null;
+  };
+  viewing_intent: string | null;
+  main_objections: string[];
+  status_suggestion: LeadRecord["status"];
+  urgency_suggestion: LeadRecord["urgency"];
+  next_action_suggestion: string;
+  reply_draft: LeadReplyDraft;
+};
+
+type ZipTextCandidate = {
+  name: string;
+  size: number;
+};
+
+type ChatImportPreview = {
+  summary?: ChatFollowupSummary;
+  zipCandidates?: ZipTextCandidate[];
+  pendingZipFile?: File;
+  selectedLead?: LeadListItem | null;
+  selectedLeadId?: string | null;
+};
+
+type ChatImportAction = "reply" | "manage_followup" | "choose_lead" | "create_lead";
+
+type ChatReplyActionPreview = {
+  summary: ChatFollowupSummary;
+  lead?: LeadListItem | null;
+};
+
+type ChatFollowupManagePreview = {
+  summary: ChatFollowupSummary;
+  lead: LeadListItem;
+  suggestedAction?: ChatFollowupNextAction;
+};
+
+type ChatLeadChoicePreview = {
+  summary: ChatFollowupSummary;
+  candidates: LeadListItem[];
+};
+
+type ChatFollowupNextAction = "note" | "reminder" | "status";
+type ChatImportRequestedAction = "reply" | "save_followup" | "set_reminder" | "update_status" | "analyze_only" | "unknown";
 
 type AgentResolution = NonNullable<AgentAction["resolution"]>;
 type AgentResolutionCandidate = NonNullable<AgentResolution["matched"]>;
@@ -203,6 +283,13 @@ type ChatMessageUiPayload = Partial<
     | "leadListingUpdate"
     | "leadStatusUpdate"
     | "leadReply"
+    | "chatImport"
+    | "chatReplyAction"
+    | "chatFollowupManage"
+    | "chatFollowupNote"
+    | "chatReminder"
+    | "chatStatus"
+    | "chatLeadChoice"
     | "listingUpdate"
     | "listingUpdateChoices"
     | "entitySelection"
@@ -259,6 +346,13 @@ function resolutionCandidateToLead(candidate: AgentResolutionCandidate): LeadLis
     status: (candidate.status as LeadRecord["status"] | undefined) ?? "new",
     urgency: null,
     ai_summary: null,
+    last_contacted_at: null,
+    next_follow_up_at: null,
+    last_note: null,
+    budget_min: null,
+    budget_max: null,
+    interested_area: null,
+    interested_listing_id: null,
     created_at: new Date().toISOString(),
     updated_at: null,
     listing_title: candidate.listing_title ?? null,
@@ -327,6 +421,13 @@ function structuredPayloadForMessage(message: ChatMessage): Record<string, unkno
     "leadListingUpdate",
     "leadStatusUpdate",
     "leadReply",
+    "chatImport",
+    "chatReplyAction",
+    "chatFollowupManage",
+    "chatFollowupNote",
+    "chatReminder",
+    "chatStatus",
+    "chatLeadChoice",
     "listingUpdate",
     "listingUpdateChoices",
     "entitySelection",
@@ -338,7 +439,15 @@ function structuredPayloadForMessage(message: ChatMessage): Record<string, unkno
     "promotionChannels"
   ] as const) {
     if (message[key] !== undefined) {
-      ui[key] = message[key];
+      ui[key] =
+        key === "chatImport"
+          ? {
+              summary: message.chatImport?.summary,
+              selectedLead: message.chatImport?.selectedLead,
+              selectedLeadId: message.chatImport?.selectedLeadId,
+              zipCandidates: message.chatImport?.pendingZipFile ? undefined : message.chatImport?.zipCandidates
+            }
+          : message[key];
     }
   }
 
@@ -421,6 +530,7 @@ type ListingMediaUploadResult = {
 type PendingFileAttachment = {
   id: string;
   file: File;
+  kind?: "document" | "whatsapp_chat";
 };
 
 function ChannelLogo({ channel }: { channel: PromotionChannel }) {
@@ -718,6 +828,150 @@ function formatFileSize(bytes: number) {
   return `${megabytes.toFixed(megabytes >= 100 ? 0 : 1)} MB`;
 }
 
+function formatChatImportBudget(summary: ChatFollowupSummary) {
+  if (summary.budget.text) {
+    return summary.budget.text;
+  }
+
+  if (summary.budget.min) {
+    return `PKR ${summary.budget.min.toLocaleString("en-PK")}`;
+  }
+
+  return "Not detected";
+}
+
+function getDefaultFollowUpReminderLocalValue() {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  date.setHours(10, 0, 0, 0);
+  const offsetMs = date.getTimezoneOffset() * 60000;
+
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function buildChatImportNarrative(summary: ChatFollowupSummary, lead: LeadListItem | null) {
+  const lines = [
+    `I read the WhatsApp chat. ${summary.chat_summary}`,
+    lead
+      ? `It looks connected to ${lead.full_name || lead.phone || "the selected lead"} (${formatLeadStatusLabel(lead.status, lead.urgency)}).`
+      : summary.detected_customer_name || summary.detected_phone
+        ? `I detected ${[summary.detected_customer_name, summary.detected_phone].filter(Boolean).join(" · ")}, but I have not confirmed an existing lead yet.`
+        : "I have not confirmed which lead this belongs to yet."
+  ];
+
+  return lines.join("\n\n");
+}
+
+function recommendChatFollowupAction(summary: ChatFollowupSummary, lead: LeadListItem): ChatFollowupNextAction | null {
+  const signalText = [
+    summary.chat_summary,
+    summary.next_action_suggestion,
+    summary.viewing_intent,
+    summary.interested_area,
+    summary.interested_listing_text,
+    ...summary.customer_needs,
+    ...summary.main_objections
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  const hasViewingTime = Boolean(summary.viewing_intent) || /\b(today|tomorrow|tonight|morning|evening|pm|am|visit|viewing|schedule|appointment|6pm|7pm|8pm)\b/i.test(signalText);
+  const isStrongLost = summary.status_suggestion === "lost" || /not interested|no longer|stop|don't contact|dont contact|not looking/i.test(signalText);
+  const isStrongQualified =
+    summary.status_suggestion === "qualified" ||
+    summary.urgency_suggestion === "high" ||
+    /interested|serious|confirm|budget|final demand|documents clear|ready to visit/i.test(signalText);
+
+  if (isStrongLost) {
+    return "status";
+  }
+
+  if ((lead.status === "new" || lead.status === "contacted") && isStrongQualified) {
+    return "status";
+  }
+
+  if (hasViewingTime) {
+    return "reminder";
+  }
+
+  if (summary.chat_summary && summary.chat_summary.length > 24) {
+    return "note";
+  }
+
+  return null;
+}
+
+function getSuggestedLeadStatus(summary: ChatFollowupSummary): {
+  status: LeadRecord["status"];
+  urgency?: LeadRecord["urgency"];
+} {
+  if (summary.status_suggestion === "qualified") {
+    return {
+      status: "qualified",
+      urgency: summary.urgency_suggestion === "high" ? "high" : summary.urgency_suggestion
+    };
+  }
+
+  if (summary.status_suggestion === "lost") {
+    return { status: "lost" };
+  }
+
+  return {
+    status: summary.status_suggestion || "contacted",
+    urgency: summary.urgency_suggestion ?? undefined
+  };
+}
+
+function buildLeadCreateFollowUpFromChat(summary: ChatFollowupSummary): LeadCreateFollowUpPreview {
+  return {
+    summary: summary.chat_summary,
+    sourceType: summary.source_type,
+    messageDraft: summary.reply_draft?.reply_text
+  };
+}
+
+function looksLikeWhatsAppChatText(message: string) {
+  const trimmed = message.trim();
+
+  if (/\bSelected context:\s+(?:Lead|Listing)\b/i.test(trimmed)) {
+    return false;
+  }
+
+  return (
+    /whats\s*app|whatsapp|chat export|messages and calls are end-to-end encrypted/i.test(trimmed) ||
+    /^\[?\d{1,2}[/.:-]\d{1,2}[/.:-]\d{2,4},?\s+\d{1,2}:\d{2}/m.test(trimmed) ||
+    /^[\p{L}\p{N} ._+\-()]+:\s+.+$/mu.test(trimmed)
+  );
+}
+
+function detectChatImportRequestedAction(message: string): ChatImportRequestedAction {
+  const normalized = message.toLowerCase();
+
+  if (/回复|回他|回她|reply|respond|draft/i.test(message)) {
+    return "reply";
+  }
+  if (/提醒|remind|reminder|follow up later|跟进时间/i.test(message)) {
+    return "set_reminder";
+  }
+  if (/状态|更新.*客户|更新.*线索|qualified|interested|not interested|lost|status/i.test(message)) {
+    return "update_status";
+  }
+  if (/保存|记录|加入.*跟进|保存.*跟进|save|record|note/i.test(message)) {
+    return "save_followup";
+  }
+  if (/分析|总结|看看|summari[sz]e|analy[sz]e/i.test(message)) {
+    return "analyze_only";
+  }
+
+  return normalized.trim() ? "unknown" : "unknown";
+}
+
+function isWhatsAppChatFile(file: File) {
+  const name = file.name.toLowerCase();
+
+  return name.endsWith(".txt") || name.endsWith(".zip");
+}
+
 function listingToContextAttachment(listing: RecentListingSummary): ChatContextAttachment {
   const area = [listing.area_value, listing.area_unit].filter(Boolean).join(" ");
   const location = [listing.location_area, listing.city].filter(Boolean).join(", ");
@@ -772,7 +1026,7 @@ function leadToContextAttachment(lead: LeadListItem): ChatContextAttachment {
     type: "lead",
     entity_id: lead.id,
     label: lead.full_name || lead.phone || lead.email || "Unnamed buyer",
-    summary: [lead.status, getLeadInterestLine(lead), lead.phone || null].filter(Boolean).join(" · "),
+    summary: [formatLeadStatusLabel(lead.status, lead.urgency), getLeadInterestLine(lead), lead.phone || null].filter(Boolean).join(" · "),
     snapshot: {
       status: lead.status,
       urgency: lead.urgency,
@@ -788,14 +1042,56 @@ function leadToContextAttachment(lead: LeadListItem): ChatContextAttachment {
   };
 }
 
-function summarizeContextAttachments(contextAttachments: ChatContextAttachment[]) {
-  if (!contextAttachments.length) {
-    return "";
+function uniqueLeadsById(leads: LeadListItem[]) {
+  const seen = new Set<string>();
+  const unique: LeadListItem[] = [];
+
+  for (const lead of leads) {
+    if (seen.has(lead.id)) {
+      continue;
+    }
+    seen.add(lead.id);
+    unique.push(lead);
   }
 
-  return `Selected context: ${contextAttachments
-    .map((item) => `${item.type === "listing" ? "Listing" : "Lead"} ${item.label}`)
-    .join(", ")}.`;
+  return unique;
+}
+
+function leadFromContextAttachment(attachment: ChatContextAttachment): LeadListItem | null {
+  if (attachment.type !== "lead") {
+    return null;
+  }
+
+  const snapshot = attachment.snapshot ?? {};
+
+  return {
+    id: attachment.entity_id,
+    broker_id: "",
+    listing_id: null,
+    campaign_link_id: null,
+    source_channel: typeof snapshot.source_channel === "string" ? snapshot.source_channel : null,
+    full_name: typeof snapshot.full_name === "string" ? snapshot.full_name : attachment.label,
+    phone: typeof snapshot.phone === "string" ? snapshot.phone : null,
+    email: typeof snapshot.email === "string" ? snapshot.email : null,
+    message: null,
+    status: (typeof snapshot.status === "string" ? snapshot.status : "new") as LeadRecord["status"],
+    urgency: (typeof snapshot.urgency === "string" ? snapshot.urgency : null) as LeadRecord["urgency"],
+    ai_summary: null,
+    last_contacted_at: null,
+    next_follow_up_at: null,
+    last_note: null,
+    budget_min: null,
+    budget_max: null,
+    interested_area: null,
+    interested_listing_id: null,
+    created_at: new Date().toISOString(),
+    updated_at: null,
+    listing_title: typeof snapshot.listing_title === "string" ? snapshot.listing_title : null,
+    listing_area: typeof snapshot.listing_area === "string" ? snapshot.listing_area : null,
+    listing_city: typeof snapshot.listing_city === "string" ? snapshot.listing_city : null,
+    campaign_code: null,
+    campaign_channel: typeof snapshot.campaign_channel === "string" ? snapshot.campaign_channel : null
+  };
 }
 
 function summarizeFileAttachments(fileAttachments: PendingFileAttachment[]) {
@@ -1251,13 +1547,70 @@ function scoreLeadMatch(message: string, lead: LeadListItem) {
   return score;
 }
 
-function filterLeadsByPayload(leads: LeadListItem[], payload: LeadOperationPayload) {
-  const statusFilter = payload.status_filter;
+function getChatLeadCandidateEvidence(summary: ChatFollowupSummary, lead: LeadListItem) {
+  const detectedPhone = normalizeWhatsAppPhone(summary.detected_phone);
+  const leadPhone = normalizeWhatsAppPhone(lead.phone);
+  const detectedName = normalizeListingText(summary.detected_customer_name ?? "");
+  const leadName = normalizeListingText(lead.full_name ?? "");
+  const chatText = normalizeListingText(
+    [
+      summary.detected_customer_name,
+      summary.detected_phone,
+      summary.chat_summary,
+      summary.interested_area,
+      summary.interested_listing_text,
+      ...summary.customer_needs,
+      ...summary.main_objections
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+  const evidence: string[] = [];
+
+  if (detectedPhone && leadPhone) {
+    const shorterPhone = detectedPhone.length < leadPhone.length ? detectedPhone : leadPhone;
+    const longerPhone = detectedPhone.length < leadPhone.length ? leadPhone : detectedPhone;
+    if (shorterPhone.length >= 7 && longerPhone.endsWith(shorterPhone)) {
+      evidence.push("phone");
+    }
+  }
+
+  if (detectedName && leadName) {
+    const detectedNameTokens = detectedName.split(" ").filter((token) => token.length >= 3);
+    const leadNameTokens = leadName.split(" ").filter((token) => token.length >= 3);
+    const sharedNameTokens = detectedNameTokens.filter((token) => leadNameTokens.includes(token));
+
+    if (detectedName === leadName || sharedNameTokens.length >= 1) {
+      evidence.push("name");
+    }
+  }
+
+  if (lead.email && chatText.includes(normalizeListingText(lead.email))) {
+    evidence.push("email");
+  }
+
+  if (lead.listing_title && chatText.includes(normalizeListingText(lead.listing_title))) {
+    evidence.push("listing");
+  }
+
+  return evidence;
+}
+
+function getVerifiedChatLeadCandidates(summary: ChatFollowupSummary) {
+  return uniqueLeadsById(summary.candidate_leads).filter((lead) => getChatLeadCandidateEvidence(summary, lead).length > 0);
+}
+
+function filterLeadsByPayload(leads: LeadListItem[], payload: LeadOperationPayload, fallbackQuery = "") {
+  const queryText = [payload.query, payload.lead_name, fallbackQuery].filter(Boolean).join(" ");
+  const inferredFilter = inferLeadStatusFilterFromQuery(queryText);
+  const statusFilter = payload.status_filter && payload.status_filter !== "all" ? payload.status_filter : inferredFilter?.status_filter;
+  const urgencyFilter = payload.urgency ?? inferredFilter?.urgency;
   const channelFilter = payload.channel_filter?.toLowerCase();
   const explicitLeadQuery = payload.lead_name ? normalizeListingText(payload.lead_name) : "";
 
   return leads
-    .filter((lead) => statusFilter === "all" || !statusFilter || lead.status === statusFilter)
+    .filter((lead) => !statusFilter || lead.status === statusFilter)
+    .filter((lead) => !urgencyFilter || lead.urgency === urgencyFilter)
     .filter((lead) => {
       if (!channelFilter) {
         return true;
@@ -1292,6 +1645,64 @@ function filterLeadsByPayload(leads: LeadListItem[], payload: LeadOperationPaylo
     });
 }
 
+function describeLeadResultSet(payload: LeadOperationPayload, fallbackQuery = "") {
+  const queryText = [payload.query, payload.lead_name, fallbackQuery].filter(Boolean).join(" ");
+  const inferredFilter = inferLeadStatusFilterFromQuery(queryText);
+  const statusFilter = payload.status_filter && payload.status_filter !== "all" ? payload.status_filter : inferredFilter?.status_filter;
+  const urgencyFilter = payload.urgency ?? inferredFilter?.urgency;
+
+  if (statusFilter === "qualified" && urgencyFilter === "high") {
+    return { singular: "hot lead", plural: "hot leads" };
+  }
+
+  if (statusFilter === "qualified") {
+    return { singular: "interested lead", plural: "interested leads" };
+  }
+
+  if (statusFilter === "lost") {
+    return { singular: "not interested lead", plural: "not interested leads" };
+  }
+
+  if (statusFilter === "contacted") {
+    return { singular: "contacted lead", plural: "contacted leads" };
+  }
+
+  if (statusFilter === "new") {
+    return { singular: "new lead", plural: "new leads" };
+  }
+
+  return { singular: "matching lead", plural: "matching leads" };
+}
+
+function formatLeadResultCount(count: number, payload: LeadOperationPayload, fallbackQuery = "") {
+  const descriptor = describeLeadResultSet(payload, fallbackQuery);
+  return count === 1 ? `You have 1 ${descriptor.singular}.` : `You have ${count} ${descriptor.plural}.`;
+}
+
+function inferLeadStatusFilterFromQuery(query: string): Pick<LeadOperationPayload, "status_filter" | "urgency"> | null {
+  if (/\bhot\b|高意向|强意向/i.test(query)) {
+    return { status_filter: "qualified", urgency: "high" };
+  }
+
+  if (/interested|有兴趣|感兴趣/i.test(query)) {
+    return { status_filter: "qualified" };
+  }
+
+  if (/not interested|lost|无效|丢失|不感兴趣|没兴趣/i.test(query)) {
+    return { status_filter: "lost" };
+  }
+
+  if (/contacted|已联系|联系过|跟进过/i.test(query)) {
+    return { status_filter: "contacted" };
+  }
+
+  if (/\bnew\b|新线索|新客户/i.test(query)) {
+    return { status_filter: "new" };
+  }
+
+  return null;
+}
+
 function formatLeadCreatedAt(createdAt: string) {
   return new Intl.DateTimeFormat("en-PK", {
     month: "short",
@@ -1322,7 +1733,70 @@ function makeWhatsAppReplyUrl(phone: string | null, text: string) {
 }
 
 async function copyToClipboard(text: string) {
-  await navigator.clipboard.writeText(text);
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    document.body.removeChild(textarea);
+
+    if (!copied) {
+      throw new Error("Copy is not available in this browser.");
+    }
+  }
+}
+
+async function saveChatFollowUpActivity({
+  lead,
+  summary,
+  activityType,
+  newStatus,
+  urgency,
+  nextFollowUpAt,
+  note
+}: {
+  lead: LeadListItem;
+  summary: ChatFollowupSummary;
+  activityType: "followup_summary_saved" | "status_changed" | "whatsapp_opened" | "message_sent" | "reminder_created";
+  newStatus?: LeadRecord["status"];
+  urgency?: LeadRecord["urgency"];
+  nextFollowUpAt?: string;
+  note?: string;
+}) {
+  const response = await fetch("/api/leads/followup-activities", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      lead_id: lead.id,
+      activity_type: activityType,
+      channel: "whatsapp",
+      summary: note?.trim() || summary.chat_summary,
+      message_draft: summary.reply_draft.reply_text,
+      source_type: summary.source_type,
+      original_chat_saved: summary.save_original_chat_text,
+      original_chat_text: summary.original_chat_text,
+      new_status: newStatus,
+      urgency,
+      next_follow_up_at: nextFollowUpAt
+    })
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? "Unable to save follow-up.");
+  }
+
+  const payload = (await response.json().catch(() => null)) as { lead?: LeadRecord } | null;
+  return payload?.lead ?? null;
 }
 
 function getRecordingMimeType() {
@@ -1542,11 +2016,11 @@ function LeadResultsCard({
                 <strong>{lead.full_name || "Unnamed buyer"}</strong>
                 <p>{getLeadInterestLine(lead)}</p>
                 <small>
-                  {lead.status} · {lead.phone || "No phone"} · {formatLeadCreatedAt(lead.created_at)}
+                  {formatLeadStatusLabel(lead.status, lead.urgency)} · {lead.phone || "No phone"} · {formatLeadCreatedAt(lead.created_at)}
                 </small>
               </div>
               <div className="lead-chat-row-action">
-                <span className={`lead-status ${lead.status}`}>{lead.status}</span>
+                <span className={getLeadStatusClassName(lead.status, lead.urgency)}>{formatLeadStatusLabel(lead.status, lead.urgency)}</span>
                 {onSelect ? (
                   <button
                     className="outline-button small"
@@ -1619,17 +2093,29 @@ function LeadStatusConfirmCard({
     }
 
     setIsSaving(true);
-    setStatus("Updating lead...");
-    const response = await fetch("/api/leads", {
-      method: "PATCH",
+    setStatus(preview.activityType ? "Saving follow-up..." : "Updating lead...");
+    const response = await fetch(preview.activityType ? "/api/leads/followup-activities" : "/api/leads", {
+      method: preview.activityType ? "POST" : "PATCH",
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        id: preview.lead.id,
-        status: preview.status,
-        urgency: preview.urgency ?? undefined
-      })
+      body: JSON.stringify(
+        preview.activityType
+          ? {
+              lead_id: preview.lead.id,
+              activity_type: preview.activityType,
+              channel: "whatsapp",
+              summary: preview.summary,
+              new_status: preview.status,
+              urgency: preview.urgency ?? undefined,
+              source_type: "agent_chat"
+            }
+          : {
+              id: preview.lead.id,
+              status: preview.status,
+              urgency: preview.urgency ?? undefined
+            }
+      )
     });
 
     if (!response.ok) {
@@ -1665,12 +2151,12 @@ function LeadStatusConfirmCard({
           <strong>{preview.lead.full_name || "Unnamed buyer"}</strong>
           <p>{getLeadInterestLine(preview.lead)}</p>
           <small>
-            {preview.lead.status} {preview.status ? `→ ${preview.status}` : ""} ·{" "}
+            {formatLeadStatusLabel(preview.lead.status, preview.lead.urgency)} {preview.status ? `→ ${formatLeadStatusLabel(preview.status, preview.urgency)}` : ""} ·{" "}
             {preview.lead.phone || "No phone"}
           </small>
         </div>
-        <span className={`lead-status ${preview.status ?? preview.lead.status}`}>
-          {preview.status ?? preview.lead.status}
+        <span className={getLeadStatusClassName(preview.status ?? preview.lead.status, preview.urgency ?? preview.lead.urgency)}>
+          {formatLeadStatusLabel(preview.status ?? preview.lead.status, preview.urgency ?? preview.lead.urgency)}
         </span>
       </div>
     </AgentOutputCard>
@@ -1750,7 +2236,7 @@ function LeadDetailsConfirmCard({
           <p>{getLeadInterestLine(preview.lead)}</p>
           <small>{preview.lead.phone || "No phone"}</small>
         </div>
-        <span className={`lead-status ${preview.lead.status}`}>{preview.lead.status}</span>
+        <span className={getLeadStatusClassName(preview.lead.status, preview.lead.urgency)}>{formatLeadStatusLabel(preview.lead.status, preview.lead.urgency)}</span>
       </div>
       <div className="listing-update-list">
         {entries.map(([field, nextValue]) => (
@@ -1772,7 +2258,7 @@ function LeadCreateConfirmCard({
   onSaved
 }: {
   preview: LeadCreatePreview;
-  onSaved: () => void;
+  onSaved: (lead: LeadRecord | null, savedFollowUp: boolean) => void;
 }) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
@@ -1785,7 +2271,7 @@ function LeadCreateConfirmCard({
     }
 
     setIsSaving(true);
-    setStatus("Saving lead...");
+    setStatus(preview.followUp ? "Saving lead and follow-up..." : "Saving lead...");
     const response = await fetch("/api/leads", {
       method: "POST",
       headers: {
@@ -1801,9 +2287,42 @@ function LeadCreateConfirmCard({
       return;
     }
 
-    setStatus("Lead saved.");
+    const createPayload = (await response.json().catch(() => null)) as { lead?: LeadRecord } | null;
+    const savedLead = createPayload?.lead ?? null;
+    let savedFollowUp = false;
+
+    if (preview.followUp && savedLead?.id) {
+      const followUpResponse = await fetch("/api/leads/followup-activities", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          lead_id: savedLead.id,
+          activity_type: "followup_summary_saved",
+          channel: "whatsapp",
+          summary: preview.followUp.summary,
+          message_draft: preview.followUp.messageDraft,
+          source_type: preview.followUp.sourceType,
+          original_chat_saved: false
+        })
+      });
+
+      if (!followUpResponse.ok) {
+        const payload = (await followUpResponse.json().catch(() => null)) as { error?: string } | null;
+        setStatus(payload?.error ?? "Lead saved, but follow-up was not saved.");
+        onSaved(savedLead, false);
+        router.refresh();
+        setIsSaving(false);
+        return;
+      }
+
+      savedFollowUp = true;
+    }
+
+    setStatus(savedFollowUp ? "Lead and follow-up saved." : "Lead saved.");
     setIsSaved(true);
-    onSaved();
+    onSaved(savedLead, savedFollowUp);
     router.refresh();
     setIsSaving(false);
   }
@@ -1827,8 +2346,7 @@ function LeadCreateConfirmCard({
           ["Name", preview.payload.full_name],
           ["Phone", preview.payload.phone],
           ["Email", preview.payload.email],
-          ["Status", preview.payload.status ?? "new"],
-          ["Urgency", preview.payload.urgency ?? "normal"],
+          ["Status", formatLeadStatusLabel(preview.payload.status ?? "new", preview.payload.urgency ?? "normal")],
           ["Message", preview.payload.message]
         ]
           .filter(([, value]) => Boolean(value))
@@ -1841,6 +2359,16 @@ function LeadCreateConfirmCard({
             </div>
           ))}
       </div>
+      {preview.followUp ? (
+        <div className="listing-update-list compact">
+          <div className="listing-update-row">
+            <span>Follow-up record</span>
+            <div>
+              <strong>{preview.followUp.summary}</strong>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </AgentOutputCard>
   );
 }
@@ -1926,10 +2454,12 @@ function LeadBatchStatusConfirmCard({
             <div>
               <strong>{lead.full_name || lead.phone || "Unnamed buyer"}</strong>
               <small>
-                {lead.status} {preview.status ? `→ ${preview.status}` : ""} · {lead.phone || "No phone"}
+                {formatLeadStatusLabel(lead.status, lead.urgency)} {preview.status ? `→ ${formatLeadStatusLabel(preview.status, preview.urgency)}` : ""} · {lead.phone || "No phone"}
               </small>
             </div>
-            <span className={`lead-status ${preview.status ?? lead.status}`}>{preview.status ?? lead.status}</span>
+            <span className={getLeadStatusClassName(preview.status ?? lead.status, preview.urgency ?? lead.urgency)}>
+              {formatLeadStatusLabel(preview.status ?? lead.status, preview.urgency ?? lead.urgency)}
+            </span>
           </div>
         ))}
       </div>
@@ -2011,7 +2541,7 @@ function LeadListingConfirmCard({
           <p>{getLeadInterestLine(preview.lead)}</p>
           <small>{preview.lead.phone || "No phone"}</small>
         </div>
-        <span className={`lead-status ${preview.lead.status}`}>{preview.lead.status}</span>
+        <span className={getLeadStatusClassName(preview.lead.status, preview.lead.urgency)}>{formatLeadStatusLabel(preview.lead.status, preview.lead.urgency)}</span>
       </div>
       <div className="listing-update-list">
         <div className="listing-update-row">
@@ -2258,12 +2788,12 @@ function EntitySelectionCard({
                 <strong>{lead.full_name || lead.phone || "Unnamed buyer"}</strong>
                 <p>{getLeadInterestLine(lead)}</p>
                 <small>
-                  {lead.status} · {lead.phone || "No phone"}
+                  {formatLeadStatusLabel(lead.status, lead.urgency)} · {lead.phone || "No phone"}
                   {lead.email ? ` · ${lead.email}` : ""}
                 </small>
               </div>
               <div className="lead-chat-row-action">
-                <span className={`lead-status ${lead.status}`}>{lead.status}</span>
+                <span className={getLeadStatusClassName(lead.status, lead.urgency)}>{formatLeadStatusLabel(lead.status, lead.urgency)}</span>
                 <button
                   className="primary-button small"
                   type="button"
@@ -2286,10 +2816,39 @@ function EntitySelectionCard({
 
 function LeadReplyCard({ draft }: { draft: LeadReplyDraftWithLink }) {
   const [copied, setCopied] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
 
   async function handleCopy() {
     await copyToClipboard(draft.reply_text);
     setCopied(true);
+  }
+
+  async function handleOpenWhatsApp() {
+    if (draft.lead_id) {
+      const response = await fetch("/api/leads/followup-activities", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          lead_id: draft.lead_id,
+          activity_type: "whatsapp_opened",
+          channel: "whatsapp",
+          message_draft: draft.reply_text,
+          summary: "Opened WhatsApp with drafted reply.",
+          source_type: "agent_chat"
+        })
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        setStatus(payload?.error ?? "Could not record WhatsApp open.");
+        return;
+      }
+    }
+
+    window.open(draft.whatsapp_url, "_blank", "noopener,noreferrer");
+    setStatus("WhatsApp opened. Mark Sent only after you send it.");
   }
 
   return (
@@ -2299,19 +2858,664 @@ function LeadReplyCard({ draft }: { draft: LeadReplyDraftWithLink }) {
           <button className="outline-button small" type="button" onClick={() => void handleCopy()}>
             <Copy size={14} /> {copied ? "Copied" : "Copy"}
           </button>
-          <a className="primary-button small" href={draft.whatsapp_url} target="_blank" rel="noreferrer">
+          <button className="primary-button small" type="button" onClick={() => void handleOpenWhatsApp()}>
             <Phone size={14} /> Open WhatsApp
-          </a>
+          </button>
         </>
       }
       className="lead-chat-card"
       icon={<MessageCircle size={16} />}
       summary={draft.next_step}
+      status={status}
       title="WhatsApp reply draft"
       tone="lead"
     >
       <p className="lead-chat-reply">{draft.reply_text}</p>
     </AgentOutputCard>
+  );
+}
+
+function ChatFollowupSummaryCard({
+  preview,
+  contextLeads,
+  onCreateLead,
+  recentLeads,
+  onNeedsSummary,
+  onDraftReply,
+  onManageFollowup
+}: {
+  preview: ChatImportPreview;
+  contextLeads: LeadListItem[];
+  onCreateLead: (payload: LeadCreatePayload, followUp?: LeadCreateFollowUpPreview) => void;
+  recentLeads: LeadListItem[];
+  onNeedsSummary: (summary: ChatFollowupSummary) => void;
+  onDraftReply: (summary: ChatFollowupSummary, lead: LeadListItem) => void;
+  onManageFollowup: (summary: ChatFollowupSummary, lead: LeadListItem) => void;
+}) {
+  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(
+    preview.selectedLeadId ?? preview.summary?.matched_lead?.id ?? preview.selectedLead?.id ?? contextLeads[0]?.id ?? null
+  );
+  const [selectedZipTextName, setSelectedZipTextName] = useState("");
+  const [summary, setSummary] = useState<ChatFollowupSummary | undefined>(preview.summary);
+  const [status, setStatus] = useState<string | null>(null);
+  const [isWorking, setIsWorking] = useState(false);
+  const [activeAction, setActiveAction] = useState<ChatImportAction | null>(null);
+  const targetLead =
+    recentLeads.find((lead) => lead.id === selectedLeadId) ??
+    contextLeads.find((lead) => lead.id === selectedLeadId) ??
+    (preview.selectedLead?.id === selectedLeadId ? preview.selectedLead : null) ??
+    summary?.candidate_leads.find((lead) => lead.id === selectedLeadId) ??
+    summary?.matched_lead ??
+    null;
+  const matchedLeadLabel = targetLead?.full_name || targetLead?.phone || targetLead?.email || "selected lead";
+  const sourceLabel =
+    summary?.source_type === "whatsapp_zip_upload"
+      ? "WhatsApp zip"
+      : summary?.source_type === "whatsapp_txt_upload"
+        ? "WhatsApp txt"
+        : "Pasted WhatsApp text";
+
+  async function summarizeSelectedZipText() {
+    if (!preview.pendingZipFile || !selectedZipTextName) {
+      setStatus("Choose which .txt chat file to summarize.");
+      return;
+    }
+
+    setIsWorking(true);
+    setStatus("Summarizing selected chat...");
+    const formData = new FormData();
+    formData.append("source_type", "whatsapp_zip_upload");
+    formData.append("selected_txt_name", selectedZipTextName);
+    formData.append("save_original_chat_text", "false");
+    if (selectedLeadId) {
+      formData.append("lead_id", selectedLeadId);
+    }
+    formData.append("file", preview.pendingZipFile);
+
+    const response = await fetch("/api/leads/import-whatsapp-chat", {
+      method: "POST",
+      body: formData
+    });
+
+    setIsWorking(false);
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      setStatus(payload?.error ?? "Unable to summarize this chat.");
+      return;
+    }
+
+    const payload = (await response.json()) as ChatFollowupSummary;
+    setSummary(payload);
+    setSelectedLeadId(payload.matched_lead?.id ?? selectedLeadId);
+    setStatus("Chat summary ready. Review before saving.");
+    onNeedsSummary(payload);
+  }
+
+  return (
+    <div className="chat-import-card">
+      <div className="card-title">
+        <FileText size={16} /> WhatsApp chat follow-up
+      </div>
+
+      {preview.zipCandidates?.length && !summary ? (
+        <div className="zip-candidate-list" role="group" aria-label="Choose chat text file">
+          <span>Choose chat text</span>
+          {preview.zipCandidates.map((candidate) => (
+            <button
+              className={selectedZipTextName === candidate.name ? "primary-button small" : "outline-button small"}
+              key={candidate.name}
+              type="button"
+              onClick={() => setSelectedZipTextName(candidate.name)}
+            >
+              <FileText size={14} /> {candidate.name}
+            </button>
+          ))}
+          <button className="primary-button small" type="button" disabled={isWorking} onClick={() => void summarizeSelectedZipText()}>
+            <Sparkles size={14} /> Summarize
+          </button>
+        </div>
+      ) : null}
+
+      {summary ? (
+        <>
+          {activeAction === "choose_lead" && getVerifiedChatLeadCandidates(summary).length ? (
+            <div className="lead-candidate-list" role="group" aria-label="Choose matching lead">
+              <span>Choose matching lead</span>
+              {getVerifiedChatLeadCandidates(summary).map((candidate) => (
+                <button
+                  className={selectedLeadId === candidate.id ? "primary-button small" : "outline-button small"}
+                  key={candidate.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedLeadId(candidate.id);
+                    setActiveAction("manage_followup");
+                  }}
+                >
+                  <UserPlus size={14} /> {candidate.full_name || candidate.phone || "Unnamed buyer"}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <div className="chat-import-fields">
+            <div>
+              <span>Matched lead</span>
+              <strong>{targetLead ? matchedLeadLabel : "Not matched"}</strong>
+            </div>
+            <div>
+              <span>Phone</span>
+              <strong>{targetLead?.phone || summary.detected_phone || "Not detected"}</strong>
+            </div>
+            <div>
+              <span>Current status</span>
+              <strong>{targetLead?.status || "No lead yet"}</strong>
+            </div>
+            <div>
+              <span>Detected customer</span>
+              <strong>{summary.detected_customer_name || targetLead?.full_name || "Not detected"}</strong>
+            </div>
+            <div>
+              <span>Source</span>
+              <strong>{sourceLabel}</strong>
+            </div>
+          </div>
+
+          <div className="chat-next-actions" aria-label="Choose next action">
+            <span>What should I do next?</span>
+            <div className="card-actions">
+              <button
+                className={activeAction === "reply" ? "primary-button small" : "outline-button small"}
+                type="button"
+                disabled={Boolean(activeAction) || !targetLead}
+                title={!targetLead ? "Choose a matching lead before drafting a WhatsApp reply." : undefined}
+                onClick={() => {
+                  if (!targetLead) {
+                    setStatus("Choose a matching lead before drafting a WhatsApp reply.");
+                    return;
+                  }
+                  setActiveAction("reply");
+                  onDraftReply(summary, targetLead);
+                }}
+              >
+                <MessageCircle size={14} /> Draft reply
+              </button>
+              {targetLead ? (
+                <button
+                  className={activeAction === "manage_followup" ? "primary-button small" : "outline-button small"}
+                  type="button"
+                  disabled={Boolean(activeAction)}
+                  onClick={() => {
+                    setActiveAction("manage_followup");
+                    onManageFollowup(summary, targetLead);
+                  }}
+                >
+                  <FileText size={14} /> Manage follow-up
+                </button>
+              ) : (
+                <>
+                  <button className={activeAction === "choose_lead" ? "primary-button small" : "outline-button small"} type="button" onClick={() => setActiveAction("choose_lead")}>
+                    <UserPlus size={14} /> Choose existing lead
+                  </button>
+                  <button
+                    className="outline-button small"
+                    type="button"
+                    onClick={() =>
+                      onCreateLead({
+                        full_name: summary.detected_customer_name ?? undefined,
+                        phone: summary.detected_phone ?? undefined,
+                        message: summary.chat_summary,
+                        source_channel: "whatsapp",
+                        status: "new",
+                        urgency: summary.urgency_suggestion ?? "normal"
+                      }, buildLeadCreateFollowUpFromChat(summary))
+                    }
+                  >
+                    <UserPlus size={14} /> Create lead
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+          {activeAction ? <p className="agent-draft-status">Selected: {activeAction === "reply" ? "Draft reply" : activeAction === "manage_followup" ? "Manage follow-up" : "Choose lead"}.</p> : null}
+        </>
+      ) : null}
+      {status ? <p className="agent-draft-status">{status}</p> : null}
+    </div>
+  );
+}
+
+function LeadMiniCard({ lead }: { lead: LeadListItem }) {
+  return (
+    <div className="chat-lead-mini-card">
+      <div>
+        <span>Lead</span>
+        <strong>{lead.full_name || lead.phone || "Unnamed buyer"}</strong>
+      </div>
+      <div>
+        <span>Status</span>
+        <strong>{formatLeadStatusLabel(lead.status, lead.urgency)}</strong>
+      </div>
+      {lead.phone ? (
+        <div>
+          <span>Phone</span>
+          <strong>{lead.phone}</strong>
+        </div>
+      ) : null}
+      {lead.listing_title ? (
+        <div>
+          <span>Listing</span>
+          <strong>{lead.listing_title}</strong>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ChatReplyActionCard({ preview }: { preview: ChatReplyActionPreview }) {
+  const { summary, lead } = preview;
+  const [status, setStatus] = useState<string | null>(null);
+  const [isCopied, setIsCopied] = useState(false);
+
+  async function copyReply() {
+    try {
+      await copyToClipboard(summary.reply_draft.reply_text);
+      setIsCopied(true);
+      setStatus("Reply copied.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Copy is not available in this browser.");
+    }
+  }
+
+  return (
+    <div className="chat-reply-card" aria-label={lead ? `Recommended reply for ${lead.full_name || lead.phone || "lead"}` : "Recommended reply"}>
+      <button className="icon-button subtle" type="button" aria-label="Copy reply" title="Copy reply" onClick={() => void copyReply()}>
+        {isCopied ? <CheckCircle2 size={16} /> : <Copy size={16} />}
+      </button>
+      <div className="chat-reply-text">
+        {summary.reply_draft.reply_text}
+      </div>
+      {status ? <p className="agent-draft-status">{status}</p> : null}
+    </div>
+  );
+}
+
+function ChatFollowupManageCard({
+  preview,
+  onSaved,
+  onNeedsReminder,
+  onDeclined
+}: {
+  preview: ChatFollowupManagePreview;
+  onSaved: (message: string, updatedLead?: LeadRecord | null) => void;
+  onNeedsReminder: (preview: ChatFollowupManagePreview) => void;
+  onDeclined: () => void;
+}) {
+  const [decision, setDecision] = useState<"yes" | "no" | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [isWorking, setIsWorking] = useState(false);
+  const [followUpTime] = useState(() => new Date());
+  const action = preview.suggestedAction ?? recommendChatFollowupAction(preview.summary, preview.lead);
+  const suggestedStatus = getSuggestedLeadStatus(preview.summary);
+  const title =
+    action === "status"
+      ? "Confirm lead follow-up status update?"
+      : action === "reminder"
+        ? "Confirm follow-up reminder?"
+        : "Confirm saving this follow-up note?";
+  const followUpTimeLabel = followUpTime.toLocaleString("en-PK", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+
+  async function acceptSuggestion() {
+    if (!action || decision || isWorking) {
+      return;
+    }
+
+    if (action === "reminder") {
+      setDecision("yes");
+      onNeedsReminder(preview);
+      return;
+    }
+
+    setIsWorking(true);
+    setStatus("Saving...");
+    try {
+      if (action === "status") {
+        const updatedLead = await saveChatFollowUpActivity({
+          lead: preview.lead,
+          summary: preview.summary,
+          activityType: "status_changed",
+          newStatus: suggestedStatus.status,
+          urgency: suggestedStatus.urgency
+        });
+        setStatus("Saved follow-up and updated status.");
+        onSaved(`Done. I saved the follow-up summary and updated ${preview.lead.full_name || "this lead"} to ${formatLeadStatusLabel(suggestedStatus.status, suggestedStatus.urgency)}.`, updatedLead);
+      } else {
+        const updatedLead = await saveChatFollowUpActivity({
+          lead: preview.lead,
+          summary: preview.summary,
+          activityType: "followup_summary_saved"
+        });
+        setStatus("Saved follow-up summary.");
+        onSaved("Done. I saved this chat summary to the lead follow-up record.", updatedLead);
+      }
+      setDecision("yes");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to save this follow-up.");
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
+  function declineSuggestion() {
+    if (decision || isWorking) {
+      return;
+    }
+
+    setDecision("no");
+    setStatus("No changes made.");
+    onDeclined();
+  }
+
+  if (!action) {
+    return null;
+  }
+
+  return (
+    <div className="chat-import-card">
+      <div className="card-title">
+        <FileText size={16} /> {title}
+      </div>
+      {action === "status" ? (
+        <div className="chat-status-change" aria-label="Suggested status change">
+          <span>{preview.lead.full_name || preview.lead.phone || "Unnamed buyer"}</span>
+          <div className="chat-status-change-row">
+            <strong className={getLeadStatusClassName(preview.lead.status, preview.lead.urgency)}>{formatLeadStatusLabel(preview.lead.status, preview.lead.urgency)}</strong>
+            <span className="chat-status-arrow">→</span>
+            <strong className={getLeadStatusClassName(suggestedStatus.status, suggestedStatus.urgency, "target")}>
+              {formatLeadStatusLabel(suggestedStatus.status, suggestedStatus.urgency)}
+            </strong>
+          </div>
+        </div>
+      ) : (
+        <div className="chat-compact-lead-line">
+          <span>{preview.lead.full_name || preview.lead.phone || "Unnamed buyer"}</span>
+        </div>
+      )}
+      <div className="chat-followup-record">
+        <div className="chat-followup-record-header">
+          <span>Follow-up record</span>
+          <small>{followUpTimeLabel}</small>
+        </div>
+        <p>{preview.summary.chat_summary}</p>
+      </div>
+      {action === "reminder" ? (
+        <div className="chat-import-fields single">
+          <div>
+            <span>Reminder note</span>
+            <strong>{preview.summary.next_action_suggestion || "Follow up on this WhatsApp chat."}</strong>
+          </div>
+        </div>
+      ) : null}
+      <div className="card-actions">
+        <button className="primary-button small" type="button" disabled={Boolean(decision) || isWorking} onClick={() => void acceptSuggestion()}>
+          <CheckCircle2 size={15} /> Yes
+        </button>
+        <button className="outline-button small" type="button" disabled={Boolean(decision) || isWorking} onClick={declineSuggestion}>
+          <X size={15} /> No
+        </button>
+      </div>
+      {status ? <p className="agent-draft-status">{status}</p> : null}
+    </div>
+  );
+}
+
+function ChatLeadChoiceCard({
+  preview,
+  onChooseLead,
+  onCreateLead
+}: {
+  preview: ChatLeadChoicePreview;
+  onChooseLead: (lead: LeadListItem) => void;
+  onCreateLead: (payload: LeadCreatePayload, followUp?: LeadCreateFollowUpPreview) => void;
+}) {
+  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [created, setCreated] = useState(false);
+  const candidates = getVerifiedChatLeadCandidates(preview.summary);
+  const hasDetectedIdentity = Boolean(preview.summary.detected_customer_name || preview.summary.detected_phone);
+
+  function createLead() {
+    if (created || selectedLeadId) {
+      return;
+    }
+
+    setCreated(true);
+    onCreateLead({
+      full_name: preview.summary.detected_customer_name ?? undefined,
+      phone: preview.summary.detected_phone ?? undefined,
+      message: preview.summary.chat_summary,
+      source_channel: "whatsapp",
+      status: "new",
+      urgency: preview.summary.urgency_suggestion ?? "normal"
+    }, buildLeadCreateFollowUpFromChat(preview.summary));
+  }
+
+  return (
+    <div className="chat-import-card">
+      <div className="card-title">
+        <UserPlus size={16} /> Which lead does this chat belong to?
+      </div>
+      <div className="chat-import-fields">
+        <div>
+          <span>Detected customer</span>
+          <strong>{preview.summary.detected_customer_name || "Not detected"}</strong>
+        </div>
+        <div>
+          <span>Detected phone</span>
+          <strong>{preview.summary.detected_phone || "Not detected"}</strong>
+        </div>
+      </div>
+      {candidates.length ? (
+        <div className="lead-candidate-list" role="group" aria-label="Choose existing lead">
+          <span>Choose existing lead</span>
+          {candidates.map((candidate) => (
+            <button
+              className={selectedLeadId === candidate.id ? "primary-button small" : "outline-button small"}
+              key={candidate.id}
+              type="button"
+              disabled={Boolean(selectedLeadId) || created}
+              onClick={() => {
+                setSelectedLeadId(candidate.id);
+                onChooseLead(candidate);
+              }}
+            >
+              <UserPlus size={14} /> {candidate.full_name || candidate.phone || "Unnamed buyer"}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="agent-draft-status">No likely existing lead candidates were found.</p>
+      )}
+      {hasDetectedIdentity ? (
+        <div className="card-actions">
+          <button className="outline-button small" type="button" disabled={Boolean(selectedLeadId) || created} onClick={createLead}>
+            <UserPlus size={14} /> Create new lead
+          </button>
+        </div>
+      ) : null}
+      {selectedLeadId ? <p className="agent-draft-status">Selected existing lead.</p> : null}
+      {created ? <p className="agent-draft-status">Creating a new lead preview.</p> : null}
+    </div>
+  );
+}
+
+function ChatFollowupNoteCard({ preview, onSaved }: { preview: ChatFollowupManagePreview; onSaved: (message: string) => void }) {
+  const [status, setStatus] = useState<string | null>(null);
+  const [isWorking, setIsWorking] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+
+  async function saveNote() {
+    if (isSaved || isWorking) {
+      return;
+    }
+
+    setIsWorking(true);
+    setStatus("Saving follow-up note...");
+    try {
+      await saveChatFollowUpActivity({ lead: preview.lead, summary: preview.summary, activityType: "followup_summary_saved" });
+      setIsSaved(true);
+      setStatus("Follow-up note saved.");
+      onSaved("Done. I saved the chat summary as a follow-up note. The original chat text was not saved by default.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to save follow-up note.");
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
+  return (
+    <div className="chat-import-card">
+      <div className="card-title">
+        <FileText size={16} /> Confirm saving this follow-up note?
+      </div>
+      <LeadMiniCard lead={preview.lead} />
+      <div className="chat-import-fields single">
+        <div>
+          <span>Summary to save</span>
+          <strong>{preview.summary.chat_summary}</strong>
+        </div>
+      </div>
+      <div className="card-actions">
+        <button className="primary-button small" type="button" disabled={isSaved || isWorking} onClick={() => void saveNote()}>
+          <CheckCircle2 size={15} /> Save note
+        </button>
+      </div>
+      {status ? <p className="agent-draft-status">{status}</p> : null}
+    </div>
+  );
+}
+
+function ChatReminderCard({ preview, onSaved }: { preview: ChatFollowupManagePreview; onSaved: (message: string) => void }) {
+  const [reminderAt, setReminderAt] = useState(getDefaultFollowUpReminderLocalValue);
+  const [note, setNote] = useState(preview.summary.next_action_suggestion || "Follow up on WhatsApp chat.");
+  const [status, setStatus] = useState<string | null>(null);
+  const [isWorking, setIsWorking] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+
+  async function saveReminder() {
+    if (isSaved || isWorking) {
+      return;
+    }
+
+    if (!reminderAt) {
+      setStatus("Choose a reminder time.");
+      return;
+    }
+
+    setIsWorking(true);
+    setStatus("Saving reminder...");
+    try {
+      await saveChatFollowUpActivity({
+        lead: preview.lead,
+        summary: preview.summary,
+        activityType: "reminder_created",
+        nextFollowUpAt: new Date(reminderAt).toISOString(),
+        note
+      });
+      setIsSaved(true);
+      setStatus("Reminder saved.");
+      onSaved("Done. I set the next follow-up reminder on the lead.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to save reminder.");
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
+  return (
+    <div className="chat-import-card">
+      <div className="card-title">
+        <CalendarClock size={16} /> Confirm follow-up reminder?
+      </div>
+      <LeadMiniCard lead={preview.lead} />
+      <div className="chat-action-nested">
+        <label>
+          <span>Reminder time</span>
+          <input type="datetime-local" value={reminderAt} disabled={isSaved} onChange={(event) => setReminderAt(event.target.value)} />
+        </label>
+        <label>
+          <span>Note</span>
+          <input value={note} disabled={isSaved} onChange={(event) => setNote(event.target.value)} />
+        </label>
+      </div>
+      <div className="card-actions">
+        <button className="primary-button small" type="button" disabled={isSaved || isWorking} onClick={() => void saveReminder()}>
+          <CalendarClock size={15} /> Save reminder
+        </button>
+      </div>
+      {status ? <p className="agent-draft-status">{status}</p> : null}
+    </div>
+  );
+}
+
+function ChatStatusCard({ preview, onSaved }: { preview: ChatFollowupManagePreview; onSaved: (message: string) => void }) {
+  const [status, setStatus] = useState<string | null>(null);
+  const [isWorking, setIsWorking] = useState(false);
+  const [selected, setSelected] = useState<LeadRecord["status"] | null>(null);
+
+  async function updateStatus(nextStatus: LeadRecord["status"], urgency?: LeadRecord["urgency"]) {
+    if (selected || isWorking) {
+      return;
+    }
+
+    setIsWorking(true);
+    setStatus("Updating lead status...");
+    try {
+      await saveChatFollowUpActivity({
+        lead: preview.lead,
+        summary: preview.summary,
+        activityType: "status_changed",
+        newStatus: nextStatus,
+        urgency
+      });
+      setSelected(nextStatus);
+      setStatus(`Status updated to ${formatLeadStatusLabel(nextStatus, urgency)}.`);
+      onSaved(`Done. I updated ${preview.lead.full_name || "this lead"} to ${formatLeadStatusLabel(nextStatus, urgency)}.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to update status.");
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
+  return (
+    <div className="chat-import-card">
+      <div className="card-title">
+        <CheckCircle2 size={16} /> Confirm lead status update?
+      </div>
+      <LeadMiniCard lead={preview.lead} />
+      <div className="chat-import-fields single">
+        <div>
+          <span>Suggested status</span>
+          <strong>{formatLeadStatusLabel(preview.summary.status_suggestion, preview.summary.urgency_suggestion)}</strong>
+        </div>
+      </div>
+      <div className="card-actions">
+        <button className="primary-button small" type="button" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("qualified", "high")}>
+          <CheckCircle2 size={15} /> Hot lead
+        </button>
+        <button className="outline-button small" type="button" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("contacted")}>
+          <CheckCircle2 size={15} /> Contacted
+        </button>
+        <button className="outline-button small" type="button" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("lost")}>
+          <X size={15} /> Not interested
+        </button>
+      </div>
+      {status ? <p className="agent-draft-status">{status}</p> : null}
+    </div>
   );
 }
 
@@ -2957,9 +4161,10 @@ export function AgentWorkspace({
   conversationId: initialConversationId,
   firstName,
   hasOlderMessages,
+  initialWhatsAppImportOpen = false,
   initialContextAttachments = [],
   initialMessages,
-  recentLeads,
+  recentLeads: initialRecentLeads,
   recentListings
 }: AgentWorkspaceProps) {
   const [userTimeZone, setUserTimeZone] = useState(() => getResolvedTimeZone());
@@ -2968,12 +4173,25 @@ export function AgentWorkspace({
   const [composerFiles, setComposerFiles] = useState<PendingFileAttachment[]>([]);
   const [contextAttachments, setContextAttachments] = useState<ChatContextAttachment[]>(initialContextAttachments);
   const [contextPickerMode, setContextPickerMode] = useState<"listing" | "lead" | null>(null);
+  const [isWhatsAppImportMode, setIsWhatsAppImportMode] = useState(initialWhatsAppImportOpen);
+  const [workspaceLeads, setWorkspaceLeads] = useState(initialRecentLeads);
   const [pendingMedia, setPendingMedia] = useState<PendingMedia[]>([]);
   const [draftMediaByMessageId, setDraftMediaByMessageId] = useState<Record<string, PendingMedia[]>>({});
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [activeListingId, setActiveListingId] = useState<string | null>(
     initialContextAttachments.find((item) => item.type === "listing")?.entity_id ?? recentListings[0]?.id ?? null
   );
+  const [activeLeadId, setActiveLeadId] = useState<string | null>(
+    initialContextAttachments.find((item) => item.type === "lead")?.entity_id ?? null
+  );
+  const [activeLeadSnapshot, setActiveLeadSnapshot] = useState<LeadListItem | null>(() => {
+    const initialLeadAttachment = initialContextAttachments.find((item) => item.type === "lead");
+    if (!initialLeadAttachment) {
+      return null;
+    }
+
+    return initialRecentLeads.find((lead) => lead.id === initialLeadAttachment.entity_id) ?? leadFromContextAttachment(initialLeadAttachment);
+  });
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [canLoadOlder, setCanLoadOlder] = useState(hasOlderMessages);
   const [oldestMessageCreatedAt, setOldestMessageCreatedAt] = useState<string | null>(
@@ -2998,6 +4216,7 @@ export function AgentWorkspace({
   const [voiceLevels, setVoiceLevels] = useState(idleVoiceLevels);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const documentFileInputRef = useRef<HTMLInputElement | null>(null);
+  const whatsAppChatFileInputRef = useRef<HTMLInputElement | null>(null);
   const chatPanelRef = useRef<HTMLElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -3052,6 +4271,14 @@ export function AgentWorkspace({
     }
   ];
   const attachActions = [
+    {
+      icon: MessageCircle,
+      label: "Import WhatsApp chat",
+      onClick: () => {
+        setIsWhatsAppImportMode(true);
+        whatsAppChatFileInputRef.current?.click();
+      }
+    },
     {
       icon: ImageIcon,
       label: "Upload photo/video",
@@ -3310,19 +4537,82 @@ export function AgentWorkspace({
 
   function addLeadContext(lead: LeadListItem) {
     addContextAttachment(leadToContextAttachment(lead));
+    setActiveLeadId(lead.id);
+    setActiveLeadSnapshot(lead);
     setContextPickerMode(null);
   }
 
   function removeContextAttachment(contextId: string) {
+    const removedLeadId = contextId.startsWith("lead:") ? contextId.slice("lead:".length) : null;
     setContextAttachments((current) => current.filter((item) => item.id !== contextId));
+    if (removedLeadId && activeLeadId === removedLeadId) {
+      setActiveLeadId(null);
+      setActiveLeadSnapshot(null);
+    }
   }
 
   function removeComposerFile(fileId: string) {
-    setComposerFiles((current) => current.filter((item) => item.id !== fileId));
+    setComposerFiles((current) => {
+      const nextFiles = current.filter((item) => item.id !== fileId);
+      if (!nextFiles.some((item) => item.kind === "whatsapp_chat")) {
+        setIsWhatsAppImportMode(false);
+      }
+      return nextFiles;
+    });
   }
 
   function selectedContextEntityId(type: ChatContextAttachment["type"]) {
     return [...contextAttachments].reverse().find((item) => item.type === type)?.entity_id;
+  }
+
+  function getActiveLead() {
+    const leadId = selectedContextEntityId("lead") ?? activeLeadId;
+    if (!leadId) {
+      return null;
+    }
+
+    const contextLead =
+      contextAttachments
+        .filter((item) => item.type === "lead")
+        .map(leadFromContextAttachment)
+        .find((lead) => lead?.id === leadId) ?? null;
+
+    return workspaceLeads.find((lead) => lead.id === leadId) ?? contextLead ?? (activeLeadSnapshot?.id === leadId ? activeLeadSnapshot : null);
+  }
+
+  function mergeUpdatedLead(updatedLead?: LeadRecord | null) {
+    if (!updatedLead) {
+      return;
+    }
+
+    setWorkspaceLeads((current) => {
+      const existing = current.find((lead) => lead.id === updatedLead.id);
+      const merged: LeadListItem = {
+        ...(existing ?? {
+          listing_title: null,
+          listing_area: null,
+          listing_city: null,
+          campaign_code: null,
+          campaign_channel: null
+        }),
+        ...updatedLead
+      };
+
+      return existing
+        ? current.map((lead) => (lead.id === updatedLead.id ? merged : lead))
+        : [merged, ...current];
+    });
+
+    setActiveLeadSnapshot((current) => {
+      if (!current || current.id !== updatedLead.id) {
+        return current;
+      }
+
+      return {
+        ...current,
+        ...updatedLead
+      };
+    });
   }
 
   function composerContextPreviews(): AgentComposerContextPreview[] {
@@ -3542,6 +4832,21 @@ export function AgentWorkspace({
     void persistAssistantMessage(nextMessage);
 
     return nextMessage;
+  }
+
+  function estimateAssistantStreamDuration(content: string) {
+    const characters = Array.from(content);
+    if (!characters.length) {
+      return 140;
+    }
+
+    const charactersPerTick = characters.length > 180 ? 3 : 2;
+    return 120 + Math.ceil(characters.length / charactersPerTick) * 18;
+  }
+
+  async function appendAssistantMessageSequential(message: Omit<ChatMessage, "id" | "role"> & { id?: string }) {
+    appendAssistantMessage(message);
+    await new Promise((resolve) => window.setTimeout(resolve, estimateAssistantStreamDuration(message.content) + 120));
   }
 
   async function loadEarlierMessages() {
@@ -3904,6 +5209,13 @@ export function AgentWorkspace({
       status: (candidate.status as LeadRecord["status"] | undefined) ?? "new",
       urgency: null,
       ai_summary: null,
+      last_contacted_at: null,
+      next_follow_up_at: null,
+      last_note: null,
+      budget_min: null,
+      budget_max: null,
+      interested_area: null,
+      interested_listing_id: null,
       created_at: new Date().toISOString(),
       updated_at: null,
       listing_title: candidate.listing_title ?? null,
@@ -3925,7 +5237,7 @@ export function AgentWorkspace({
 
     if (resolution?.status === "matched") {
       const matchedLead =
-        recentLeads.find((lead) => lead.id === resolution.target_id) ??
+        workspaceLeads.find((lead) => lead.id === resolution.target_id) ??
         (resolution.matched ? candidateToLead(resolution.matched) : null);
 
       return { lead: matchedLead, ambiguous: false, candidates: [] };
@@ -3933,14 +5245,14 @@ export function AgentWorkspace({
 
     if (payload.lead_id) {
       return {
-        lead: recentLeads.find((lead) => lead.id === payload.lead_id) ?? null,
+        lead: workspaceLeads.find((lead) => lead.id === payload.lead_id) ?? null,
         ambiguous: false,
         candidates: []
       };
     }
 
     const query = [payload.lead_name, payload.query].filter(Boolean).join(" ");
-    const scoredLeads = recentLeads
+    const scoredLeads = workspaceLeads
       .map((lead) => ({ lead, score: scoreLeadMatch(query, lead) }))
       .filter((item) => item.score >= 4)
       .sort((left, right) => right.score - left.score);
@@ -3972,21 +5284,41 @@ export function AgentWorkspace({
     return { lead: null, ambiguous: false, candidates: [] };
   }
 
-  function showLeadResults(actionResponse: string, payload: LeadOperationPayload) {
-    const matchedLeads = filterLeadsByPayload(recentLeads, payload);
+  function showLeadResults(actionResponse: string, payload: LeadOperationPayload, fallbackQuery = "") {
+    const responseContext = [fallbackQuery, actionResponse].filter(Boolean).join(" ");
+    const matchedLeads = filterLeadsByPayload(workspaceLeads, payload, responseContext);
 
     if (!matchedLeads.length) {
       appendAssistantMessage({
-        content:
-          "I could not find a lead matching that request. I will not show unrelated records unless you confirm.",
-        leadLatestOffer: recentLeads.length > 0
+        content: formatLeadResultCount(0, payload, responseContext),
+        leadLatestOffer: workspaceLeads.length > 0
       });
       return;
     }
 
     appendAssistantMessage({
-      content: actionResponse,
+      content: formatLeadResultCount(matchedLeads.length, payload, responseContext),
       leadResults: matchedLeads
+    });
+  }
+
+  async function showTodayFollowUps(actionResponse: string) {
+    const response = await fetch("/api/leads/followups/today?limit=10");
+
+    if (!response.ok) {
+      const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null;
+      appendAssistantMessage({
+        content: errorPayload?.error ?? "I could not read today's follow-ups yet. Please try again in a moment."
+      });
+      return;
+    }
+
+    const payload = (await response.json()) as { leads?: LeadListItem[] };
+    const leads = payload.leads ?? [];
+
+    appendAssistantMessage({
+      content: leads.length ? actionResponse : "No leads are due for follow-up right now.",
+      leadResults: leads
     });
   }
 
@@ -4146,6 +5478,45 @@ export function AgentWorkspace({
     });
   }
 
+  function proposeLeadFollowUpRecord(
+    actionResponse: string,
+    payload: LeadOperationPayload,
+    resolution?: AgentResolution
+  ) {
+    const target = getLeadTarget(payload, resolution);
+
+    if (target.ambiguous) {
+      appendEntitySelectionMessage({
+        targetType: "lead",
+        intent: "record_lead_followup",
+        candidates: target.candidates,
+        actionResponse,
+        originalMessage: payload.query ?? payload.lead_name ?? "",
+        payload: payload as Record<string, unknown>
+      });
+      return;
+    }
+
+    if (!target.lead) {
+      const requestedLead = payload.lead_name ? ` "${payload.lead_name}"` : "";
+      appendAssistantMessage({
+        content: `I could not find a matching recent lead${requestedLead}. Please check the buyer name, phone number, or open Leads to choose the exact record.`
+      });
+      return;
+    }
+
+    appendAssistantMessage({
+      content: actionResponse,
+      leadStatusUpdate: {
+        lead: target.lead,
+        status: payload.status,
+        urgency: payload.urgency,
+        activityType: payload.activity_type === "message_sent" ? "message_sent" : "status_changed",
+        summary: payload.summary ?? payload.query
+      }
+    });
+  }
+
   function proposeLeadDetailsUpdate(
     actionResponse: string,
     payload: LeadDetailsUpdatePayload,
@@ -4191,7 +5562,7 @@ export function AgentWorkspace({
     });
   }
 
-  function proposeLeadCreate(payload: LeadCreatePayload) {
+  function proposeLeadCreate(payload: LeadCreatePayload, followUp?: LeadCreateFollowUpPreview) {
     if (!payload.full_name && !payload.phone && !payload.email) {
       appendAssistantMessage({
         content: "I can create a lead, but I need at least a buyer name, phone, or email."
@@ -4207,7 +5578,8 @@ export function AgentWorkspace({
           status: payload.status ?? "new",
           urgency: payload.urgency ?? "normal",
           source_channel: payload.source_channel ?? "manual"
-        }
+        },
+        followUp
       }
     });
   }
@@ -4215,13 +5587,13 @@ export function AgentWorkspace({
   function proposeBatchLeadStatusUpdate(messageText: string, leadContexts: ChatContextAttachment[]) {
     const nextStatus = leadStatusFromMessage(messageText);
     const leads = leadContexts
-      .map((context) => recentLeads.find((lead) => lead.id === context.entity_id))
+      .map((context) => workspaceLeads.find((lead) => lead.id === context.entity_id))
       .filter((lead): lead is LeadListItem => Boolean(lead));
 
     if (!nextStatus?.status || !leads.length) {
       appendAssistantMessage({
         content:
-          "I attached those leads, but I need a clear status before I can prepare a batch update. Try contacted, hot, qualified, closed, lost, or new."
+          "I attached those leads, but I need a clear status before I can prepare a batch update. Try contacted, hot lead, interested, closed, not interested, or new."
       });
       return;
     }
@@ -4356,6 +5728,169 @@ export function AgentWorkspace({
     });
   }
 
+  async function summarizeWhatsAppChatFromComposer(
+    messageText: string,
+    files: PendingFileAttachment[],
+    selectedLeadId: string | null,
+    requestedAction: ChatImportRequestedAction = "unknown"
+  ) {
+    const chatFile = files.find((item) => item.kind === "whatsapp_chat" || isWhatsAppChatFile(item.file));
+    const selectedLead = selectedLeadId
+      ? workspaceLeads.find((lead) => lead.id === selectedLeadId) ?? (activeLeadSnapshot?.id === selectedLeadId ? activeLeadSnapshot : null)
+      : null;
+    const formData = new FormData();
+
+    formData.append("save_original_chat_text", "false");
+    if (selectedLeadId) {
+      formData.append("lead_id", selectedLeadId);
+    }
+
+    if (chatFile) {
+      const isZip = chatFile.file.name.toLowerCase().endsWith(".zip");
+      formData.append("source_type", isZip ? "whatsapp_zip_upload" : "whatsapp_txt_upload");
+      formData.append("file", chatFile.file);
+    } else {
+      formData.append("source_type", "whatsapp_paste");
+      formData.append("text", messageText);
+    }
+
+    const response = await fetch("/api/leads/import-whatsapp-chat", {
+      method: "POST",
+      body: formData
+    });
+
+    if (!response.ok) {
+      const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null;
+      appendAssistantMessage({
+        content: errorPayload?.error ?? "I could not summarize that WhatsApp chat yet."
+      });
+      return;
+    }
+
+    const payload = (await response.json()) as ChatFollowupSummary & {
+      needs_txt_selection?: boolean;
+      txt_candidates?: ZipTextCandidate[];
+    };
+
+    if (payload.needs_txt_selection) {
+      appendAssistantMessage({
+        content: "I found more than one text file in the WhatsApp export. Choose the chat file before I summarize it.",
+        chatImport: {
+          zipCandidates: payload.txt_candidates ?? [],
+          pendingZipFile: chatFile?.file,
+          selectedLead,
+          selectedLeadId
+        }
+      });
+      return;
+    }
+
+    const resolvedLead = payload.matched_lead ?? selectedLead;
+
+    if (requestedAction === "analyze_only") {
+      appendAssistantMessage({
+        content: buildChatImportNarrative(payload, resolvedLead)
+      });
+      return;
+    }
+
+    if (requestedAction === "reply") {
+      appendAssistantMessage({
+        content: `I read the chat and drafted a reply${resolvedLead ? ` for ${resolvedLead.full_name || resolvedLead.phone || "this lead"}` : ""}. Review it before opening WhatsApp.`,
+        chatReplyAction: {
+          summary: payload,
+          lead: resolvedLead
+        }
+      });
+      return;
+    }
+
+    if (resolvedLead && requestedAction === "save_followup") {
+      appendAssistantMessage({
+        content: "",
+        chatFollowupManage: {
+          summary: payload,
+          lead: resolvedLead,
+          suggestedAction: "note"
+        }
+      });
+      return;
+    }
+
+    if (resolvedLead && requestedAction === "set_reminder") {
+      appendAssistantMessage({
+        content: `I found ${resolvedLead.full_name || resolvedLead.phone || "the matching lead"}. Choose the reminder time, then confirm.`,
+        chatReminder: {
+          summary: payload,
+          lead: resolvedLead
+        }
+      });
+      return;
+    }
+
+    if (resolvedLead && requestedAction === "update_status") {
+      appendAssistantMessage({
+        content: "",
+        chatFollowupManage: {
+          summary: payload,
+          lead: resolvedLead,
+          suggestedAction: "status"
+        }
+      });
+      return;
+    }
+
+    await appendAssistantMessageSequential({
+      content: buildChatImportNarrative(payload, resolvedLead)
+    });
+
+    await appendAssistantMessageSequential({
+      content: "Suggested reply:",
+      chatReplyAction: {
+        summary: payload,
+        lead: resolvedLead
+      }
+    });
+
+    if (resolvedLead) {
+      const suggestedAction = recommendChatFollowupAction(payload, resolvedLead);
+      if (suggestedAction) {
+        await appendAssistantMessageSequential({
+          content: "",
+          chatFollowupManage: {
+            summary: payload,
+            lead: resolvedLead,
+            suggestedAction
+          }
+        });
+      }
+      return;
+    }
+
+    const verifiedCandidates = getVerifiedChatLeadCandidates(payload).slice(0, 5);
+    const hasDetectedIdentity = Boolean(payload.detected_customer_name || payload.detected_phone);
+
+    if (!verifiedCandidates.length && !hasDetectedIdentity) {
+      await appendAssistantMessageSequential({
+        content: "I did not find enough customer identity information to match or create a lead. Please send the customer name or phone if you want me to attach this chat to a lead."
+      });
+      return;
+    }
+
+    await appendAssistantMessageSequential({
+      content: verifiedCandidates.length
+        ? "I found possible matching leads. Choose one only if it is the same customer."
+        : "I did not find an existing lead with matching customer information. You can create a new lead from the detected customer details.",
+      chatLeadChoice: {
+        summary: {
+          ...payload,
+          candidate_leads: verifiedCandidates
+        },
+        candidates: verifiedCandidates
+      }
+    });
+  }
+
   async function continueAfterEntitySelection(preview: EntitySelectionPreview, candidate: AgentResolutionCandidate) {
     if (preview.targetType === "listing") {
       const listing = candidateToListing(candidate);
@@ -4423,6 +5958,23 @@ export function AgentWorkspace({
           lead,
           status: (nextPayload as LeadOperationPayload).status,
           urgency: (nextPayload as LeadOperationPayload).urgency
+        }
+      });
+      return;
+    }
+
+    if (preview.intent === "record_lead_followup") {
+      appendAssistantMessage({
+        content: preview.actionResponse,
+        leadStatusUpdate: {
+          lead,
+          status: (nextPayload as LeadOperationPayload).status,
+          urgency: (nextPayload as LeadOperationPayload).urgency,
+          activityType:
+            (nextPayload as LeadOperationPayload).activity_type === "message_sent"
+              ? "message_sent"
+              : "status_changed",
+          summary: (nextPayload as LeadOperationPayload).summary ?? (nextPayload as LeadOperationPayload).query
         }
       });
       return;
@@ -4529,17 +6081,34 @@ export function AgentWorkspace({
       ? `Attached ${outgoingMedia.length} listing media file${outgoingMedia.length === 1 ? "" : "s"}.`
       : "";
     const fileSummary = summarizeFileAttachments(outgoingFiles);
-    const contextSummary = summarizeContextAttachments(outgoingContext);
     const userMessageContent = trimmed || mediaSummary;
-    const visibleUserMessageContent = [userMessageContent, fileSummary, contextSummary].filter(Boolean).join("\n\n");
-    const agentMessageContent = [trimmed, mediaSummary, fileSummary, contextSummary].filter(Boolean).join("\n\n");
+    const visibleUserMessageContent = [userMessageContent, fileSummary].filter(Boolean).join("\n\n");
+    const agentMessageContent = [trimmed, mediaSummary, fileSummary].filter(Boolean).join("\n\n");
     const currentListingId = selectedContextEntityId("listing") ?? activeListingId ?? undefined;
-    const currentLeadId = selectedContextEntityId("lead") ?? undefined;
+    const currentLeadId = selectedContextEntityId("lead") ?? activeLeadId ?? undefined;
+    const outgoingLeadId = outgoingContext.find((item) => item.type === "lead")?.entity_id ?? activeLeadId ?? null;
+    const hasWhatsAppChatFile = outgoingFiles.some((item) => item.kind === "whatsapp_chat" || isWhatsAppChatFile(item.file));
+    const shouldImportWhatsAppChat =
+      isWhatsAppImportMode ||
+      hasWhatsAppChatFile ||
+      (!hasOutgoingMedia && !hasOutgoingFiles && !isScheduleRequest(trimmed) && looksLikeWhatsAppChatText(trimmed));
 
     setInput("");
     setComposerMedia([]);
     setComposerFiles([]);
     setContextAttachments([]);
+    if (outgoingLeadId) {
+      setActiveLeadId(outgoingLeadId);
+      const outgoingLead =
+        workspaceLeads.find((lead) => lead.id === outgoingLeadId) ??
+        outgoingContext
+          .filter((item) => item.type === "lead")
+          .map(leadFromContextAttachment)
+          .find((lead) => lead?.id === outgoingLeadId) ??
+        null;
+      setActiveLeadSnapshot(outgoingLead);
+    }
+    setIsWhatsAppImportMode(false);
     setIsSubmitting(true);
     if (hasOutgoingMedia) {
       if (activeDraftId) {
@@ -4562,6 +6131,12 @@ export function AgentWorkspace({
     setActiveTurnAnchorId(userMessage.id);
     setActiveOutputId(null);
     window.requestAnimationFrame(() => positionTurnAnchor(userMessage.id));
+
+    if (shouldImportWhatsAppChat && (trimmed || hasWhatsAppChatFile)) {
+      await summarizeWhatsAppChatFromComposer(trimmed, outgoingFiles, outgoingLeadId, detectChatImportRequestedAction(trimmed));
+      setIsSubmitting(false);
+      return;
+    }
 
     if (!trimmed) {
       appendAssistantMessage({
@@ -4690,7 +6265,12 @@ export function AgentWorkspace({
       }
 
       if (payload.action.intent === "list_leads" && leadPayload) {
-        showLeadResults(payload.action.response, leadPayload);
+        showLeadResults(payload.action.response, leadPayload, agentMessageContent);
+        return;
+      }
+
+      if (payload.action.intent === "list_today_followups") {
+        await showTodayFollowUps(payload.action.response);
         return;
       }
 
@@ -4704,6 +6284,11 @@ export function AgentWorkspace({
 
       if (payload.action.intent === "update_lead_status" && leadPayload) {
         proposeLeadStatusUpdate(payload.action.response, leadPayload, payload.action.resolution);
+        return;
+      }
+
+      if (payload.action.intent === "record_lead_followup" && leadPayload) {
+        proposeLeadFollowUpRecord(payload.action.response, leadPayload, payload.action.resolution);
         return;
       }
 
@@ -4973,20 +6558,91 @@ export function AgentWorkspace({
     mediaSelectionDraftIdRef.current = null;
   }
 
+  function addComposerDocumentFiles(files: File[]) {
+    const accepted = files.map((file) => ({
+      id: createId(),
+      file,
+      kind: "document" as const
+    }));
+
+    setComposerFiles((current) => [...current, ...accepted].slice(-8));
+  }
+
+  function addWhatsAppChatFiles(files: File[]) {
+    const accepted = files
+      .filter(isWhatsAppChatFile)
+      .map((file) => ({
+        id: createId(),
+        file,
+        kind: "whatsapp_chat" as const
+      }));
+
+    if (!accepted.length) {
+      return false;
+    }
+
+    setIsWhatsAppImportMode(true);
+    setComposerFiles((current) => [...current, ...accepted].slice(-8));
+    return true;
+  }
+
+  function handleComposerFilesDropped(files: File[]) {
+    if (!files.length) {
+      return;
+    }
+
+    const mediaFiles = files.filter((file) => file.type.startsWith("image/") || file.type.startsWith("video/"));
+    const chatFiles = files.filter(isWhatsAppChatFile);
+    const otherFiles = files.filter((file) => !mediaFiles.includes(file) && !chatFiles.includes(file));
+
+    if (mediaFiles.length) {
+      const accepted = mediaFiles.map((file) => ({
+        id: createId(),
+        file,
+        previewUrl: URL.createObjectURL(file),
+        mediaType: file.type.startsWith("image/") ? ("image" as const) : ("video" as const)
+      }));
+      setComposerMedia((current) => [...current, ...accepted]);
+    }
+
+    if (chatFiles.length) {
+      addWhatsAppChatFiles(chatFiles);
+    }
+
+    if (otherFiles.length) {
+      addComposerDocumentFiles(otherFiles);
+    }
+  }
+
   function handleDocumentSelected(files: FileList | null) {
     if (!files?.length) {
       return;
     }
 
-    const accepted = Array.from(files).map((file) => ({
-      id: createId(),
-      file
-    }));
-
-    setComposerFiles((current) => [...current, ...accepted].slice(-8));
+    addComposerDocumentFiles(Array.from(files));
 
     if (documentFileInputRef.current) {
       documentFileInputRef.current.value = "";
+    }
+  }
+
+  function handleWhatsAppChatSelected(files: FileList | null) {
+    if (!files?.length) {
+      return;
+    }
+
+    if (!addWhatsAppChatFiles(Array.from(files))) {
+      appendAssistantMessage({
+        content: "Choose a WhatsApp export .txt or .zip file."
+      });
+      if (whatsAppChatFileInputRef.current) {
+        whatsAppChatFileInputRef.current.value = "";
+      }
+      return;
+    }
+
+    if (whatsAppChatFileInputRef.current) {
+      whatsAppChatFileInputRef.current.value = "";
     }
   }
 
@@ -5163,7 +6819,7 @@ export function AgentWorkspace({
                 {message.leadLatestOffer ? (
                   <LeadLatestOfferCard
                     onConfirm={() => {
-                      const latestLead = recentLeads[0] ? [recentLeads[0]] : [];
+                      const latestLead = workspaceLeads[0] ? [workspaceLeads[0]] : [];
                       appendAssistantMessage({
                         content: latestLead.length
                           ? "Confirmed. Here is the latest lead from your inbox."
@@ -5196,9 +6852,12 @@ export function AgentWorkspace({
                 {message.leadCreate ? (
                   <LeadCreateConfirmCard
                     preview={message.leadCreate}
-                    onSaved={() => {
+                    onSaved={(lead, savedFollowUp) => {
+                      mergeUpdatedLead(lead);
                       appendAssistantMessage({
-                        content: "Done. I saved the lead. You can review it from the Leads page."
+                        content: savedFollowUp
+                          ? "Done. I created the lead and saved the WhatsApp chat summary as its first follow-up record."
+                          : "Done. I saved the lead. You can review it from the Leads page."
                       });
                     }}
                   />
@@ -5267,6 +6926,134 @@ export function AgentWorkspace({
                   />
                 ) : null}
                 {message.leadReply ? <LeadReplyCard draft={message.leadReply} /> : null}
+                {message.chatImport ? (
+                  <ChatFollowupSummaryCard
+                    preview={message.chatImport}
+                    contextLeads={
+                      [
+                        ...(message.contextAttachments
+                          ?.filter((item) => item.type === "lead")
+                          .map((item) => workspaceLeads.find((lead) => lead.id === item.entity_id) ?? leadFromContextAttachment(item))
+                          .filter((lead): lead is LeadListItem => Boolean(lead)) ?? []),
+                        getActiveLead()
+                      ].filter((lead): lead is LeadListItem => Boolean(lead))
+                    }
+                    onCreateLead={(payload, followUp) => proposeLeadCreate(payload, followUp)}
+                    recentLeads={workspaceLeads}
+                    onDraftReply={(summary, lead) => {
+                      appendAssistantMessage({
+                        content: `Here is a reply draft for ${lead.full_name || lead.phone || "this lead"}. Review it, then copy it or open WhatsApp.`,
+                        chatReplyAction: {
+                          summary,
+                          lead
+                        }
+                      });
+                    }}
+                    onManageFollowup={(summary, lead) => {
+                      const suggestedAction = recommendChatFollowupAction(summary, lead);
+                      if (!suggestedAction) {
+                        appendAssistantMessage({
+                          content: "I do not see a strong follow-up action from this chat. You can still tell me what to do, for example: save this note, update status, or remind me tomorrow."
+                        });
+                        return;
+                      }
+                      appendAssistantMessage({
+                        content: "",
+                        chatFollowupManage: {
+                          summary,
+                          lead,
+                          suggestedAction
+                        }
+                      });
+                    }}
+                    onNeedsSummary={(summary) => {
+                      setMessages((current) =>
+                        current.map((item) =>
+                          item.id === message.id
+                            ? {
+                                ...item,
+                                chatImport: {
+                                  ...item.chatImport,
+                                  summary,
+                                  selectedLead: summary.matched_lead ?? item.chatImport?.selectedLead,
+                                  selectedLeadId: summary.matched_lead?.id ?? item.chatImport?.selectedLeadId
+                                }
+                              }
+                            : item
+                        )
+                      );
+                    }}
+                  />
+                ) : null}
+                {message.chatReplyAction ? (
+                  <ChatReplyActionCard preview={message.chatReplyAction} />
+                ) : null}
+                {message.chatFollowupManage ? (
+                  <ChatFollowupManageCard
+                    preview={message.chatFollowupManage}
+                    onSaved={(content, updatedLead) => {
+                      mergeUpdatedLead(updatedLead);
+                      appendAssistantMessage({ content });
+                    }}
+                    onNeedsReminder={(preview) => {
+                      appendAssistantMessage({
+                        content: `Choose a reminder time for ${preview.lead.full_name || preview.lead.phone || "this lead"}, then confirm.`,
+                        chatReminder: preview
+                      });
+                    }}
+                    onDeclined={() => {
+                      appendAssistantMessage({
+                        content: "No problem. I did not change the lead. Tell me what you want to do next, for example save a note, update status, or remind you later."
+                      });
+                    }}
+                  />
+                ) : null}
+                {message.chatLeadChoice ? (
+                  <ChatLeadChoiceCard
+                    preview={message.chatLeadChoice}
+                    onChooseLead={(lead) => {
+                      const summary = (message.chatLeadChoice as ChatLeadChoicePreview).summary;
+                      const suggestedAction = recommendChatFollowupAction(summary, lead);
+                      appendAssistantMessage({
+                        content: suggestedAction
+                          ? `Matched this chat to ${lead.full_name || lead.phone || "the selected lead"}. I have one recommended next step.`
+                          : `Matched this chat to ${lead.full_name || lead.phone || "the selected lead"}. I do not see a strong database action yet.`,
+                        chatFollowupManage: suggestedAction
+                          ? {
+                              summary,
+                              lead,
+                              suggestedAction
+                            }
+                          : undefined
+                      });
+                    }}
+                    onCreateLead={(payload, followUp) => proposeLeadCreate(payload, followUp)}
+                  />
+                ) : null}
+                {message.chatFollowupNote ? (
+                  <ChatFollowupNoteCard
+                    preview={message.chatFollowupNote}
+                    onSaved={(content) => {
+                      appendAssistantMessage({ content });
+                    }}
+                  />
+                ) : null}
+                {message.chatReminder ? (
+                  <ChatReminderCard
+                    preview={message.chatReminder}
+                    onSaved={(content) => {
+                      appendAssistantMessage({ content });
+                    }}
+                  />
+                ) : null}
+                {message.chatStatus ? (
+                  <ChatStatusCard
+                    preview={message.chatStatus}
+                    onSaved={(content) => {
+                      appendAssistantMessage({ content });
+                    }}
+                  />
+                ) : null}
                 {message.promotion ? <PromotionPack promotion={message.promotion} /> : null}
                 {message.promotionTarget ? (
                   <PromotionConfirmCard
@@ -5326,8 +7113,8 @@ export function AgentWorkspace({
               ) : (
                 <p className="agent-context-empty">No listings available yet.</p>
               )
-            ) : recentLeads.length ? (
-              recentLeads.slice(0, 20).map((lead) => (
+            ) : workspaceLeads.length ? (
+              workspaceLeads.slice(0, 20).map((lead) => (
                 <button
                   className="agent-context-option"
                   key={lead.id}
@@ -5338,7 +7125,7 @@ export function AgentWorkspace({
                   <span>
                     <strong>{lead.full_name || lead.phone || "Unnamed buyer"}</strong>
                     <small>
-                      {lead.status} · {getLeadInterestLine(lead)} · {lead.phone || "No phone"}
+                      {formatLeadStatusLabel(lead.status, lead.urgency)} · {getLeadInterestLine(lead)} · {lead.phone || "No phone"}
                     </small>
                   </span>
                 </button>
@@ -5366,6 +7153,13 @@ export function AgentWorkspace({
         multiple
         onChange={(event) => handleDocumentSelected(event.target.files)}
       />
+      <input
+        ref={whatsAppChatFileInputRef}
+        className="media-file-input"
+        type="file"
+        accept=".txt,.zip,text/plain,application/zip"
+        onChange={(event) => handleWhatsAppChatSelected(event.target.files)}
+      />
       <AgentComposer
         actions={!hasStarted ? quickActions : undefined}
         attachActions={attachActions}
@@ -5373,6 +7167,7 @@ export function AgentWorkspace({
         contextAttachments={composerContextPreviews()}
         files={composerFiles.map((item) => ({
           id: item.id,
+          label: item.kind === "whatsapp_chat" ? "WhatsApp chat" : "File",
           name: item.file.name,
           sizeLabel: formatFileSize(item.file.size)
         }))}
@@ -5386,12 +7181,17 @@ export function AgentWorkspace({
         }))}
         onAttach={openComposerMediaPicker}
         onChange={setInput}
+        onFilesDropped={handleComposerFilesDropped}
         onRemoveContext={removeContextAttachment}
         onRemoveFile={removeComposerFile}
         onRemoveMedia={removeComposerMedia}
         onSubmit={handleSubmit}
         onVoice={handleVoiceInput}
-        placeholder="Ask Pislaka Agent to help..."
+        placeholder={
+          isWhatsAppImportMode
+            ? "Paste WhatsApp chat or drop a .txt/.zip export..."
+            : "Ask Pislaka Agent to help..."
+        }
         sendDisabled={isSubmitting || isListening || isTranscribing}
         value={input}
         voiceSlot={

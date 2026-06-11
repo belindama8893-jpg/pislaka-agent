@@ -8,6 +8,9 @@
 - Ambiguous matches must pause for user selection.
 - Channels are parameters, not intents.
 - External or persistent actions require confirmation.
+- Open WhatsApp is not the same as sent.
+- `reply_drafted` and `whatsapp_opened` must not update `last_contacted_at`.
+- Only `message_sent` updates `last_contacted_at`.
 
 ## Routing Priority
 
@@ -27,6 +30,8 @@
 - `create_listing_draft`: create an editable listing preview from broker text/voice/media.
 - `update_listing_draft`: edit an existing listing after resolving the target.
 - `list_leads`: read-only lead search or filter.
+- `list_today_followups`: read-only ranked list of leads due for follow-up today.
+- `record_lead_followup`: broker-confirmed follow-up activity such as sent message or interested/not interested status.
 - `update_lead_status`: status/urgency update after exact lead match and confirmation.
 - `create_schedule_event`: viewing, signing, handover, deadline, reminder, weekly/monthly review.
 - `list_schedule_events`: read-only calendar query.
@@ -50,6 +55,7 @@
 - "Reply to Ahmed on WhatsApp" -> `draft_lead_reply`; channel = `whatsapp`.
 - "Promote this listing on WhatsApp" -> `create_campaign_links`; channel = `whatsapp`.
 - "Send Sarah a follow-up" -> communication draft; do not auto-send.
+- "I sent message to Ahmed" -> `record_lead_followup`; activity_type = `message_sent`; resolve Ahmed before writing.
 - "Write Facebook copy for this villa" -> content generation; requires listing target.
 
 ## Entity Resolution
@@ -79,6 +85,8 @@ Must confirm:
 - Change lead status or urgency.
 - Create/edit/cancel schedule event.
 - Open external WhatsApp message.
+- Save follow-up activity from imported chat.
+- Save original WhatsApp chat text.
 - Export/share documents.
 - Bulk actions.
 
@@ -94,7 +102,15 @@ Can run without confirmation:
 These examples must stay correct:
 
 - "Reply to Ahmed on WhatsApp" must not trigger listing promotion.
+- "Reply to Ahmed on WhatsApp" must not mark Ahmed as contacted.
+- "I sent message to Ahmed" must resolve Ahmed before writing `message_sent`.
+- "Who should I follow up today?" must return today's follow-up recommendations, not a generic lead list.
 - "Mark Ahmed as hot lead" must not show another person's lead if Ahmed is missing.
 - "Show Ahmed lead" must report no match before offering latest leads.
 - "Promote my DHA 5 10 marla villa" must confirm the listing and channels before generating links.
-
+- "这套房源改为10marla" with a selected listing context must prepare an update preview for that listing, not create a new listing draft.
+- "Set a schedule for 4:30 today" with selected lead and listing context must bind both selected records and must not extract lead name "4" from the time.
+- "Schedule a viewing with belinda tomorrow at 5pm for my DHA Phase 5 villa" must prepare a schedule preview. Interpret the time in the user's current browser timezone, match lowercase lead names such as "belinda" to existing leads when possible, and do not block if "DHA Phase 5 villa" matches multiple listings; keep the listing text unbound unless there is a confident selected match.
+- The Schedule workspace must default to the next 7 days, not only today, and its top metric cards must stay compact on mobile.
+- "Share this listing to Facebook" must prepare a promotion pack confirmation for the matched listing and channel; a later "yes" must execute the pending promotion action, not route as a new general message.
+- "Publish it to WhatsApp" for a selected listing must prepare a WhatsApp promotion pack confirmation and must not claim that Pislaka has published or sent the listing externally.
