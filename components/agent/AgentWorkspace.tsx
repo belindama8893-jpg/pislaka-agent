@@ -7536,10 +7536,10 @@ export function AgentWorkspace({
 
   return (
     <section
-      className={`chat-panel ${hasStarted ? "has-thread" : "is-empty"} ${activeTurnAnchorId || activeOutputId ? "has-active-turn" : ""}`}
+      className={`chat-panel ${hasStarted ? "has-thread" : "is-empty"} ${isGuest && hasStarted ? "has-guest-note" : ""} ${activeTurnAnchorId || activeOutputId ? "has-active-turn" : ""}`}
       ref={chatPanelRef}
     >
-      {isGuest ? (
+      {isGuest && hasStarted ? (
         <p className="guest-mode-note">
           Guest mode. Chat history is not saved.{" "}
           <Link href="/auth/sign-in">Sign in</Link> to save your work.

@@ -891,6 +891,10 @@ a {
   flex: 0 0 clamp(72px, 22vh, 220px);
 }
 
+.chat-panel.has-thread.has-guest-note .messages::before {
+  flex-basis: clamp(118px, 24vh, 230px);
+}
+
 .messages::-webkit-scrollbar {
   width: 6px;
 }
@@ -6843,6 +6847,10 @@ a {
     top: 10px;
     width: calc(100% - 32px);
     font-size: 0.74rem;
+  }
+
+  .chat-panel.has-thread.has-guest-note .messages::before {
+    flex-basis: clamp(118px, 18vh, 150px);
   }
 
   .agent-start {
