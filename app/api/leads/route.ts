@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { insertAgentChatMessage } from "@/lib/agent/conversations";
 import { generateLeadSummary } from "@/lib/agent/lead-summaries";
 import { requireCurrentBroker } from "@/lib/auth/current-user";
-import { getRecentLeadsForBroker, leadBaseSelect } from "@/lib/leads/queries";
+import { getLeadsByIdsForBroker, getRecentLeadsForBroker, leadBaseSelect } from "@/lib/leads/queries";
+import type { TodayFollowUpLead } from "@/lib/leads/types";
 import type { ListingRecord } from "@/lib/listings/types";
 import { createServiceClient } from "@/lib/supabase/server";
 
@@ -48,6 +50,50 @@ const leadUpdateSchema = z.object({
 }).refine((value) => Object.keys(value).some((key) => key !== "id"), {
   message: "At least one lead field must be provided"
 });
+
+async function insertCampaignLeadAlert({
+  brokerId,
+  leadId,
+  listing,
+  service
+}: {
+  brokerId: string;
+  leadId: string;
+  listing: ListingRecord | null;
+  service: ReturnType<typeof createServiceClient>;
+}) {
+  const [lead] = await getLeadsByIdsForBroker(service, brokerId, [leadId]);
+
+  if (!lead) {
+    return;
+  }
+
+  const listingLabel =
+    [lead.listing_title, lead.listing_area, lead.listing_city].filter(Boolean).join(", ") ||
+    listing?.title ||
+    "the promoted listing";
+  const channelLabel = lead.campaign_channel ?? lead.source_channel ?? "promotion";
+  const alertLead: TodayFollowUpLead = {
+    ...lead,
+    priority_label: "First reply",
+    recommended_reason: `New lead submitted from the ${channelLabel} promotion for ${listingLabel}.`,
+    recommended_action: "Review the inquiry and draft the first reply.",
+    recommendation_context: lead.message ?? lead.ai_summary
+  };
+
+  await insertAgentChatMessage(service, {
+    brokerId,
+    role: "assistant",
+    messageType: "lead_alert",
+    content: `New lead from ${channelLabel} promotion for ${listingLabel}. Review the inquiry and decide whether to reply now.`,
+    structuredPayload: {
+      ui: {
+        leadResults: [alertLead],
+        leadSourceMessage: "promotion_lead_alert"
+      }
+    }
+  });
+}
 
 export async function GET() {
   try {
@@ -191,6 +237,17 @@ export async function POST(request: Request) {
 
   if (leadError || !lead) {
     return NextResponse.json({ error: leadError?.message ?? "Unable to save lead" }, { status: 500 });
+  }
+
+  try {
+    await insertCampaignLeadAlert({
+      brokerId: campaignLink.broker_id,
+      leadId: lead.id,
+      listing: (listing as ListingRecord | null) ?? null,
+      service
+    });
+  } catch {
+    // The public lead capture must not fail if the broker-facing chat alert cannot be saved.
   }
 
   return NextResponse.json({ lead });

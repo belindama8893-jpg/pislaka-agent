@@ -3,7 +3,7 @@ import { AgentWorkspace } from "@/components/agent/AgentWorkspace";
 import { ProfileCompletionForm } from "@/components/profile/ProfileCompletionForm";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
 import { getAgentChatMessages } from "@/lib/agent/conversations";
-import { getLeadsByIdsForBroker, getRecentLeadsForBroker } from "@/lib/leads/queries";
+import { getLeadsByIdsForBroker, getNewLeadsCountForBroker, getRecentLeadsForBroker } from "@/lib/leads/queries";
 import type { ListingMediaRecord, ListingRecord } from "@/lib/listings/types";
 import { createServiceClient, createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -158,9 +158,10 @@ async function getListingsForBroker(
 export default async function Home({ searchParams }: HomeProps) {
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const { supabase, broker } = await getCurrentBrokerContext();
-  const [listings, leads, chatHistory] = await Promise.all([
+  const [listings, leads, newLeadsCount, chatHistory] = await Promise.all([
     getListingsForBroker(supabase, broker.id),
     getRecentLeadsForBroker(supabase, broker.id, 100),
+    getNewLeadsCountForBroker(supabase, broker.id),
     getAgentChatMessages(supabase, broker.id, { limit: 50 })
   ]);
   const selectedListingId = getSearchParamValue(resolvedSearchParams, "listing");
@@ -250,7 +251,6 @@ export default async function Home({ searchParams }: HomeProps) {
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
   const firstName = getFirstName(broker);
   const profileComplete = isProfileComplete(broker);
-  const newLeadsCount = leads.filter((lead) => lead.status === "new").length;
 
   return (
     <WorkspaceShell
@@ -258,7 +258,6 @@ export default async function Home({ searchParams }: HomeProps) {
       broker={broker}
       initials={getInitials(broker)}
       leadsCount={newLeadsCount}
-      listingsCount={listings.length}
     >
         {!profileComplete ? <ProfileCompletionForm profile={broker} /> : null}
 

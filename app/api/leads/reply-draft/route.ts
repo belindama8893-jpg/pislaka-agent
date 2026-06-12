@@ -7,7 +7,8 @@ import type { LeadListItem, LeadRecord } from "@/lib/leads/types";
 import type { ListingRecord } from "@/lib/listings/types";
 
 const replyDraftRequestSchema = z.object({
-  lead_id: z.string().uuid()
+  lead_id: z.string().uuid(),
+  preview: z.boolean().optional()
 });
 
 function normalizeWhatsAppPhone(phone: string | null) {
@@ -99,35 +100,37 @@ export async function POST(request: Request) {
 
     const whatsapp_url = makeWhatsAppReplyUrl(leadRow.phone, draft.reply_text);
 
-    await supabase.from("audit_logs").insert({
-      broker_id: broker.id,
-      actor_type: "agent",
-      action: "draft_lead_reply",
-      entity_type: "lead",
-      entity_id: leadRow.id,
-      after_payload: {
-        ...draft,
-        whatsapp_url
-      },
-      metadata: {
-        source: "lead_reply_draft"
-      }
-    });
+    if (!parsed.data.preview) {
+      await supabase.from("audit_logs").insert({
+        broker_id: broker.id,
+        actor_type: "agent",
+        action: "draft_lead_reply",
+        entity_type: "lead",
+        entity_id: leadRow.id,
+        after_payload: {
+          ...draft,
+          whatsapp_url
+        },
+        metadata: {
+          source: "lead_reply_draft"
+        }
+      });
 
-    await supabase.from("follow_up_activities").insert({
-      broker_id: broker.id,
-      lead_id: leadRow.id,
-      related_listing_id: leadRow.listing_id,
-      activity_type: "reply_drafted",
-      channel: "whatsapp",
-      summary: draft.next_step,
-      message_draft: draft.reply_text,
-      old_status: leadRow.status,
-      new_status: null,
-      source_type: "agent_chat",
-      original_chat_saved: false,
-      original_chat_text: null
-    });
+      await supabase.from("follow_up_activities").insert({
+        broker_id: broker.id,
+        lead_id: leadRow.id,
+        related_listing_id: leadRow.listing_id,
+        activity_type: "reply_drafted",
+        channel: "whatsapp",
+        summary: draft.next_step,
+        message_draft: draft.reply_text,
+        old_status: leadRow.status,
+        new_status: null,
+        source_type: "agent_chat",
+        original_chat_saved: false,
+        original_chat_text: null
+      });
+    }
 
     return NextResponse.json({
       draft: {

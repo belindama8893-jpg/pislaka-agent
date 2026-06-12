@@ -21,7 +21,6 @@ type WorkspaceShellProps = {
   children: ReactNode;
   initials: string;
   leadsCount?: number;
-  listingsCount?: number;
   subtitle?: string;
   title?: string;
 };
@@ -51,7 +50,6 @@ export function WorkspaceShell({
   children,
   initials,
   leadsCount,
-  listingsCount,
   subtitle,
   title
 }: WorkspaceShellProps) {
@@ -80,7 +78,7 @@ export function WorkspaceShell({
           <p>Workspace</p>
           {workspaceNav.map((item) => {
             const Icon = item.icon;
-            const count = item.id === "listings" ? listingsCount : item.id === "leads" ? leadsCount : undefined;
+            const count = item.id === "leads" ? leadsCount : undefined;
             return (
               <Link className={getNavClass(active, item.id)} href={item.href} key={item.id}>
                 <span>
@@ -118,7 +116,6 @@ export function WorkspaceShell({
               email={broker.email}
               initials={initials}
               leadsCount={leadsCount}
-              listingsCount={listingsCount}
               name={getDisplayName(broker)}
             />
           </div>

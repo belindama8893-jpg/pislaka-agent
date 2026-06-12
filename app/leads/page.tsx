@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { LeadListPanel } from "@/components/leads/LeadListPanel";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
-import { getRecentLeadsForBroker } from "@/lib/leads/queries";
+import { getNewLeadsCountForBroker, getRecentLeadsForBroker } from "@/lib/leads/queries";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -51,8 +51,10 @@ async function getCurrentBrokerContext() {
 
 export default async function LeadsPage() {
   const { supabase, broker } = await getCurrentBrokerContext();
-  const leads = await getRecentLeadsForBroker(supabase, broker.id, 30);
-  const newLeadsCount = leads.filter((lead) => lead.status === "new").length;
+  const [leads, newLeadsCount] = await Promise.all([
+    getRecentLeadsForBroker(supabase, broker.id, 30),
+    getNewLeadsCountForBroker(supabase, broker.id)
+  ]);
 
   return (
     <WorkspaceShell

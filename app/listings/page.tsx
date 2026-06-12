@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { ListingDraftsPanel } from "@/components/listings/ListingDraftsPanel";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
-import { getRecentLeadsForBroker } from "@/lib/leads/queries";
+import { getNewLeadsCountForBroker } from "@/lib/leads/queries";
 import type { ListingMediaRecord, ListingRecord } from "@/lib/listings/types";
 import { createServiceClient, createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -102,11 +102,10 @@ async function getListingsForBroker(
 
 export default async function ListingsPage() {
   const { supabase, broker } = await getCurrentBrokerContext();
-  const [listings, leads] = await Promise.all([
+  const [listings, newLeadsCount] = await Promise.all([
     getListingsForBroker(supabase, broker.id),
-    getRecentLeadsForBroker(supabase, broker.id, 30)
+    getNewLeadsCountForBroker(supabase, broker.id)
   ]);
-  const newLeadsCount = leads.filter((lead) => lead.status === "new").length;
 
   return (
     <WorkspaceShell
@@ -114,7 +113,6 @@ export default async function ListingsPage() {
       broker={broker}
       initials={getInitials(broker)}
       leadsCount={newLeadsCount}
-      listingsCount={listings.length}
       subtitle="Review confirmed drafts, edit property facts, and attach photos or video."
       title="Listings"
     >

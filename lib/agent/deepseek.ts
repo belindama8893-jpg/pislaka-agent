@@ -16,6 +16,7 @@ import {
   extractLeadName,
   extractLeadStatus,
   extractLeadStatusFilter,
+  isTodayFollowUpsRequest,
   isPromotionRequest
 } from "@/lib/agent/intent-router";
 import {
@@ -204,7 +205,7 @@ Lead rules:
 - Use create_lead when the user asks to add, create, record, or save a lead/customer/buyer.
 - Use update_lead_listing when the user asks to link, attach, associate, move, change, or assign a lead/customer/buyer to a listing/property.
 - Use list_leads when the user asks who/which leads/customers/buyers to follow up, new leads, hot leads, or today's leads.
-- Use list_today_followups when the user asks specifically who to follow up today or today's follow-ups.
+- Use list_today_followups when the user asks specifically who to follow up today, today's follow-ups, or simply says "follow up" as a standalone request.
 - Use record_lead_followup when the user says they sent a message, contacted a lead, the lead is interested/hot, or the lead is not interested.
 - Use draft_lead_reply when the user asks to reply to a lead/customer/buyer.
 - Use update_lead_status when the user asks to mark/change/update a lead status.
@@ -721,6 +722,12 @@ function shouldNormalizeExternalPublishAsPromotion(message: string) {
 }
 
 function normalizeAgentAction(action: AgentAction, message: string, context?: AgentRoutingContext): AgentAction {
+  const brokerMessage = stripLocationEnhancedRoutingContext(message);
+
+  if (isTodayFollowUpsRequest(brokerMessage) && action.intent !== "list_today_followups") {
+    return parseLocalTodayFollowUps(brokerMessage);
+  }
+
   if (
     action.intent === "publish_listing" &&
     shouldNormalizeExternalPublishAsPromotion(message)
@@ -1003,13 +1010,15 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
   }
 
   const routingMessage = buildLocationEnhancedRoutingMessage(message, context?.locationContext);
-  const localIntent = classifyLocalIntent(routingMessage);
+  const localIntent = classifyLocalIntent(message);
 
-  if (
-    localIntent === "listing_draft" ||
-    localIntent === "listing_update" ||
-    localIntent === "lead_details_update"
-  ) {
+  if (localIntent === "today_followups") {
+    return stripInternalLocationContextFromAction(
+      localizeAgentActionResponse(parseLocalAgentAction(message, context), message)
+    );
+  }
+
+  if (localIntent === "listing_draft" || localIntent === "listing_update" || localIntent === "lead_details_update") {
     return stripInternalLocationContextFromAction(
       localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
     );

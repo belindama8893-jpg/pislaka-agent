@@ -6,8 +6,9 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const limit = Number(searchParams.get("limit") ?? 12);
+    const seedTag = searchParams.get("seed") === "followup-test" ? "[seed:followup-test]" : undefined;
     const { supabase, broker } = await requireCurrentBroker();
-    const leads = await getTodayFollowUpsForBroker(supabase, broker.id, limit);
+    const leads = await getTodayFollowUpsForBroker(supabase, broker.id, limit, { seedTag });
 
     return NextResponse.json({ leads });
   } catch (error) {

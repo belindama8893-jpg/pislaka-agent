@@ -72,8 +72,12 @@ export function isLeadStatusRequest(message: string) {
 }
 
 export function isTodayFollowUpsRequest(message: string) {
-  return /who should i follow up today|show today'?s follow[-\s]?ups|today'?s follow[-\s]?ups|any hot leads today|which clients need reply|今天.*跟.*客户|今天.*跟进|今日.*跟进/i.test(
-    message
+  const trimmed = message.trim();
+  return (
+    /^(?:follow[-\s]?up|followups|follow-ups)$/i.test(trimmed) ||
+    /who should i follow up today|show today'?s follow[-\s]?ups|today'?s follow[-\s]?ups|any hot leads today|which clients need reply|今天.*跟.*客户|今天.*跟进|今日.*跟进/i.test(
+      message
+    )
   );
 }
 

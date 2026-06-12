@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { LeadListItem, LeadRecord, TodayFollowUpLead } from "@/lib/leads/types";
+import type { FollowUpActivityRecord, LeadListItem, LeadRecord, TodayFollowUpLead } from "@/lib/leads/types";
 
 export const leadBaseSelect =
   "id, broker_id, listing_id, campaign_link_id, source_channel, full_name, phone, email, message, status, urgency, ai_summary, last_contacted_at, next_follow_up_at, last_note, budget_min, budget_max, interested_area, interested_listing_id, created_at, updated_at";
@@ -134,6 +134,20 @@ export async function getRecentLeadsForBroker(
   return hydrateLeadRows(supabase, (leads ?? []) as Partial<LeadRecord>[]);
 }
 
+export async function getNewLeadsCountForBroker(supabase: SupabaseClient, brokerId: string) {
+  const { count, error } = await supabase
+    .from("leads")
+    .select("id", { count: "exact", head: true })
+    .eq("broker_id", brokerId)
+    .eq("status", "new");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return count ?? 0;
+}
+
 export async function getLeadsByIdsForBroker(
   supabase: SupabaseClient,
   brokerId: string,
@@ -157,113 +171,322 @@ export async function getLeadsByIdsForBroker(
   return hydrateLeadRows(supabase, (data ?? []) as Partial<LeadRecord>[]);
 }
 
-function getLeadTime(value: string | null) {
-  return value ? new Date(value).getTime() : 0;
+export async function getFollowUpActivitiesForLead(
+  supabase: SupabaseClient,
+  brokerId: string,
+  leadId: string,
+  limit = 30
+): Promise<FollowUpActivityRecord[]> {
+  const { data, error } = await supabase
+    .from("follow_up_activities")
+    .select(
+      "id, broker_id, lead_id, related_listing_id, activity_type, channel, summary, message_draft, old_status, new_status, next_follow_up_at, source_type, original_chat_saved, original_chat_text, occurred_at, created_at, created_by"
+    )
+    .eq("broker_id", brokerId)
+    .eq("lead_id", leadId)
+    .order("occurred_at", { ascending: false })
+    .limit(Math.min(Math.max(limit, 1), 100));
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as FollowUpActivityRecord[];
 }
 
-function buildFollowUpRecommendation(lead: LeadListItem, now: Date) {
+function getActivitySummary(activity: FollowUpActivityRecord | undefined) {
+  return activity?.summary?.trim() || activity?.message_draft?.trim() || null;
+}
+
+function compactText(value: string | null | undefined, maxLength = 130) {
+  const text = value?.replace(/\s+/g, " ").trim();
+  if (!text) {
+    return null;
+  }
+
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1).trim()}...` : text;
+}
+
+function formatElapsedHours(hours: number) {
+  if (!Number.isFinite(hours)) {
+    return "no recorded contact";
+  }
+
+  if (hours < 1) {
+    return "less than 1 hour ago";
+  }
+
+  if (hours < 24) {
+    return `${Math.floor(hours)}h ago`;
+  }
+
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+function hoursBetween(now: Date, value: string | null) {
+  if (!value) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return (now.getTime() - new Date(value).getTime()) / 36e5;
+}
+
+function hasActivity(activities: FollowUpActivityRecord[], activityTypes: FollowUpActivityRecord["activity_type"][]) {
+  return activities.some((activity) => activityTypes.includes(activity.activity_type));
+}
+
+function describeLeadNeed(lead: LeadListItem) {
+  const location = lead.interested_area ?? lead.listing_area ?? lead.listing_city;
+  const budget =
+    lead.budget_min || lead.budget_max
+      ? [lead.budget_min, lead.budget_max].filter((amount): amount is number => Boolean(amount)).join("-")
+      : null;
+  const listing = lead.listing_title ?? null;
+
+  return [
+    location ? `area: ${location}` : null,
+    budget ? `budget: ${budget}` : null,
+    listing ? `listing: ${listing}` : null
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function hasClearNeed(lead: LeadListItem, activities: FollowUpActivityRecord[]) {
+  const contextText = [
+    lead.ai_summary,
+    lead.last_note,
+    lead.message,
+    ...activities.slice(0, 3).map((activity) => activity.summary)
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return Boolean(
+    lead.budget_min ||
+      lead.budget_max ||
+      lead.interested_area ||
+      lead.interested_listing_id ||
+      lead.listing_id ||
+      /option|options|send|share|房源|listing|apartment|villa|plot|budget|area|move|viewing|visit|schedule|看房|预算|区域/i.test(
+        contextText
+      )
+  );
+}
+
+function hasHandledClearNeed(activities: FollowUpActivityRecord[]) {
+  return hasActivity(activities, ["message_sent", "whatsapp_opened", "viewing_scheduled"]);
+}
+
+function inferBestAction(lead: LeadListItem, latestActivity: FollowUpActivityRecord | undefined) {
+  const contextText = [lead.ai_summary, lead.last_note, latestActivity?.summary, lead.message].filter(Boolean).join(" ");
+  const hasSpecificRequest = /option|options|房源|listing|apartment|villa|plot|budget|move|viewing|visit|schedule/i.test(contextText);
+
+  if (!lead.phone && !lead.email) {
+    return "Review lead and capture a contact channel";
+  }
+
+  if (hasSpecificRequest) {
+    return "Send matching options and ask for viewing availability";
+  }
+
+  if (lead.status === "new") {
+    return "Send first WhatsApp reply";
+  }
+
+  if (lead.status === "contacted") {
+    return "Ask for next step";
+  }
+
+  return lead.phone ? "Send WhatsApp reply" : "Review lead";
+}
+
+function getFollowUpLane(lead: LeadListItem, now: Date, activities: FollowUpActivityRecord[]) {
   const nextFollowUpAt = lead.next_follow_up_at ? new Date(lead.next_follow_up_at) : null;
-  const lastContactedAt = lead.last_contacted_at ? new Date(lead.last_contacted_at) : null;
-  const createdAt = new Date(lead.created_at);
-  const hoursSinceCreated = (now.getTime() - createdAt.getTime()) / 36e5;
-  const hoursSinceContacted = lastContactedAt
-    ? (now.getTime() - lastContactedAt.getTime()) / 36e5
-    : Number.POSITIVE_INFINITY;
+  const hoursSinceCreated = hoursBetween(now, lead.created_at);
+  const hoursSinceContacted = hoursBetween(now, lead.last_contacted_at);
+  const hasRecordedContact = Boolean(lead.last_contacted_at) || hasActivity(activities, ["message_sent", "whatsapp_opened"]);
+  const clearNeed = hasClearNeed(lead, activities);
+  const handledClearNeed = hasHandledClearNeed(activities);
 
-  if (nextFollowUpAt && nextFollowUpAt.getTime() <= now.getTime()) {
+  if (lead.status === "new" && !hasRecordedContact && hoursSinceCreated >= 24 && hoursSinceCreated <= 72) {
     return {
-      recommended_reason: "Follow-up reminder is due.",
-      recommended_action: "Send WhatsApp reply"
+      lane: 1,
+      reasonKind: "new_uncontacted" as const
     };
   }
 
-  if (lead.urgency === "high" || lead.status === "qualified") {
+  if (
+    (nextFollowUpAt && nextFollowUpAt.getTime() <= now.getTime()) ||
+    ((lead.urgency === "high" || lead.status === "qualified" || clearNeed) && !handledClearNeed)
+  ) {
     return {
-      recommended_reason: "High-intent lead needs active follow-up.",
-      recommended_action: "Send WhatsApp reply"
+      lane: 2,
+      reasonKind: nextFollowUpAt && nextFollowUpAt.getTime() <= now.getTime() ? ("due_commitment" as const) : ("open_need" as const)
     };
   }
 
-  if (lead.status === "new" && !lead.last_contacted_at && hoursSinceCreated >= 24) {
+  if (
+    lead.status === "contacted" &&
+    hoursSinceContacted >= 48 &&
+    !hasActivity(activities, ["message_sent", "viewing_scheduled"])
+  ) {
     return {
-      recommended_reason: "New lead has not been contacted for over 24 hours.",
-      recommended_action: "Send first WhatsApp reply"
+      lane: 3,
+      reasonKind: "reactivate" as const
     };
   }
 
-  if (lead.status === "contacted" && hoursSinceContacted >= 48) {
+  return null;
+}
+
+function buildFollowUpRecommendation(
+  lead: LeadListItem,
+  now: Date,
+  activities: FollowUpActivityRecord[] = []
+) {
+  const latestActivity = activities[0];
+  const latestSummary = getActivitySummary(latestActivity);
+  const needSignal = describeLeadNeed(lead);
+  const profileContext = compactText(lead.ai_summary ?? lead.last_note ?? lead.message);
+  const recommendationContext = compactText(latestSummary ?? (needSignal || profileContext));
+  const hoursSinceCreated = hoursBetween(now, lead.created_at);
+  const hoursSinceContacted = hoursBetween(now, lead.last_contacted_at);
+  const bestAction = inferBestAction(lead, latestActivity);
+  const lane = getFollowUpLane(lead, now, activities);
+
+  if (lane?.reasonKind === "new_uncontacted") {
     return {
-      recommended_reason: "Contacted lead has no recent follow-up.",
-      recommended_action: "Ask for next step"
+      recommended_reason: `Suggested first reply: yesterday's new lead has not received a recorded first contact (${formatElapsedHours(hoursSinceCreated)}).`,
+      recommended_action: "Send first WhatsApp reply",
+      recommendation_context: recommendationContext,
+      priority_label: "First reply"
+    };
+  }
+
+  if (lane?.reasonKind === "due_commitment") {
+    return {
+      recommended_reason: latestSummary
+        ? `Suggested because a promised or scheduled follow-up is due. Latest note: ${compactText(latestSummary, 90)}`
+        : "Suggested because a promised or scheduled follow-up is due.",
+      recommended_action: bestAction,
+      recommendation_context: recommendationContext,
+      priority_label: "Open task"
+    };
+  }
+
+  if (lane?.reasonKind === "open_need") {
+    return {
+      recommended_reason: needSignal
+        ? `Suggested because the customer has a clear need (${needSignal}) and no completed follow-up action is recorded yet.`
+        : "Suggested because the customer has a clear need or high intent, but no completed follow-up action is recorded yet.",
+      recommended_action: bestAction,
+      recommendation_context: recommendationContext,
+      priority_label: "Handle request"
+    };
+  }
+
+  if (lane?.reasonKind === "reactivate") {
+    return {
+      recommended_reason: latestSummary
+        ? `Optional check-in after ${formatElapsedHours(hoursSinceContacted)}. Latest note: ${compactText(latestSummary, 90)}`
+        : `Optional check-in: contacted lead has no recent progress for ${formatElapsedHours(hoursSinceContacted)}.`,
+      recommended_action: bestAction,
+      recommendation_context: recommendationContext,
+      priority_label: "Check again"
     };
   }
 
   return {
-    recommended_reason: "Recent lead worth checking today.",
-    recommended_action: lead.phone ? "Review and reply" : "Review lead"
+    recommended_reason: profileContext
+      ? `Recent lead worth checking: ${compactText(profileContext, 90)}`
+      : "Recent lead worth checking today.",
+    recommended_action: bestAction,
+    recommendation_context: recommendationContext,
+    priority_label: "Check today"
   };
 }
 
-function followUpPriority(lead: LeadListItem, now: Date) {
+function followUpPriorityWithActivities(lead: LeadListItem, now: Date, activities: FollowUpActivityRecord[]) {
+  const lane = getFollowUpLane(lead, now, activities);
   const nextFollowUpAt = lead.next_follow_up_at ? new Date(lead.next_follow_up_at) : null;
-  const createdAt = new Date(lead.created_at);
-  const lastContactedAt = lead.last_contacted_at ? new Date(lead.last_contacted_at) : null;
-  const hoursSinceCreated = (now.getTime() - createdAt.getTime()) / 36e5;
-  const hoursSinceContacted = lastContactedAt
-    ? (now.getTime() - lastContactedAt.getTime()) / 36e5
-    : Number.POSITIVE_INFINITY;
+  const hoursSinceCreated = hoursBetween(now, lead.created_at);
+  const hoursSinceContacted = hoursBetween(now, lead.last_contacted_at);
 
-  if (nextFollowUpAt && nextFollowUpAt.getTime() <= now.getTime()) {
-    return 10_000 + Math.max(0, now.getTime() - nextFollowUpAt.getTime()) / 60000;
+  if (!lane) {
+    return 0;
   }
 
-  if (lead.urgency === "high" || lead.status === "qualified") {
-    return 8_000 + hoursSinceContacted;
+  if (lane.lane === 1) {
+    return 30_000 + Math.min(hoursSinceCreated, 96);
   }
 
-  if (lead.status === "new" && !lead.last_contacted_at && hoursSinceCreated >= 24) {
-    return 6_000 + hoursSinceCreated;
+  if (lane.lane === 2) {
+    const dueMinutes = nextFollowUpAt ? Math.max(0, now.getTime() - nextFollowUpAt.getTime()) / 60000 : 0;
+    const intentBoost = lead.urgency === "high" || lead.status === "qualified" ? 500 : 0;
+    return 20_000 + intentBoost + dueMinutes;
   }
 
-  if (lead.status === "contacted" && hoursSinceContacted >= 48) {
-    return 4_000 + hoursSinceContacted;
-  }
-
-  return Math.max(0, 1_000 - (now.getTime() - getLeadTime(lead.created_at)) / 36e5);
+  return 10_000 + Math.min(hoursSinceContacted, 240);
 }
 
-function shouldShowTodayFollowUp(lead: LeadListItem, now: Date) {
-  const nextFollowUpAt = lead.next_follow_up_at ? new Date(lead.next_follow_up_at) : null;
-  const createdAt = new Date(lead.created_at);
-  const lastContactedAt = lead.last_contacted_at ? new Date(lead.last_contacted_at) : null;
-  const hoursSinceCreated = (now.getTime() - createdAt.getTime()) / 36e5;
-  const hoursSinceContacted = lastContactedAt
-    ? (now.getTime() - lastContactedAt.getTime()) / 36e5
-    : Number.POSITIVE_INFINITY;
-
-  return Boolean(
-    (nextFollowUpAt && nextFollowUpAt.getTime() <= now.getTime()) ||
-      lead.urgency === "high" ||
-      lead.status === "qualified" ||
-      (lead.status === "new" && !lead.last_contacted_at && hoursSinceCreated >= 24) ||
-      (lead.status === "contacted" && hoursSinceContacted >= 48)
-  );
+function shouldShowTodayFollowUp(lead: LeadListItem, now: Date, activities: FollowUpActivityRecord[] = []) {
+  return Boolean(getFollowUpLane(lead, now, activities));
 }
 
 export async function getTodayFollowUpsForBroker(
   supabase: SupabaseClient,
   brokerId: string,
-  limit = 12
+  limit = 12,
+  options: { seedTag?: string } = {}
 ): Promise<TodayFollowUpLead[]> {
-  const leads = await getRecentLeadsForBroker(supabase, brokerId, 100);
+  const recentLeads = await getRecentLeadsForBroker(supabase, brokerId, 100);
+  const seedTag = options.seedTag;
+  const leads = seedTag
+    ? recentLeads.filter((lead) => lead.message?.includes(seedTag))
+    : recentLeads;
   const now = new Date();
+  const leadIds = leads.map((lead) => lead.id);
+  const activitiesByLeadId = new Map<string, FollowUpActivityRecord[]>();
 
-  return leads
-    .filter((lead) => shouldShowTodayFollowUp(lead, now))
+  if (leadIds.length) {
+    const { data, error } = await supabase
+      .from("follow_up_activities")
+      .select(
+        "id, broker_id, lead_id, related_listing_id, activity_type, channel, summary, message_draft, old_status, new_status, next_follow_up_at, source_type, original_chat_saved, original_chat_text, occurred_at, created_at, created_by"
+      )
+      .eq("broker_id", brokerId)
+      .in("lead_id", leadIds)
+      .order("occurred_at", { ascending: false })
+      .limit(300);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    for (const activity of (data ?? []) as FollowUpActivityRecord[]) {
+      const activities = activitiesByLeadId.get(activity.lead_id) ?? [];
+      activities.push(activity);
+      activitiesByLeadId.set(activity.lead_id, activities);
+    }
+  }
+
+  const candidateLeads = leads.filter((lead) => shouldShowTodayFollowUp(lead, now, activitiesByLeadId.get(lead.id) ?? []));
+  const primaryLeads = candidateLeads.filter((lead) => {
+    const lane = getFollowUpLane(lead, now, activitiesByLeadId.get(lead.id) ?? []);
+    return lane ? lane.lane <= 2 : false;
+  });
+  const leadsToRecommend = primaryLeads.length ? primaryLeads : candidateLeads;
+
+  return leadsToRecommend
     .map((lead) => ({
       ...lead,
-      ...buildFollowUpRecommendation(lead, now)
+      ...buildFollowUpRecommendation(lead, now, activitiesByLeadId.get(lead.id) ?? [])
     }))
-    .sort((left, right) => followUpPriority(right, now) - followUpPriority(left, now))
+    .sort(
+      (left, right) =>
+        followUpPriorityWithActivities(right, now, activitiesByLeadId.get(right.id) ?? []) -
+        followUpPriorityWithActivities(left, now, activitiesByLeadId.get(left.id) ?? [])
+    )
     .slice(0, Math.min(Math.max(limit, 1), 30));
 }

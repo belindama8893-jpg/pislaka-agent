@@ -11,11 +11,10 @@ type AccountMenuProps = {
   email?: string | null;
   agency?: string | null;
   city?: string | null;
-  listingsCount?: number;
   leadsCount?: number;
 };
 
-export function AccountMenu({ initials, name, email, agency, city, listingsCount, leadsCount }: AccountMenuProps) {
+export function AccountMenu({ initials, name, email, agency, city, leadsCount }: AccountMenuProps) {
   const menuRef = useRef<HTMLDetailsElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
 
@@ -86,7 +85,6 @@ export function AccountMenu({ initials, name, email, agency, city, listingsCount
           </Link>
           <Link href="/listings">
             <List size={16} /> Listings
-            {typeof listingsCount === "number" ? <span>{listingsCount}</span> : null}
           </Link>
           <Link href="/leads">
             <Users size={16} /> Leads

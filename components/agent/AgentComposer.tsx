@@ -52,6 +52,7 @@ type AgentComposerProps = {
   onVoice: () => void;
   placeholder: string;
   sendDisabled?: boolean;
+  topSlot?: ReactNode;
   value: string;
   voiceSlot?: ReactNode;
 };
@@ -76,6 +77,7 @@ export function AgentComposer({
   onVoice,
   placeholder,
   sendDisabled = false,
+  topSlot,
   value,
   voiceSlot
 }: AgentComposerProps) {
@@ -186,6 +188,8 @@ export function AgentComposer({
 
   return (
     <form className={`agent-composer ${className}`} onSubmit={onSubmit}>
+      {topSlot}
+
       <div
         className={`agent-composer-row ${isDragActive ? "is-drag-active" : ""} ${hasInlineItems ? "has-inline-items" : ""}`}
         onDragLeave={handleDragLeave}

@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { SchedulePanel } from "@/components/schedule/SchedulePanel";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
 import { getBrokerEventsForBroker } from "@/lib/events/queries";
-import { getRecentLeadsForBroker } from "@/lib/leads/queries";
+import { getNewLeadsCountForBroker, getRecentLeadsForBroker } from "@/lib/leads/queries";
 import type { LeadListItem, LeadRecord } from "@/lib/leads/types";
 import type { ListingMediaRecord, ListingRecord } from "@/lib/listings/types";
 import { createServiceClient, createSupabaseServerClient } from "@/lib/supabase/server";
@@ -67,22 +67,6 @@ async function getCurrentBrokerContext() {
   }
 
   return { supabase, broker: broker as BrokerProfile };
-}
-
-async function getListingsCount(
-  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
-  brokerId: string
-) {
-  const { count, error } = await supabase
-    .from("listings")
-    .select("id", { count: "exact", head: true })
-    .eq("broker_id", brokerId);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return count ?? 0;
 }
 
 async function getScheduleLeadsForBroker(
@@ -204,9 +188,9 @@ type SchedulePageProps = {
 export default async function SchedulePage({ searchParams }: SchedulePageProps) {
   const resolvedSearchParams = await searchParams;
   const { supabase, broker } = await getCurrentBrokerContext();
-  const [leads, listingsCount, eventsResult] = await Promise.all([
+  const [leads, newLeadsCount, eventsResult] = await Promise.all([
     getRecentLeadsForBroker(supabase, broker.id, 30),
-    getListingsCount(supabase, broker.id),
+    getNewLeadsCountForBroker(supabase, broker.id),
     getBrokerEventsForBroker(supabase, broker.id, { status: "all", limit: 40 }).then(
       (events) => ({ events, migrationRequired: false }),
       (error) => ({
@@ -227,15 +211,12 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
     getScheduleLeadsForBroker(supabase, broker.id, linkedLeadIds),
     getScheduleListingsForBroker(supabase, broker.id, linkedListingIds, hasReferenceOnlyListings)
   ]);
-  const newLeadsCount = leads.filter((lead) => lead.status === "new").length;
-
   return (
     <WorkspaceShell
       active="schedule"
       broker={broker}
       initials={getInitials(broker)}
       leadsCount={newLeadsCount}
-      listingsCount={listingsCount}
       subtitle="Manage viewings, follow-ups, signing dates, handovers, and reminders."
       title="Schedule"
     >

@@ -68,7 +68,7 @@ This domain creates, queries, or updates broker-owned records.
 | `create_listing_draft` | "Create a 10 marla villa in DHA Phase 5" | Listing facts | Editable listing preview | Required before save |
 | `update_listing_draft` | "Change this listing price to 1.2 crore" | Listing target + changed fields | Editable update preview | Required |
 | `list_leads` | "Show my hot leads" | Lead filters | Lead list or no-match message | Not required for read |
-| `list_today_followups` | "Who should I follow up today?" | Broker-owned leads | Ranked follow-up list | Not required for read |
+| `list_today_followups` | "Who should I follow up today?", "follow up" | Broker-owned leads | Ranked follow-up list | Not required for read |
 | `record_lead_followup` | "I sent message to Ahmed" | Exact lead target | Follow-up activity preview/action | Required for status changes; Sent button is explicit action |
 | `update_lead_status` | "Mark Ahmed as hot lead" | Exact lead target + new status | Status update preview | Required |
 | `create_schedule_event` | "Schedule viewing with Ahmed tomorrow 3pm" | Event type + time + participant | Calendar preview | Required |
@@ -213,6 +213,7 @@ Schedule is an independent workflow and does not require every event to bind a l
 | --- | --- | --- |
 | "Reply to Ahmed on WhatsApp" | `draft_lead_reply` | WhatsApp is a channel parameter |
 | "Who should I follow up today?" | `list_today_followups` | Read-only ranked follow-up recommendations |
+| "follow up" | `list_today_followups` | Opens today's recommended follow-up assistant, not a schedule reminder |
 | "I sent message to Ahmed" | `record_lead_followup` | Resolve Ahmed before writing `message_sent` |
 | "Mark Ahmed as hot lead" | `update_lead_status` | Must exact-match Ahmed first |
 | "Show hot leads" | `list_leads` | Read-only |

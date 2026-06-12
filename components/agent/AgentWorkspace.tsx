@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { AgentComposer, type AgentComposerContextPreview } from "@/components/agent/AgentComposer";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { AgentChatMessageRecord } from "@/lib/agent/conversations";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -34,7 +35,7 @@ import {
   getResolvedTimeZone,
   toBrokerDatetimeLocal
 } from "@/lib/events/time";
-import type { LeadListItem, LeadRecord } from "@/lib/leads/types";
+import type { LeadListItem, LeadRecord, TodayFollowUpLead } from "@/lib/leads/types";
 import type { LeadReplyDraft } from "@/lib/leads/reply-types";
 import type {
   AgentAction,
@@ -93,6 +94,10 @@ type AgentWorkspaceProps = {
   recentLeads: LeadListItem[];
 };
 
+const FOLLOW_UP_NUDGE_DISMISS_PREFIX = "pislaka_followup_nudge_dismissed";
+
+type LeadCardItem = LeadListItem | TodayFollowUpLead;
+
 type ChatMessage = {
   id: string;
   createdAt?: string;
@@ -109,7 +114,7 @@ type ChatMessage = {
   scheduleEvent?: BrokerEventDraftInput;
   scheduleEvents?: BrokerEventRecord[];
   scheduleSourceMessage?: string;
-  leadResults?: LeadListItem[];
+  leadResults?: LeadCardItem[];
   leadSourceMessage?: string;
   leadLatestOffer?: boolean;
   leadDetailsUpdate?: LeadDetailsUpdatePreview;
@@ -1634,6 +1639,30 @@ function getLeadInterestLine(lead: LeadListItem, language: AgentResponseLanguage
   return [listing || copy.listingNotSet, channel ? `${copy.via} ${channel}` : null].filter(Boolean).join(" · ");
 }
 
+function getLeadChannelLabel(lead: LeadListItem) {
+  return lead.campaign_channel ?? lead.source_channel ?? "Unknown channel";
+}
+
+function getLeadListingLabel(lead: LeadListItem) {
+  return [lead.listing_title, lead.listing_area, lead.listing_city].filter(Boolean).join(", ") || "Listing not set";
+}
+
+function getLeadContactTimeLabel(lead: LeadListItem) {
+  if (lead.last_contacted_at) {
+    return `Last contact ${formatLeadCreatedAt(lead.last_contacted_at)}`;
+  }
+
+  return `Inquiry ${formatLeadCreatedAt(lead.created_at)}`;
+}
+
+function getLeadContentSummary(lead: LeadListItem) {
+  return lead.last_note || lead.ai_summary || lead.message || "No inquiry content captured yet.";
+}
+
+function isTodayFollowUpLead(lead: LeadCardItem): lead is TodayFollowUpLead {
+  return "recommended_reason" in lead && "recommended_action" in lead;
+}
+
 function scoreLeadMatch(message: string, lead: LeadListItem) {
   if (!message.trim()) {
     return 0;
@@ -2180,8 +2209,8 @@ function LeadResultsCard({
   onSelect,
   sourceMessage
 }: {
-  leads: LeadListItem[];
-  onSelect?: (lead: LeadListItem) => void;
+  leads: LeadCardItem[];
+  onSelect?: (lead: LeadCardItem) => void;
   sourceMessage?: string;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -2197,35 +2226,73 @@ function LeadResultsCard({
     >
       {leads.length ? (
         <div className="lead-chat-list">
-          {leads.slice(0, 5).map((lead) => (
-            <div className="lead-chat-row" key={lead.id}>
-              <div>
-                <strong>{lead.full_name || copy.unnamedBuyer}</strong>
-                <p>{getLeadInterestLine(lead, language)}</p>
-                <small>
-                  {formatLeadStatusForLanguage(lead.status, lead.urgency, language)} · {lead.phone || copy.noPhone} · {formatLeadCreatedAt(lead.created_at)}
-                </small>
+          {leads.slice(0, 5).map((lead) => {
+            const followUpRecommendation = isTodayFollowUpLead(lead) ? lead : null;
+
+            return (
+              <div className="lead-chat-row" key={lead.id}>
+                <div>
+                  <div className="lead-chat-row-title">
+                    <strong>{lead.full_name || copy.unnamedBuyer}</strong>
+                    <span className={getLeadStatusClassName(lead.status, lead.urgency)}>
+                      {formatLeadStatusForLanguage(lead.status, lead.urgency, language)}
+                    </span>
+                  </div>
+                  <div className="lead-chat-detail-list">
+                    <p>
+                      <span>Time</span>
+                      {getLeadContactTimeLabel(lead)}
+                    </p>
+                    <p>
+                      <span>Listing</span>
+                      {lead.listing_id ? (
+                        <Link
+                          className="lead-chat-listing-link"
+                          href={`/listings/${lead.listing_id}`}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          {getLeadListingLabel(lead)}
+                        </Link>
+                      ) : (
+                        getLeadListingLabel(lead)
+                      )}
+                    </p>
+                    <p>
+                      <span>Channel</span>
+                      {getLeadChannelLabel(lead)}
+                    </p>
+                    <p>
+                      <span>Content</span>
+                      {getLeadContentSummary(lead)}
+                    </p>
+                    {followUpRecommendation ? (
+                      <p>
+                        <span>Suggested reply</span>
+                        {followUpRecommendation.recommended_action}
+                      </p>
+                    ) : null}
+                  </div>
+                  <small>{lead.phone || copy.noPhone}</small>
+                </div>
+                <div className="lead-chat-row-action">
+                  {onSelect ? (
+                    <button
+                      className="outline-button small"
+                      type="button"
+                      disabled={selectedId === lead.id}
+                      onClick={() => {
+                        setSelectedId(lead.id);
+                        onSelect(lead);
+                      }}
+                    >
+                      {selectedId === lead.id ? copy.selected : copy.select}
+                    </button>
+                  ) : null}
+                </div>
               </div>
-              <div className="lead-chat-row-action">
-                <span className={getLeadStatusClassName(lead.status, lead.urgency)}>
-                  {formatLeadStatusForLanguage(lead.status, lead.urgency, language)}
-                </span>
-                {onSelect ? (
-                  <button
-                    className="outline-button small"
-                    type="button"
-                    disabled={selectedId === lead.id}
-                    onClick={() => {
-                      setSelectedId(lead.id);
-                      onSelect(lead);
-                    }}
-                  >
-                    {selectedId === lead.id ? copy.selected : copy.select}
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <p className="agent-draft-status">{copy.empty}</p>
@@ -4480,6 +4547,8 @@ export function AgentWorkspace({
   const [activeOutputId, setActiveOutputId] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isFollowUpNudgeVisible, setIsFollowUpNudgeVisible] = useState(false);
+  const [isFollowUpNudgeLoading, setIsFollowUpNudgeLoading] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [voiceLevels, setVoiceLevels] = useState(idleVoiceLevels);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -4502,6 +4571,47 @@ export function AgentWorkspace({
   useEffect(() => {
     setUserTimeZone(getResolvedTimeZone());
   }, []);
+
+  useEffect(() => {
+    const todayKey = new Date().toLocaleDateString("en-CA", { timeZone: userTimeZone });
+    const storageKey = `${FOLLOW_UP_NUDGE_DISMISS_PREFIX}:${todayKey}`;
+    setIsFollowUpNudgeVisible(window.localStorage.getItem(storageKey) !== "true");
+  }, [userTimeZone]);
+
+  useEffect(() => {
+    if (!conversationId) {
+      return;
+    }
+
+    const supabase = createSupabaseBrowserClient();
+    const channel = supabase
+      .channel(`agent-lead-alerts:${conversationId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "chat_messages",
+          filter: `conversation_id=eq.${conversationId}`
+        },
+        (payload) => {
+          const record = payload.new;
+          if (!isRecord(record) || record.message_type !== "lead_alert") {
+            return;
+          }
+
+          const message = chatMessageFromRecord(record as AgentChatMessageRecord);
+          setMessages((current) =>
+            current.some((item) => item.id === message.id) ? current : [...current, message]
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [conversationId]);
 
   useEffect(() => {
     const detectedPreference = detectLatestExplicitLanguagePreference(initialMessages);
@@ -4816,6 +4926,43 @@ export function AgentWorkspace({
     setActiveLeadId(lead.id);
     setActiveLeadSnapshot(lead);
     setContextPickerMode(null);
+  }
+
+  async function draftRecommendedFollowUp(lead: TodayFollowUpLead) {
+    appendAssistantMessage({
+      content: `Selected ${lead.full_name || "this lead"}. I am preparing a follow-up draft based on: ${lead.recommended_reason}`
+    });
+
+    const response = await fetch("/api/leads/reply-draft", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ lead_id: lead.id, preview: true })
+    });
+
+    if (!response.ok) {
+      const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null;
+      appendAssistantMessage({
+        content: errorPayload?.error ?? "I selected the lead, but could not draft the follow-up yet."
+      });
+      return;
+    }
+
+    const replyPayload = (await response.json()) as { draft: LeadReplyDraftWithLink };
+
+    appendAssistantMessage({
+      content: `Here is a recommended follow-up for ${lead.full_name || "this lead"}. Suggested next step: ${lead.recommended_action}`,
+      leadReply: replyPayload.draft
+    });
+  }
+
+  function handleLeadResultSelect(lead: LeadCardItem) {
+    addLeadContext(lead);
+
+    if (isTodayFollowUpLead(lead)) {
+      void draftRecommendedFollowUp(lead);
+    }
   }
 
   function removeContextAttachment(contextId: string) {
@@ -5587,7 +5734,11 @@ export function AgentWorkspace({
   }
 
   async function showTodayFollowUps(actionResponse: string) {
-    const response = await fetch("/api/leads/followups/today?limit=10");
+    const followUpParams = new URLSearchParams({ limit: "10" });
+    if (window.localStorage.getItem("pislaka_followup_seed_mode") === "followup-test") {
+      followUpParams.set("seed", "followup-test");
+    }
+    const response = await fetch(`/api/leads/followups/today?${followUpParams.toString()}`);
 
     if (!response.ok) {
       const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null;
@@ -5597,13 +5748,48 @@ export function AgentWorkspace({
       return;
     }
 
-    const payload = (await response.json()) as { leads?: LeadListItem[] };
+    const payload = (await response.json()) as { leads?: TodayFollowUpLead[] };
     const leads = payload.leads ?? [];
+    const firstReplyCount = leads.filter((lead) => lead.priority_label === "First reply").length;
+    const taskCount = leads.filter((lead) => lead.priority_label === "Open task" || lead.priority_label === "Handle request").length;
+    const optionalCount = leads.filter((lead) => lead.priority_label === "Check again").length;
+    const followUpIntro = firstReplyCount || taskCount
+      ? [
+          "I found these follow-up suggestions from your lead history.",
+          firstReplyCount ? `${firstReplyCount} new lead${firstReplyCount === 1 ? "" : "s"} have no recorded first contact.` : null,
+          taskCount ? `${taskCount} customer request${taskCount === 1 ? "" : "s"} or promised follow-up${taskCount === 1 ? " is" : "s are"} still open.` : null,
+          "Review them and choose which ones are worth acting on."
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : optionalCount
+        ? "There are no new first replies or open customer requests right now. These are optional check-ins worth considering; use your judgment before acting."
+        : "No leads are due for follow-up right now.";
 
     appendAssistantMessage({
-      content: leads.length ? actionResponse : "No leads are due for follow-up right now.",
+      content: leads.length ? followUpIntro : "No leads are due for follow-up right now.",
       leadResults: leads
     });
+  }
+
+  function dismissFollowUpNudge() {
+    const todayKey = new Date().toLocaleDateString("en-CA", { timeZone: userTimeZone });
+    window.localStorage.setItem(`${FOLLOW_UP_NUDGE_DISMISS_PREFIX}:${todayKey}`, "true");
+    setIsFollowUpNudgeVisible(false);
+  }
+
+  async function handleFollowUpNudgeOpen() {
+    if (isFollowUpNudgeLoading) {
+      return;
+    }
+
+    setIsFollowUpNudgeLoading(true);
+    try {
+      await showTodayFollowUps("Here are the leads that need follow-up today.");
+      dismissFollowUpNudge();
+    } finally {
+      setIsFollowUpNudgeLoading(false);
+    }
   }
 
   async function showScheduleResults(actionResponse: string, payload: ScheduleEventListPayload, sourceMessage: string) {
@@ -7201,7 +7387,7 @@ export function AgentWorkspace({
                 {message.leadResults ? (
                   <LeadResultsCard
                     leads={message.leadResults}
-                    onSelect={addLeadContext}
+                    onSelect={handleLeadResultSelect}
                     sourceMessage={message.uiLanguage ?? message.sourceMessage ?? message.leadSourceMessage ?? message.content}
                   />
                 ) : null}
@@ -7607,6 +7793,30 @@ export function AgentWorkspace({
             : "Ask Pislaka Agent to help..."
         }
         sendDisabled={isSubmitting || isListening || isTranscribing}
+        topSlot={
+          isFollowUpNudgeVisible ? (
+            <div className="agent-followup-nudge" aria-label="Today follow-up suggestions">
+              <button
+                className="agent-followup-nudge-main"
+                disabled={isFollowUpNudgeLoading}
+                type="button"
+                onClick={() => void handleFollowUpNudgeOpen()}
+              >
+                <Sparkles size={14} />
+                <span>{isFollowUpNudgeLoading ? "Checking today’s follow-ups..." : "Today follow-ups are ready"}</span>
+              </button>
+              <button
+                aria-label="Hide today follow-up suggestion"
+                className="agent-followup-nudge-close"
+                disabled={isFollowUpNudgeLoading}
+                type="button"
+                onClick={dismissFollowUpNudge}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          ) : undefined
+        }
         value={input}
         voiceSlot={
           isListening || isTranscribing ? (

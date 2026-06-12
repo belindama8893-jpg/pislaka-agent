@@ -79,4 +79,6 @@ export type FollowUpActivityRecord = {
 export type TodayFollowUpLead = LeadListItem & {
   recommended_reason: string;
   recommended_action: string;
+  recommendation_context: string | null;
+  priority_label: string;
 };
