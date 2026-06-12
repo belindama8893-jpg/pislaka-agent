@@ -778,6 +778,28 @@ a {
   display: none;
 }
 
+.guest-mode-note {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  z-index: 4;
+  width: min(760px, calc(100% - 56px));
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 300;
+  line-height: 1.45;
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.guest-mode-note a {
+  color: #0b4b45;
+  font-weight: 420;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .agent-start {
   width: min(760px, 100%);
   margin: 0 auto;
@@ -6815,6 +6837,12 @@ a {
 
   .chat-panel.is-empty {
     justify-content: flex-start;
+  }
+
+  .guest-mode-note {
+    top: 10px;
+    width: calc(100% - 32px);
+    font-size: 0.74rem;
   }
 
   .agent-start {

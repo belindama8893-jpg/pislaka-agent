@@ -20,6 +20,7 @@ type WorkspaceShellProps = {
   broker: BrokerShellProfile;
   children: ReactNode;
   initials: string;
+  isGuest?: boolean;
   leadsCount?: number;
   subtitle?: string;
   title?: string;
@@ -49,6 +50,7 @@ export function WorkspaceShell({
   broker,
   children,
   initials,
+  isGuest = false,
   leadsCount,
   subtitle,
   title
@@ -94,6 +96,7 @@ export function WorkspaceShell({
           agency={broker.agency_name}
           city={broker.city}
           initials={initials}
+          isGuest={isGuest}
           name={getDisplayName(broker)}
         />
       </aside>
@@ -115,6 +118,7 @@ export function WorkspaceShell({
               city={broker.city}
               email={broker.email}
               initials={initials}
+              isGuest={isGuest}
               leadsCount={leadsCount}
               name={getDisplayName(broker)}
             />
@@ -123,7 +127,7 @@ export function WorkspaceShell({
 
         <div className="workspace-content">{children}</div>
       </section>
-      <ScheduleReminderToasts />
+      <ScheduleReminderToasts disabled={isGuest} />
     </main>
   );
 }

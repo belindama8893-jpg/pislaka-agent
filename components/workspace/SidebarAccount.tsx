@@ -1,16 +1,18 @@
 "use client";
 
-import { LogOut } from "lucide-react";
+import { LogIn, LogOut } from "lucide-react";
+import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type SidebarAccountProps = {
   agency?: string | null;
   city?: string | null;
   initials: string;
+  isGuest?: boolean;
   name: string;
 };
 
-export function SidebarAccount({ agency, city, initials, name }: SidebarAccountProps) {
+export function SidebarAccount({ agency, city, initials, isGuest = false, name }: SidebarAccountProps) {
   async function handleSignOut() {
     const supabase = createSupabaseBrowserClient();
     await supabase.auth.signOut();
@@ -26,9 +28,15 @@ export function SidebarAccount({ agency, city, initials, name }: SidebarAccountP
           <small>{[agency, city].filter(Boolean).join(", ") || "Pislaka workspace"}</small>
         </div>
       </div>
-      <button className="account-signout" type="button" onClick={handleSignOut}>
-        <LogOut size={16} /> Sign out
-      </button>
+      {isGuest ? (
+        <Link className="account-signout" href="/auth/sign-in">
+          <LogIn size={16} /> Sign in
+        </Link>
+      ) : (
+        <button className="account-signout" type="button" onClick={handleSignOut}>
+          <LogOut size={16} /> Sign out
+        </button>
+      )}
     </div>
   );
 }

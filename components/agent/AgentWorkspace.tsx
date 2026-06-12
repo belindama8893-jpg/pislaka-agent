@@ -84,17 +84,54 @@ type RecentListingSummary = {
 };
 
 type AgentWorkspaceProps = {
-  conversationId: string;
+  conversationId?: string;
   firstName: string;
   hasOlderMessages: boolean;
   initialWhatsAppImportOpen?: boolean;
   initialMessages: AgentChatMessageRecord[];
   initialContextAttachments?: ChatContextAttachment[];
+  isGuest?: boolean;
   recentListings: RecentListingSummary[];
   recentLeads: LeadListItem[];
 };
 
 const FOLLOW_UP_NUDGE_DISMISS_PREFIX = "pislaka_followup_nudge_dismissed";
+const AUTH_REQUIRED_STATUS = "Sign in to save this to your workspace.";
+
+type AuthRequiredReason =
+  | "chat_history"
+  | "save_listing"
+  | "save_lead"
+  | "update_lead"
+  | "save_followup"
+  | "save_schedule"
+  | "read_workspace";
+
+type AuthRequiredHandler = (reason: AuthRequiredReason) => void;
+
+function isUnauthorizedResponse(response: Response) {
+  return response.status === 401;
+}
+
+function getAuthRequiredMessage(reason: AuthRequiredReason) {
+  switch (reason) {
+    case "read_workspace":
+      return "Sign in to view your saved workspace data.";
+    case "save_listing":
+      return "Sign in to save this listing draft to your workspace. You can keep previewing it here as a guest.";
+    case "save_lead":
+      return "Sign in to save this lead to your workspace. Guest mode can preview the result, but it will not be stored.";
+    case "update_lead":
+      return "Sign in to update this lead record. Guest mode does not change saved customer data.";
+    case "save_followup":
+      return "Sign in to save this follow-up to your workspace. Guest chats and summaries are not stored.";
+    case "save_schedule":
+      return "Sign in to save this schedule item to your workspace.";
+    case "chat_history":
+    default:
+      return "Guest mode is active. Sign in to save chat history and workspace data.";
+  }
+}
 
 type LeadCardItem = LeadListItem | TodayFollowUpLead;
 
@@ -2335,10 +2372,14 @@ function LeadLatestOfferCard({ onConfirm, sourceMessage }: { onConfirm: () => vo
 }
 
 function LeadStatusConfirmCard({
+  isGuest = false,
+  onAuthRequired,
   preview,
   onUpdated,
   sourceMessage
 }: {
+  isGuest?: boolean;
+  onAuthRequired?: AuthRequiredHandler;
   preview: LeadStatusUpdatePreview;
   onUpdated: () => void;
   sourceMessage?: string;
@@ -2352,6 +2393,11 @@ function LeadStatusConfirmCard({
 
   async function handleConfirm() {
     if (isSaving || isSaved) {
+      return;
+    }
+    if (isGuest) {
+      setStatus(AUTH_REQUIRED_STATUS);
+      onAuthRequired?.("update_lead");
       return;
     }
 
@@ -2383,6 +2429,12 @@ function LeadStatusConfirmCard({
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (isUnauthorizedResponse(response)) {
+        setStatus(AUTH_REQUIRED_STATUS);
+        onAuthRequired?.("update_lead");
+        setIsSaving(false);
+        return;
+      }
       setStatus(payload?.error ?? copy.buttons.updating);
       setIsSaving(false);
       return;
@@ -2434,10 +2486,14 @@ const leadDetailsFieldLabels: Record<keyof LeadDetailsUpdateChanges, string> = {
 };
 
 function LeadDetailsConfirmCard({
+  isGuest = false,
+  onAuthRequired,
   preview,
   onUpdated,
   sourceMessage
 }: {
+  isGuest?: boolean;
+  onAuthRequired?: AuthRequiredHandler;
   preview: LeadDetailsUpdatePreview;
   onUpdated: () => void;
   sourceMessage?: string;
@@ -2456,6 +2512,11 @@ function LeadDetailsConfirmCard({
     if (isSaving || isSaved) {
       return;
     }
+    if (isGuest) {
+      setStatus(AUTH_REQUIRED_STATUS);
+      onAuthRequired?.("update_lead");
+      return;
+    }
 
     setIsSaving(true);
     setStatus(copy.buttons.updating);
@@ -2472,6 +2533,12 @@ function LeadDetailsConfirmCard({
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (isUnauthorizedResponse(response)) {
+        setStatus(AUTH_REQUIRED_STATUS);
+        onAuthRequired?.("update_lead");
+        setIsSaving(false);
+        return;
+      }
       setStatus(payload?.error ?? copy.buttons.updating);
       setIsSaving(false);
       return;
@@ -2521,10 +2588,14 @@ function LeadDetailsConfirmCard({
 }
 
 function LeadCreateConfirmCard({
+  isGuest = false,
+  onAuthRequired,
   preview,
   onSaved,
   sourceMessage
 }: {
+  isGuest?: boolean;
+  onAuthRequired?: AuthRequiredHandler;
   preview: LeadCreatePreview;
   onSaved: (lead: LeadRecord | null, savedFollowUp: boolean) => void;
   sourceMessage?: string;
@@ -2540,6 +2611,11 @@ function LeadCreateConfirmCard({
     if (isSaving || isSaved) {
       return;
     }
+    if (isGuest) {
+      setStatus(AUTH_REQUIRED_STATUS);
+      onAuthRequired?.("save_lead");
+      return;
+    }
 
     setIsSaving(true);
     setStatus(copy.buttons.saving);
@@ -2553,6 +2629,12 @@ function LeadCreateConfirmCard({
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (isUnauthorizedResponse(response)) {
+        setStatus(AUTH_REQUIRED_STATUS);
+        onAuthRequired?.("save_lead");
+        setIsSaving(false);
+        return;
+      }
       setStatus(payload?.error ?? copy.buttons.saving);
       setIsSaving(false);
       return;
@@ -2581,6 +2663,12 @@ function LeadCreateConfirmCard({
 
       if (!followUpResponse.ok) {
         const payload = (await followUpResponse.json().catch(() => null)) as { error?: string } | null;
+        if (isUnauthorizedResponse(followUpResponse)) {
+          setStatus(AUTH_REQUIRED_STATUS);
+          onAuthRequired?.("save_followup");
+          setIsSaving(false);
+          return;
+        }
         setStatus(payload?.error ?? copy.buttons.saved);
         onSaved(savedLead, false);
         router.refresh();
@@ -2645,10 +2733,14 @@ function LeadCreateConfirmCard({
 }
 
 function LeadBatchStatusConfirmCard({
+  isGuest = false,
+  onAuthRequired,
   preview,
   onUpdated,
   sourceMessage
 }: {
+  isGuest?: boolean;
+  onAuthRequired?: AuthRequiredHandler;
   preview: LeadBatchStatusUpdatePreview;
   onUpdated: () => void;
   sourceMessage?: string;
@@ -2662,6 +2754,11 @@ function LeadBatchStatusConfirmCard({
 
   async function handleConfirm() {
     if (isSaving || isSaved || !preview.status) {
+      return;
+    }
+    if (isGuest) {
+      setStatus(AUTH_REQUIRED_STATUS);
+      onAuthRequired?.("update_lead");
       return;
     }
 
@@ -2685,6 +2782,12 @@ function LeadBatchStatusConfirmCard({
     const failed = results.filter((response) => !response.ok).length;
 
     if (failed) {
+      if (results.some(isUnauthorizedResponse)) {
+        setStatus(AUTH_REQUIRED_STATUS);
+        onAuthRequired?.("update_lead");
+        setIsSaving(false);
+        return;
+      }
       setStatus(`${failed} ${copy.lead.title}`);
       setIsSaving(false);
       return;
@@ -2742,10 +2845,14 @@ function LeadBatchStatusConfirmCard({
 }
 
 function LeadListingConfirmCard({
+  isGuest = false,
+  onAuthRequired,
   preview,
   onUpdated,
   sourceMessage
 }: {
+  isGuest?: boolean;
+  onAuthRequired?: AuthRequiredHandler;
   preview: LeadListingUpdatePreview;
   onUpdated: () => void;
   sourceMessage?: string;
@@ -2771,6 +2878,11 @@ function LeadListingConfirmCard({
     if (isSaving || isSaved) {
       return;
     }
+    if (isGuest) {
+      setStatus(AUTH_REQUIRED_STATUS);
+      onAuthRequired?.("update_lead");
+      return;
+    }
 
     setIsSaving(true);
     setStatus(copy.buttons.updating);
@@ -2787,6 +2899,12 @@ function LeadListingConfirmCard({
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (isUnauthorizedResponse(response)) {
+        setStatus(AUTH_REQUIRED_STATUS);
+        onAuthRequired?.("update_lead");
+        setIsSaving(false);
+        return;
+      }
       setStatus(payload?.error ?? copy.buttons.updating);
       setIsSaving(false);
       return;
@@ -2856,10 +2974,14 @@ const listingUpdateFieldLabels: Record<string, string> = {
 };
 
 function ListingUpdateConfirmCard({
+  isGuest = false,
+  onAuthRequired,
   preview,
   onUpdated,
   sourceMessage
 }: {
+  isGuest?: boolean;
+  onAuthRequired?: AuthRequiredHandler;
   preview: ListingUpdatePreview;
   onUpdated: () => void;
   sourceMessage?: string;
@@ -2873,6 +2995,11 @@ function ListingUpdateConfirmCard({
 
   async function handleConfirm() {
     if (isSaving || isSaved) {
+      return;
+    }
+    if (isGuest) {
+      setStatus(AUTH_REQUIRED_STATUS);
+      onAuthRequired?.("save_listing");
       return;
     }
 
@@ -2891,6 +3018,12 @@ function ListingUpdateConfirmCard({
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (isUnauthorizedResponse(response)) {
+        setStatus(AUTH_REQUIRED_STATUS);
+        onAuthRequired?.("save_listing");
+        setIsSaving(false);
+        return;
+      }
       setStatus(payload?.error ?? copy.buttons.updating);
       setIsSaving(false);
       return;
@@ -3100,7 +3233,17 @@ function EntitySelectionCard({
   );
 }
 
-function LeadReplyCard({ draft, sourceMessage }: { draft: LeadReplyDraftWithLink; sourceMessage?: string }) {
+function LeadReplyCard({
+  draft,
+  isGuest = false,
+  onAuthRequired,
+  sourceMessage
+}: {
+  draft: LeadReplyDraftWithLink;
+  isGuest?: boolean;
+  onAuthRequired?: AuthRequiredHandler;
+  sourceMessage?: string;
+}) {
   const [copied, setCopied] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
@@ -3112,6 +3255,11 @@ function LeadReplyCard({ draft, sourceMessage }: { draft: LeadReplyDraftWithLink
 
   async function handleOpenWhatsApp() {
     if (draft.lead_id) {
+      if (isGuest) {
+        setStatus(AUTH_REQUIRED_STATUS);
+        onAuthRequired?.("save_followup");
+        return;
+      }
       const response = await fetch("/api/leads/followup-activities", {
         method: "POST",
         headers: {
@@ -3129,6 +3277,11 @@ function LeadReplyCard({ draft, sourceMessage }: { draft: LeadReplyDraftWithLink
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        if (isUnauthorizedResponse(response)) {
+          setStatus(AUTH_REQUIRED_STATUS);
+          onAuthRequired?.("save_followup");
+          return;
+        }
         setStatus(payload?.error ?? copy.buttons.openWhatsApp);
         return;
       }
@@ -3434,12 +3587,16 @@ function ChatReplyActionCard({ preview, sourceMessage }: { preview: ChatReplyAct
 }
 
 function ChatFollowupManageCard({
+  isGuest = false,
+  onAuthRequired,
   preview,
   onSaved,
   onNeedsReminder,
   onDeclined,
   sourceMessage
 }: {
+  isGuest?: boolean;
+  onAuthRequired?: AuthRequiredHandler;
   preview: ChatFollowupManagePreview;
   onSaved: (message: string, updatedLead?: LeadRecord | null) => void;
   onNeedsReminder: (preview: ChatFollowupManagePreview) => void;
@@ -3474,8 +3631,18 @@ function ChatFollowupManageCard({
     }
 
     if (action === "reminder") {
+      if (isGuest) {
+        setStatus(AUTH_REQUIRED_STATUS);
+        onAuthRequired?.("save_followup");
+        return;
+      }
       setDecision("yes");
       onNeedsReminder(preview);
+      return;
+    }
+    if (isGuest) {
+      setStatus(AUTH_REQUIRED_STATUS);
+      onAuthRequired?.(action === "status" ? "update_lead" : "save_followup");
       return;
     }
 
@@ -3654,7 +3821,19 @@ function ChatLeadChoiceCard({
   );
 }
 
-function ChatFollowupNoteCard({ preview, onSaved, sourceMessage }: { preview: ChatFollowupManagePreview; onSaved: (message: string) => void; sourceMessage?: string }) {
+function ChatFollowupNoteCard({
+  isGuest = false,
+  onAuthRequired,
+  preview,
+  onSaved,
+  sourceMessage
+}: {
+  isGuest?: boolean;
+  onAuthRequired?: AuthRequiredHandler;
+  preview: ChatFollowupManagePreview;
+  onSaved: (message: string) => void;
+  sourceMessage?: string;
+}) {
   const [status, setStatus] = useState<string | null>(null);
   const [isWorking, setIsWorking] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
@@ -3662,6 +3841,11 @@ function ChatFollowupNoteCard({ preview, onSaved, sourceMessage }: { preview: Ch
 
   async function saveNote() {
     if (isSaved || isWorking) {
+      return;
+    }
+    if (isGuest) {
+      setStatus(AUTH_REQUIRED_STATUS);
+      onAuthRequired?.("save_followup");
       return;
     }
 
@@ -3701,7 +3885,19 @@ function ChatFollowupNoteCard({ preview, onSaved, sourceMessage }: { preview: Ch
   );
 }
 
-function ChatReminderCard({ preview, onSaved, sourceMessage }: { preview: ChatFollowupManagePreview; onSaved: (message: string) => void; sourceMessage?: string }) {
+function ChatReminderCard({
+  isGuest = false,
+  onAuthRequired,
+  preview,
+  onSaved,
+  sourceMessage
+}: {
+  isGuest?: boolean;
+  onAuthRequired?: AuthRequiredHandler;
+  preview: ChatFollowupManagePreview;
+  onSaved: (message: string) => void;
+  sourceMessage?: string;
+}) {
   const [reminderAt, setReminderAt] = useState(getDefaultFollowUpReminderLocalValue);
   const [note, setNote] = useState(preview.summary.next_action_suggestion || "Follow up on WhatsApp chat.");
   const [status, setStatus] = useState<string | null>(null);
@@ -3716,6 +3912,11 @@ function ChatReminderCard({ preview, onSaved, sourceMessage }: { preview: ChatFo
 
     if (!reminderAt) {
       setStatus(copy.hints.editSchedule);
+      return;
+    }
+    if (isGuest) {
+      setStatus(AUTH_REQUIRED_STATUS);
+      onAuthRequired?.("save_followup");
       return;
     }
 
@@ -3765,7 +3966,19 @@ function ChatReminderCard({ preview, onSaved, sourceMessage }: { preview: ChatFo
   );
 }
 
-function ChatStatusCard({ preview, onSaved, sourceMessage }: { preview: ChatFollowupManagePreview; onSaved: (message: string) => void; sourceMessage?: string }) {
+function ChatStatusCard({
+  isGuest = false,
+  onAuthRequired,
+  preview,
+  onSaved,
+  sourceMessage
+}: {
+  isGuest?: boolean;
+  onAuthRequired?: AuthRequiredHandler;
+  preview: ChatFollowupManagePreview;
+  onSaved: (message: string) => void;
+  sourceMessage?: string;
+}) {
   const [status, setStatus] = useState<string | null>(null);
   const [isWorking, setIsWorking] = useState(false);
   const [selected, setSelected] = useState<LeadRecord["status"] | null>(null);
@@ -3774,6 +3987,11 @@ function ChatStatusCard({ preview, onSaved, sourceMessage }: { preview: ChatFoll
 
   async function updateStatus(nextStatus: LeadRecord["status"], urgency?: LeadRecord["urgency"]) {
     if (selected || isWorking) {
+      return;
+    }
+    if (isGuest) {
+      setStatus(AUTH_REQUIRED_STATUS);
+      onAuthRequired?.("update_lead");
       return;
     }
 
@@ -3827,14 +4045,18 @@ function ChatStatusCard({ preview, onSaved, sourceMessage }: { preview: ChatFoll
 
 function DraftPreviewCard({
   draft,
+  isGuest = false,
   onAttachMedia,
+  onAuthRequired,
   onRemoveMedia,
   pendingMedia,
   onSaved,
   sourceMessage
 }: {
   draft: ListingDraftInput;
+  isGuest?: boolean;
   onAttachMedia: () => void;
+  onAuthRequired?: AuthRequiredHandler;
   onRemoveMedia: (mediaId: string) => void;
   pendingMedia: PendingMedia[];
   onSaved: (
@@ -3858,6 +4080,11 @@ function DraftPreviewCard({
 
   async function handleConfirm() {
     if (isSaving || isSaved) {
+      return;
+    }
+    if (isGuest) {
+      setStatus(AUTH_REQUIRED_STATUS);
+      onAuthRequired?.("save_listing");
       return;
     }
 
@@ -3886,6 +4113,12 @@ function DraftPreviewCard({
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (isUnauthorizedResponse(response)) {
+        setStatus(AUTH_REQUIRED_STATUS);
+        onAuthRequired?.("save_listing");
+        setIsSaving(false);
+        return;
+      }
       setStatus(payload?.error ?? "Unable to add listing");
       setIsSaving(false);
       return;
@@ -4248,11 +4481,15 @@ function ListingSavedCard({
 
 function SchedulePreviewCard({
   event,
+  isGuest = false,
+  onAuthRequired,
   onSaved,
   timeZone,
   sourceMessage
 }: {
   event: BrokerEventDraftInput;
+  isGuest?: boolean;
+  onAuthRequired?: AuthRequiredHandler;
   onSaved: () => void;
   timeZone?: string | null;
   sourceMessage?: string;
@@ -4278,6 +4515,11 @@ function SchedulePreviewCard({
       setIsEditing(true);
       return;
     }
+    if (isGuest) {
+      setStatus(AUTH_REQUIRED_STATUS);
+      onAuthRequired?.("save_schedule");
+      return;
+    }
 
     setIsSaving(true);
     setStatus(copy.buttons.generating);
@@ -4291,6 +4533,12 @@ function SchedulePreviewCard({
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (isUnauthorizedResponse(response)) {
+        setStatus(AUTH_REQUIRED_STATUS);
+        onAuthRequired?.("save_schedule");
+        setIsSaving(false);
+        return;
+      }
       setStatus(payload?.error ?? copy.hints.editSchedule);
       setIsSaving(false);
       return;
@@ -4496,6 +4744,7 @@ export function AgentWorkspace({
   initialWhatsAppImportOpen = false,
   initialContextAttachments = [],
   initialMessages,
+  isGuest = false,
   recentLeads: initialRecentLeads,
   recentListings
 }: AgentWorkspaceProps) {
@@ -4562,6 +4811,7 @@ export function AgentWorkspace({
   const hasPositionedInitialThreadRef = useRef(false);
   const assistantStreamTimersRef = useRef<Map<string, number>>(new Map());
   const pendingProgressMessageIdRef = useRef<string | null>(null);
+  const lastAuthPromptRef = useRef<AuthRequiredReason | null>(null);
   const positionedOutputIdsRef = useRef<Set<string>>(new Set());
   const composerMediaRef = useRef<PendingMedia[]>([]);
   const pendingMediaRef = useRef<PendingMedia[]>([]);
@@ -4573,10 +4823,15 @@ export function AgentWorkspace({
   }, []);
 
   useEffect(() => {
+    if (isGuest) {
+      setIsFollowUpNudgeVisible(false);
+      return;
+    }
+
     const todayKey = new Date().toLocaleDateString("en-CA", { timeZone: userTimeZone });
     const storageKey = `${FOLLOW_UP_NUDGE_DISMISS_PREFIX}:${todayKey}`;
     setIsFollowUpNudgeVisible(window.localStorage.getItem(storageKey) !== "true");
-  }, [userTimeZone]);
+  }, [isGuest, userTimeZone]);
 
   useEffect(() => {
     if (!conversationId) {
@@ -4653,7 +4908,7 @@ export function AgentWorkspace({
       icon: CalendarClock,
       label: "Today's Follow-ups",
       onClick: () =>
-        void submitMessage("Show today's follow-ups.")
+        isGuest ? handleAuthRequired("read_workspace") : void submitMessage("Show today's follow-ups.")
     }
   ];
   const attachActions = [
@@ -5078,6 +5333,10 @@ export function AgentWorkspace({
   }
 
   async function persistAssistantMessage(message: ChatMessage) {
+    if (isGuest) {
+      return;
+    }
+
     try {
       const response = await fetch("/api/agent/messages", {
         method: "POST",
@@ -5106,6 +5365,10 @@ export function AgentWorkspace({
   }
 
   async function persistUserMessage(message: ChatMessage) {
+    if (isGuest) {
+      return;
+    }
+
     try {
       const response = await fetch("/api/agent/messages", {
         method: "POST",
@@ -5261,6 +5524,17 @@ export function AgentWorkspace({
     void persistAssistantMessage(nextMessage);
 
     return nextMessage;
+  }
+
+  function handleAuthRequired(reason: AuthRequiredReason) {
+    if (lastAuthPromptRef.current === reason) {
+      return;
+    }
+
+    lastAuthPromptRef.current = reason;
+    appendAssistantMessage({
+      content: getAuthRequiredMessage(reason)
+    });
   }
 
   function estimateAssistantStreamDuration(content: string) {
@@ -5734,6 +6008,11 @@ export function AgentWorkspace({
   }
 
   async function showTodayFollowUps(actionResponse: string) {
+    if (isGuest) {
+      handleAuthRequired("read_workspace");
+      return;
+    }
+
     const followUpParams = new URLSearchParams({ limit: "10" });
     if (window.localStorage.getItem("pislaka_followup_seed_mode") === "followup-test") {
       followUpParams.set("seed", "followup-test");
@@ -5780,6 +6059,10 @@ export function AgentWorkspace({
 
   async function handleFollowUpNudgeOpen() {
     if (isFollowUpNudgeLoading) {
+      return;
+    }
+    if (isGuest) {
+      handleAuthRequired("read_workspace");
       return;
     }
 
@@ -7064,6 +7347,11 @@ export function AgentWorkspace({
       return;
     }
 
+    if (isGuest) {
+      handleAuthRequired("save_followup");
+      return;
+    }
+
     if (isListening) {
       stopVoiceRecording();
       return;
@@ -7251,6 +7539,12 @@ export function AgentWorkspace({
       className={`chat-panel ${hasStarted ? "has-thread" : "is-empty"} ${activeTurnAnchorId || activeOutputId ? "has-active-turn" : ""}`}
       ref={chatPanelRef}
     >
+      {isGuest ? (
+        <p className="guest-mode-note">
+          Guest mode. Chat history is not saved.{" "}
+          <Link href="/auth/sign-in">Sign in</Link> to save your work.
+        </p>
+      ) : null}
       <div className="messages" ref={messagesContainerRef}>
         {!hasStarted ? (
           <div className="agent-start">
@@ -7326,6 +7620,8 @@ export function AgentWorkspace({
                 {message.draft ? (
                   <DraftPreviewCard
                     draft={message.draft}
+                    isGuest={isGuest}
+                    onAuthRequired={handleAuthRequired}
                     sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onAttachMedia={() => openDraftMediaPicker(message.id)}
                     onRemoveMedia={(mediaId) => removeDraftMedia(message.id, mediaId)}
@@ -7366,6 +7662,8 @@ export function AgentWorkspace({
                 {message.scheduleEvent ? (
                   <SchedulePreviewCard
                     event={message.scheduleEvent}
+                    isGuest={isGuest}
+                    onAuthRequired={handleAuthRequired}
                     timeZone={userTimeZone}
                     sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onSaved={() => {
@@ -7408,6 +7706,8 @@ export function AgentWorkspace({
                 ) : null}
                 {message.leadStatusUpdate ? (
                   <LeadStatusConfirmCard
+                    isGuest={isGuest}
+                    onAuthRequired={handleAuthRequired}
                     preview={message.leadStatusUpdate}
                     sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onUpdated={() => {
@@ -7420,6 +7720,8 @@ export function AgentWorkspace({
                 ) : null}
                 {message.leadDetailsUpdate ? (
                   <LeadDetailsConfirmCard
+                    isGuest={isGuest}
+                    onAuthRequired={handleAuthRequired}
                     preview={message.leadDetailsUpdate}
                     sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onUpdated={() => {
@@ -7432,6 +7734,8 @@ export function AgentWorkspace({
                 ) : null}
                 {message.leadCreate ? (
                   <LeadCreateConfirmCard
+                    isGuest={isGuest}
+                    onAuthRequired={handleAuthRequired}
                     preview={message.leadCreate}
                     sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onSaved={(lead, savedFollowUp) => {
@@ -7447,6 +7751,8 @@ export function AgentWorkspace({
                 ) : null}
                 {message.leadBatchStatusUpdate ? (
                   <LeadBatchStatusConfirmCard
+                    isGuest={isGuest}
+                    onAuthRequired={handleAuthRequired}
                     preview={message.leadBatchStatusUpdate}
                     sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onUpdated={() => {
@@ -7459,6 +7765,8 @@ export function AgentWorkspace({
                 ) : null}
                 {message.leadListingUpdate ? (
                   <LeadListingConfirmCard
+                    isGuest={isGuest}
+                    onAuthRequired={handleAuthRequired}
                     preview={message.leadListingUpdate}
                     sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onUpdated={() => {
@@ -7471,6 +7779,8 @@ export function AgentWorkspace({
                 ) : null}
                 {message.listingUpdate ? (
                   <ListingUpdateConfirmCard
+                    isGuest={isGuest}
+                    onAuthRequired={handleAuthRequired}
                     preview={message.listingUpdate}
                     sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onUpdated={() => {
@@ -7518,7 +7828,14 @@ export function AgentWorkspace({
                     }
                   />
                 ) : null}
-                {message.leadReply ? <LeadReplyCard draft={message.leadReply} sourceMessage={message.uiLanguage ?? message.sourceMessage} /> : null}
+                {message.leadReply ? (
+                  <LeadReplyCard
+                    draft={message.leadReply}
+                    isGuest={isGuest}
+                    onAuthRequired={handleAuthRequired}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
+                  />
+                ) : null}
                 {message.chatImport ? (
                   <ChatFollowupSummaryCard
                     preview={message.chatImport}
@@ -7584,6 +7901,8 @@ export function AgentWorkspace({
                 ) : null}
                 {message.chatFollowupManage ? (
                   <ChatFollowupManageCard
+                    isGuest={isGuest}
+                    onAuthRequired={handleAuthRequired}
                     preview={message.chatFollowupManage}
                     sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onSaved={(content, updatedLead) => {
@@ -7628,6 +7947,8 @@ export function AgentWorkspace({
                 ) : null}
                 {message.chatFollowupNote ? (
                   <ChatFollowupNoteCard
+                    isGuest={isGuest}
+                    onAuthRequired={handleAuthRequired}
                     preview={message.chatFollowupNote}
                     sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onSaved={(content) => {
@@ -7637,6 +7958,8 @@ export function AgentWorkspace({
                 ) : null}
                 {message.chatReminder ? (
                   <ChatReminderCard
+                    isGuest={isGuest}
+                    onAuthRequired={handleAuthRequired}
                     preview={message.chatReminder}
                     sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onSaved={(content) => {
@@ -7646,6 +7969,8 @@ export function AgentWorkspace({
                 ) : null}
                 {message.chatStatus ? (
                   <ChatStatusCard
+                    isGuest={isGuest}
+                    onAuthRequired={handleAuthRequired}
                     preview={message.chatStatus}
                     sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onSaved={(content) => {

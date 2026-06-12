@@ -1,6 +1,6 @@
 "use client";
 
-import { BarChart3, CalendarClock, List, LogOut, MessageCircle, Users } from "lucide-react";
+import { BarChart3, CalendarClock, List, LogIn, LogOut, MessageCircle, Users } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -11,10 +11,11 @@ type AccountMenuProps = {
   email?: string | null;
   agency?: string | null;
   city?: string | null;
+  isGuest?: boolean;
   leadsCount?: number;
 };
 
-export function AccountMenu({ initials, name, email, agency, city, leadsCount }: AccountMenuProps) {
+export function AccountMenu({ initials, name, email, agency, city, isGuest = false, leadsCount }: AccountMenuProps) {
   const menuRef = useRef<HTMLDetailsElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
 
@@ -98,9 +99,15 @@ export function AccountMenu({ initials, name, email, agency, city, leadsCount }:
           </Link>
         </nav>
 
-        <button className="account-signout" type="button" onClick={handleSignOut}>
-          <LogOut size={16} /> Sign out
-        </button>
+        {isGuest ? (
+          <Link className="account-signout" href="/auth/sign-in">
+            <LogIn size={16} /> Sign in
+          </Link>
+        ) : (
+          <button className="account-signout" type="button" onClick={handleSignOut}>
+            <LogOut size={16} /> Sign out
+          </button>
+        )}
       </div>
     </details>
   );

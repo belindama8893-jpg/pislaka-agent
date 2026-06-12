@@ -24,7 +24,7 @@ function getSnoozeReminderAt(minutes: number) {
   return new Date(Date.now() + minutes * 60 * 1000).toISOString();
 }
 
-export function ScheduleReminderToasts() {
+export function ScheduleReminderToasts({ disabled = false }: { disabled?: boolean }) {
   const [reminders, setReminders] = useState<BrokerEventRecord[]>([]);
   const [timeZone, setTimeZone] = useState(() => getResolvedTimeZone());
 
@@ -35,6 +35,10 @@ export function ScheduleReminderToasts() {
   const visibleReminders = useMemo(() => reminders.slice(0, 3), [reminders]);
 
   const pollReminders = useCallback(async () => {
+    if (disabled) {
+      return;
+    }
+
     if (document.visibilityState !== "visible") {
       return;
     }
@@ -57,7 +61,7 @@ export function ScheduleReminderToasts() {
       const nextReminders = payload.reminders!.filter((event) => !existingIds.has(event.id));
       return [...current, ...nextReminders].slice(-5);
     });
-  }, []);
+  }, [disabled]);
 
   useEffect(() => {
     const initialTimer = window.setTimeout(() => {
@@ -117,7 +121,7 @@ export function ScheduleReminderToasts() {
     }).catch(() => null);
   }
 
-  if (!visibleReminders.length) {
+  if (disabled || !visibleReminders.length) {
     return null;
   }
 

@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { generateChatFollowUpSummary, normalizeWhatsAppChatText } from "@/lib/leads/followup-import";
-import { requireCurrentBroker } from "@/lib/auth/current-user";
 import { getRecentLeadsForBroker, leadBaseSelect } from "@/lib/leads/queries";
 import type { LeadListItem, LeadRecord } from "@/lib/leads/types";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   chooseZipTextCandidate,
   listZipTextCandidates,
@@ -235,7 +235,17 @@ function resolveImportedChatLead(
 
 export async function POST(request: Request) {
   try {
-    const { supabase, broker } = await requireCurrentBroker();
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    const { data: broker } = user
+      ? await supabase
+          .from("broker_profiles")
+          .select("id")
+          .eq("auth_user_id", user.id)
+          .maybeSingle()
+      : { data: null };
     const parsed = await parseRequest(request);
     if ("needs_txt_selection" in parsed) {
       return NextResponse.json({
@@ -251,7 +261,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No readable WhatsApp chat text found." }, { status: 400 });
     }
 
-    const selectedLeadResult = parsed.lead_id
+    const selectedLeadResult = parsed.lead_id && broker?.id
       ? await supabase
           .from("leads")
           .select(leadBaseSelect)
@@ -260,7 +270,9 @@ export async function POST(request: Request) {
           .maybeSingle()
       : { data: null };
     const selectedLead = selectedLeadResult.data as LeadRecord | null;
-    const leads = await getRecentLeadsForBroker(supabase, broker.id, 100, { includeClosed: true });
+    const leads = broker?.id
+      ? await getRecentLeadsForBroker(supabase, broker.id, 100, { includeClosed: true })
+      : [];
     const selectedLeadListItem = selectedLead
       ? leads.find((lead) => lead.id === selectedLead.id) ?? null
       : null;

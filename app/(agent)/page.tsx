@@ -1,4 +1,3 @@
-import { redirect } from "next/navigation";
 import { AgentWorkspace } from "@/components/agent/AgentWorkspace";
 import { ProfileCompletionForm } from "@/components/profile/ProfileCompletionForm";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
@@ -75,7 +74,7 @@ async function getCurrentBrokerContext() {
   } = await supabase.auth.getUser();
 
   if (userError || !user) {
-    redirect("/auth/sign-in");
+    return { supabase, broker: null };
   }
 
   const { data: existingProfile, error: profileError } = await supabase
@@ -158,6 +157,39 @@ async function getListingsForBroker(
 export default async function Home({ searchParams }: HomeProps) {
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const { supabase, broker } = await getCurrentBrokerContext();
+  const isGuest = !broker;
+
+  if (!broker) {
+    const guestProfile: BrokerProfile = {
+      id: "guest",
+      auth_user_id: "guest",
+      full_name: "Guest",
+      email: null,
+      city: null,
+      agency_name: null,
+      phone: null,
+      preferred_language: null
+    };
+
+    return (
+      <WorkspaceShell active="agent" broker={guestProfile} initials="G" isGuest>
+        <div className="workspace-agent-grid workspace-agent-only">
+          <AgentWorkspace
+            conversationId={undefined}
+            firstName="there"
+            hasOlderMessages={false}
+            initialWhatsAppImportOpen={getSearchParamValue(resolvedSearchParams, "import") === "whatsapp"}
+            initialContextAttachments={[]}
+            initialMessages={[]}
+            isGuest={isGuest}
+            recentLeads={[]}
+            recentListings={[]}
+          />
+        </div>
+      </WorkspaceShell>
+    );
+  }
+
   const [listings, leads, newLeadsCount, chatHistory] = await Promise.all([
     getListingsForBroker(supabase, broker.id),
     getRecentLeadsForBroker(supabase, broker.id, 100),
