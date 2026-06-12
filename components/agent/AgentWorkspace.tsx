@@ -46,6 +46,20 @@ import type {
   ScheduleEventListPayload
 } from "@/lib/agent/types";
 import { isScheduleRequest } from "@/lib/agent/intent-router";
+import {
+  detectAgentResponseLanguage,
+  formatScheduleQueryResponse,
+  type AgentResponseLanguage
+} from "@/lib/agent/response-language";
+import {
+  detectExplicitResponseLanguage,
+  detectTurnUiLanguage,
+  getAgentCardCopy,
+  getCardLanguage,
+  getLeadCardCopy,
+  getScheduleCardCopy,
+  getWhatsAppImportProgressCopy
+} from "@/lib/agent/agent-ui-copy";
 import type { ListingDraftInput, ListingDraftUpdateInput, ListingMediaRecord } from "@/lib/listings/types";
 import type { ListingPromotion, PromotionChannel } from "@/lib/promotions/types";
 
@@ -84,6 +98,8 @@ type ChatMessage = {
   createdAt?: string;
   role: "user" | "assistant";
   content: string;
+  sourceMessage?: string;
+  uiLanguage?: AgentResponseLanguage;
   isProgress?: boolean;
   isStreaming?: boolean;
   attachments?: PendingMedia[];
@@ -92,7 +108,9 @@ type ChatMessage = {
   draft?: ListingDraftInput;
   scheduleEvent?: BrokerEventDraftInput;
   scheduleEvents?: BrokerEventRecord[];
+  scheduleSourceMessage?: string;
   leadResults?: LeadListItem[];
+  leadSourceMessage?: string;
   leadLatestOffer?: boolean;
   leadDetailsUpdate?: LeadDetailsUpdatePreview;
   leadCreate?: LeadCreatePreview;
@@ -273,9 +291,16 @@ type ListingResolutionCandidate = AgentResolutionCandidate;
 type ChatMessageUiPayload = Partial<
   Pick<
     ChatMessage,
+    | "sourceMessage"
+    | "uiLanguage"
+    | "contextAttachments"
+    | "fileAttachments"
     | "draft"
     | "scheduleEvent"
+    | "scheduleEvents"
+    | "scheduleSourceMessage"
     | "leadResults"
+    | "leadSourceMessage"
     | "leadLatestOffer"
     | "leadDetailsUpdate"
     | "leadCreate"
@@ -375,6 +400,18 @@ function getMessageUiPayload(payload: AgentChatMessageRecord["structured_payload
   return payload.ui as ChatMessageUiPayload;
 }
 
+function serializeFileAttachments(fileAttachments: PendingFileAttachment[] | undefined) {
+  return fileAttachments?.map((item) => ({
+    id: item.id,
+    kind: item.kind,
+    file: {
+      name: item.file.name,
+      size: item.file.size,
+      type: item.file.type
+    }
+  }));
+}
+
 function chatMessageFromRecord(record: AgentChatMessageRecord): ChatMessage {
   return {
     id: record.id,
@@ -383,6 +420,21 @@ function chatMessageFromRecord(record: AgentChatMessageRecord): ChatMessage {
     content: record.content,
     ...getMessageUiPayload(record.structured_payload)
   };
+}
+
+function detectLatestExplicitLanguagePreference(messages: AgentChatMessageRecord[]) {
+  for (const message of [...messages].reverse()) {
+    if (message.role !== "user") {
+      continue;
+    }
+
+    const language = detectExplicitResponseLanguage(message.content);
+    if (language) {
+      return language;
+    }
+  }
+
+  return null;
 }
 
 function hasStructuredOutput(message: ChatMessage) {
@@ -398,6 +450,13 @@ function hasStructuredOutput(message: ChatMessage) {
       message.leadListingUpdate ||
       message.leadStatusUpdate ||
       message.leadReply ||
+      message.chatImport ||
+      message.chatReplyAction ||
+      message.chatFollowupManage ||
+      message.chatFollowupNote ||
+      message.chatReminder ||
+      message.chatStatus ||
+      message.chatLeadChoice ||
       message.listingUpdate ||
       message.listingUpdateChoices ||
       message.entitySelection ||
@@ -411,9 +470,15 @@ function structuredPayloadForMessage(message: ChatMessage): Record<string, unkno
   const ui: Record<string, unknown> = {};
 
   for (const key of [
+    "sourceMessage",
+    "uiLanguage",
+    "contextAttachments",
     "draft",
     "scheduleEvent",
+    "scheduleEvents",
+    "scheduleSourceMessage",
     "leadResults",
+    "leadSourceMessage",
     "leadLatestOffer",
     "leadDetailsUpdate",
     "leadCreate",
@@ -449,6 +514,11 @@ function structuredPayloadForMessage(message: ChatMessage): Record<string, unkno
             }
           : message[key];
     }
+  }
+
+  const fileAttachments = serializeFileAttachments(message.fileAttachments);
+  if (fileAttachments?.length) {
+    ui.fileAttachments = fileAttachments;
   }
 
   return Object.keys(ui).length ? { ui } : {};
@@ -849,11 +919,57 @@ function getDefaultFollowUpReminderLocalValue() {
   return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
 }
 
-function buildChatImportNarrative(summary: ChatFollowupSummary, lead: LeadListItem | null) {
+function buildChatImportNarrative(
+  summary: ChatFollowupSummary,
+  lead: LeadListItem | null,
+  uiLanguage: AgentResponseLanguage = "english"
+) {
+  const leadLabel = lead?.full_name || lead?.phone;
+  const detectedLabel = [summary.detected_customer_name, summary.detected_phone].filter(Boolean).join(" · ");
+
+  if (uiLanguage === "chinese") {
+    const lines = [
+      `我已阅读这段 WhatsApp 聊天。${summary.chat_summary}`,
+      lead
+        ? `它看起来关联到 ${leadLabel || "已选择的线索"}（${formatLeadStatusForLanguage(lead.status, lead.urgency, uiLanguage)}）。`
+        : detectedLabel
+          ? `我识别到 ${detectedLabel}，但还没有确认匹配的现有线索。`
+          : "我还不能确认这段聊天属于哪条线索。"
+    ];
+
+    return lines.join("\n\n");
+  }
+
+  if (uiLanguage === "urdu") {
+    const lines = [
+      `میں نے WhatsApp chat پڑھ لی ہے۔ ${summary.chat_summary}`,
+      lead
+        ? `یہ ${leadLabel || "selected lead"} سے connected لگتی ہے (${formatLeadStatusForLanguage(lead.status, lead.urgency, uiLanguage)})۔`
+        : detectedLabel
+          ? `مجھے ${detectedLabel} detect ہوا، لیکن existing lead ابھی confirm نہیں ہوئی۔`
+          : "ابھی confirm نہیں ہوا کہ یہ chat کس lead سے belong کرتی ہے۔"
+    ];
+
+    return lines.join("\n\n");
+  }
+
+  if (uiLanguage === "roman_urdu") {
+    const lines = [
+      `Main ne WhatsApp chat parh li hai. ${summary.chat_summary}`,
+      lead
+        ? `Yeh ${leadLabel || "selected lead"} se connected lagti hai (${formatLeadStatusForLanguage(lead.status, lead.urgency, uiLanguage)}).`
+        : detectedLabel
+          ? `Mujhe ${detectedLabel} detect hua, lekin existing lead abhi confirm nahi hui.`
+          : "Abhi confirm nahi hua ke yeh chat kis lead se belong karti hai."
+    ];
+
+    return lines.join("\n\n");
+  }
+
   const lines = [
     `I read the WhatsApp chat. ${summary.chat_summary}`,
     lead
-      ? `It looks connected to ${lead.full_name || lead.phone || "the selected lead"} (${formatLeadStatusLabel(lead.status, lead.urgency)}).`
+      ? `It looks connected to ${leadLabel || "the selected lead"} (${formatLeadStatusForLanguage(lead.status, lead.urgency, uiLanguage)}).`
       : summary.detected_customer_name || summary.detected_phone
         ? `I detected ${[summary.detected_customer_name, summary.detected_phone].filter(Boolean).join(" · ")}, but I have not confirmed an existing lead yet.`
         : "I have not confirmed which lead this belongs to yet."
@@ -1497,11 +1613,25 @@ function scoreListingMatch(message: string, listing: RecentListingSummary) {
   return score;
 }
 
-function getLeadInterestLine(lead: LeadListItem) {
+function formatLeadStatusForLanguage(
+  status: LeadRecord["status"],
+  urgency: LeadRecord["urgency"] | null | undefined,
+  language: AgentResponseLanguage
+) {
+  const copy = getLeadCardCopy(language);
+  if (status === "qualified" && urgency === "high") {
+    return copy.statuses.hot;
+  }
+
+  return copy.statuses[status];
+}
+
+function getLeadInterestLine(lead: LeadListItem, language: AgentResponseLanguage = "english") {
+  const copy = getLeadCardCopy(language);
   const listing = [lead.listing_title, lead.listing_area, lead.listing_city].filter(Boolean).join(", ");
   const channel = lead.campaign_channel ?? lead.source_channel;
 
-  return [listing || "Listing not set", channel ? `via ${channel}` : null].filter(Boolean).join(" · ");
+  return [listing || copy.listingNotSet, channel ? `${copy.via} ${channel}` : null].filter(Boolean).join(" · ");
 }
 
 function scoreLeadMatch(message: string, lead: LeadListItem) {
@@ -1645,42 +1775,91 @@ function filterLeadsByPayload(leads: LeadListItem[], payload: LeadOperationPaylo
     });
 }
 
-function describeLeadResultSet(payload: LeadOperationPayload, fallbackQuery = "") {
+function describeLeadResultSet(payload: LeadOperationPayload, fallbackQuery = "", language: AgentResponseLanguage = "english") {
   const queryText = [payload.query, payload.lead_name, fallbackQuery].filter(Boolean).join(" ");
   const inferredFilter = inferLeadStatusFilterFromQuery(queryText);
   const statusFilter = payload.status_filter && payload.status_filter !== "all" ? payload.status_filter : inferredFilter?.status_filter;
   const urgencyFilter = payload.urgency ?? inferredFilter?.urgency;
+  const descriptors = {
+    english: {
+      hot: ["hot lead", "hot leads"],
+      interested: ["interested lead", "interested leads"],
+      lost: ["not interested lead", "not interested leads"],
+      contacted: ["contacted lead", "contacted leads"],
+      new: ["new lead", "new leads"],
+      matching: ["matching lead", "matching leads"]
+    },
+    urdu: {
+      hot: ["ہاٹ لیڈ", "ہاٹ لیڈز"],
+      interested: ["دلچسپی رکھنے والی لیڈ", "دلچسپی رکھنے والی لیڈز"],
+      lost: ["دلچسپی نہ رکھنے والی لیڈ", "دلچسپی نہ رکھنے والی لیڈز"],
+      contacted: ["رابطہ شدہ لیڈ", "رابطہ شدہ لیڈز"],
+      new: ["نئی لیڈ", "نئی لیڈز"],
+      matching: ["میچنگ لیڈ", "میچنگ لیڈز"]
+    },
+    roman_urdu: {
+      hot: ["hot lead", "hot leads"],
+      interested: ["interested lead", "interested leads"],
+      lost: ["not interested lead", "not interested leads"],
+      contacted: ["contacted lead", "contacted leads"],
+      new: ["new lead", "new leads"],
+      matching: ["matching lead", "matching leads"]
+    },
+    chinese: {
+      hot: ["高意向线索", "高意向线索"],
+      interested: ["有意向线索", "有意向线索"],
+      lost: ["不感兴趣线索", "不感兴趣线索"],
+      contacted: ["已联系线索", "已联系线索"],
+      new: ["新线索", "新线索"],
+      matching: ["匹配线索", "匹配线索"]
+    }
+  }[language];
+
+  const result = (key: keyof typeof descriptors) => ({
+    singular: descriptors[key][0],
+    plural: descriptors[key][1]
+  });
 
   if (statusFilter === "qualified" && urgencyFilter === "high") {
-    return { singular: "hot lead", plural: "hot leads" };
+    return result("hot");
   }
 
   if (statusFilter === "qualified") {
-    return { singular: "interested lead", plural: "interested leads" };
+    return result("interested");
   }
 
   if (statusFilter === "lost") {
-    return { singular: "not interested lead", plural: "not interested leads" };
+    return result("lost");
   }
 
   if (statusFilter === "contacted") {
-    return { singular: "contacted lead", plural: "contacted leads" };
+    return result("contacted");
   }
 
   if (statusFilter === "new") {
-    return { singular: "new lead", plural: "new leads" };
+    return result("new");
   }
 
-  return { singular: "matching lead", plural: "matching leads" };
+  return result("matching");
 }
 
 function formatLeadResultCount(count: number, payload: LeadOperationPayload, fallbackQuery = "") {
-  const descriptor = describeLeadResultSet(payload, fallbackQuery);
+  const language = detectAgentResponseLanguage(fallbackQuery);
+  const descriptor = describeLeadResultSet(payload, fallbackQuery, language);
+  if (language === "urdu") {
+    return count === 1 ? `آپ کے پاس 1 ${descriptor.singular} ہے۔` : `آپ کے پاس ${count} ${descriptor.plural} ہیں۔`;
+  }
+  if (language === "roman_urdu") {
+    return count === 1 ? `Aap ke paas 1 ${descriptor.singular} hai.` : `Aap ke paas ${count} ${descriptor.plural} hain.`;
+  }
+  if (language === "chinese") {
+    return `你有 ${count} 个${descriptor.plural}。`;
+  }
   return count === 1 ? `You have 1 ${descriptor.singular}.` : `You have ${count} ${descriptor.plural}.`;
 }
 
 function inferLeadStatusFilterFromQuery(query: string): Pick<LeadOperationPayload, "status_filter" | "urgency"> | null {
-  if (/\bhot\b|高意向|强意向/i.test(query)) {
+  if (/\bhot\b|high intent|ہائی\s*انٹینٹ|ہاٹ|高意向|强意向/i.test(query)) {
     return { status_filter: "qualified", urgency: "high" };
   }
 
@@ -1845,8 +2024,9 @@ function VoiceWaveform({
   );
 }
 
-function PromotionPack({ promotion }: { promotion: ListingPromotion }) {
+function PromotionPack({ promotion, sourceMessage }: { promotion: ListingPromotion; sourceMessage?: string }) {
   const [copiedChannel, setCopiedChannel] = useState<string | null>(null);
+  const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
 
   async function handleCopy(channel: string, text: string) {
     await copyToClipboard(text);
@@ -1857,7 +2037,7 @@ function PromotionPack({ promotion }: { promotion: ListingPromotion }) {
     <AgentOutputCard
       className="chat-promotion-pack"
       icon={<Megaphone size={16} />}
-      title="Promotion pack"
+      title={copy.generic.promotionPack}
       tone="promotion"
     >
       <div className="promotion-list">
@@ -1871,7 +2051,7 @@ function PromotionPack({ promotion }: { promotion: ListingPromotion }) {
               <button
                 className="icon-button compact"
                 type="button"
-                aria-label={`Copy ${card.channel} promotion`}
+                aria-label={`${copy.buttons.copy} ${card.channel}`}
                 onClick={() => {
                   const parts = [card.title, card.body];
                   if (card.landing_url) parts.push(`Link: ${card.landing_url}`);
@@ -1895,12 +2075,12 @@ function PromotionPack({ promotion }: { promotion: ListingPromotion }) {
                 </a>
               ) : null}
             </div>
-            {copiedChannel === card.channel ? <small className="copied-hint">Copied to clipboard</small> : null}
+            {copiedChannel === card.channel ? <small className="copied-hint">{copy.generic.copiedToClipboard}</small> : null}
             {card.whatsapp_share_url ? (
               <div className="promotion-actions">
                 <a className="promotion-action-button secondary" href={card.whatsapp_share_url} target="_blank" rel="noreferrer">
                   <MessageCircle size={15} />
-                  <span>Share to WhatsApp</span>
+                  <span>{copy.buttons.shareToWhatsApp}</span>
                 </a>
               </div>
             ) : null}
@@ -1914,11 +2094,13 @@ function PromotionPack({ promotion }: { promotion: ListingPromotion }) {
 function PromotionConfirmCard({
   initialChannels,
   listing,
-  onGenerate
+  onGenerate,
+  sourceMessage
 }: {
   initialChannels?: PromotionChannel[];
   listing: RecentListingSummary;
   onGenerate: (channels: PromotionChannel[]) => Promise<boolean> | boolean;
+  sourceMessage?: string;
 }) {
   const [selectedChannels, setSelectedChannels] = useState<PromotionChannel[]>(
     initialChannels?.length ? initialChannels : ["whatsapp"]
@@ -1926,6 +2108,7 @@ function PromotionConfirmCard({
   const [generationState, setGenerationState] = useState<"idle" | "generating" | "generated">("idle");
   const hasGenerated = generationState === "generated";
   const isGenerating = generationState === "generating";
+  const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
 
   function toggleChannel(channel: PromotionChannel) {
     if (hasGenerated) {
@@ -1957,21 +2140,21 @@ function PromotionConfirmCard({
           }}
         >
           <CheckCircle2 size={15} />{" "}
-          {hasGenerated ? "Generated" : isGenerating ? "Generating..." : "Generate promotion pack"}
+          {hasGenerated ? copy.buttons.generated : isGenerating ? copy.buttons.generating : copy.buttons.generatePromotionPack}
         </button>
       }
       className="promotion-confirm-card"
-      hint="Choose channels, then generate the promotion pack."
+      hint={copy.hints.chooseChannels}
       icon={<Megaphone size={16} />}
-      summary="Confirm the property and choose one or more channels."
-      title="Promotion target"
+      summary={copy.hints.chooseChannels}
+      title={copy.generic.promotionTarget}
       tone="promotion"
     >
       <div className="promotion-target-card">
-        <strong>{listing.title || "Untitled listing"}</strong>
+        <strong>{listing.title || copy.generic.untitledListing}</strong>
         <span>
-          {[listing.area_value, listing.area_unit].filter(Boolean).join(" ") || "Area not set"} ·{" "}
-          {[listing.location_area, listing.city].filter(Boolean).join(", ") || "Location not set"}
+          {[listing.area_value, listing.area_unit].filter(Boolean).join(" ") || copy.generic.areaNotSet} ·{" "}
+          {[listing.location_area, listing.city].filter(Boolean).join(", ") || copy.generic.locationNotSet}
         </span>
       </div>
       <div className="channel-selector">
@@ -1994,18 +2177,22 @@ function PromotionConfirmCard({
 
 function LeadResultsCard({
   leads,
-  onSelect
+  onSelect,
+  sourceMessage
 }: {
   leads: LeadListItem[];
   onSelect?: (lead: LeadListItem) => void;
+  sourceMessage?: string;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const language = detectAgentResponseLanguage(sourceMessage ?? "");
+  const copy = getLeadCardCopy(language);
 
   return (
     <AgentOutputCard
       className="lead-chat-card"
       icon={<MessageCircle size={16} />}
-      title="Matching leads"
+      title={copy.title}
       tone="lead"
     >
       {leads.length ? (
@@ -2013,14 +2200,16 @@ function LeadResultsCard({
           {leads.slice(0, 5).map((lead) => (
             <div className="lead-chat-row" key={lead.id}>
               <div>
-                <strong>{lead.full_name || "Unnamed buyer"}</strong>
-                <p>{getLeadInterestLine(lead)}</p>
+                <strong>{lead.full_name || copy.unnamedBuyer}</strong>
+                <p>{getLeadInterestLine(lead, language)}</p>
                 <small>
-                  {formatLeadStatusLabel(lead.status, lead.urgency)} · {lead.phone || "No phone"} · {formatLeadCreatedAt(lead.created_at)}
+                  {formatLeadStatusForLanguage(lead.status, lead.urgency, language)} · {lead.phone || copy.noPhone} · {formatLeadCreatedAt(lead.created_at)}
                 </small>
               </div>
               <div className="lead-chat-row-action">
-                <span className={getLeadStatusClassName(lead.status, lead.urgency)}>{formatLeadStatusLabel(lead.status, lead.urgency)}</span>
+                <span className={getLeadStatusClassName(lead.status, lead.urgency)}>
+                  {formatLeadStatusForLanguage(lead.status, lead.urgency, language)}
+                </span>
                 {onSelect ? (
                   <button
                     className="outline-button small"
@@ -2031,7 +2220,7 @@ function LeadResultsCard({
                       onSelect(lead);
                     }}
                   >
-                    {selectedId === lead.id ? "Selected" : "Select"}
+                    {selectedId === lead.id ? copy.selected : copy.select}
                   </button>
                 ) : null}
               </div>
@@ -2039,14 +2228,15 @@ function LeadResultsCard({
           ))}
         </div>
       ) : (
-        <p className="agent-draft-status">No matching leads found in the recent inbox.</p>
+        <p className="agent-draft-status">{copy.empty}</p>
       )}
     </AgentOutputCard>
   );
 }
 
-function LeadLatestOfferCard({ onConfirm }: { onConfirm: () => void }) {
+function LeadLatestOfferCard({ onConfirm, sourceMessage }: { onConfirm: () => void; sourceMessage?: string }) {
   const [isConfirmed, setIsConfirmed] = useState(false);
+  const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
 
   return (
     <AgentOutputCard
@@ -2060,16 +2250,18 @@ function LeadLatestOfferCard({ onConfirm }: { onConfirm: () => void }) {
             onConfirm();
           }}
         >
-          <CheckCircle2 size={15} /> {isConfirmed ? "Shown" : "View latest lead"}
+          <CheckCircle2 size={15} /> {isConfirmed ? copy.buttons.shown : copy.buttons.showLatestLead}
         </button>
       }
       className="lead-chat-card"
       icon={<MessageCircle size={16} />}
-      title="No exact lead match"
+      title={copy.lead.title}
       tone="lead"
     >
       <p className="lead-chat-reply">
-        I did not find that exact lead in the recent inbox. I can show the latest lead instead, but I need your confirmation first.
+        {sourceMessage && getCardLanguage(sourceMessage) === "urdu"
+          ? "مجھے حالیہ ان باکس میں وہ exact لیڈ نہیں ملی۔ میں تازہ ترین لیڈ دکھا سکتا ہوں، پہلے آپ کی کنفرمیشن چاہیے۔"
+          : "I did not find that exact lead in the recent inbox. I can show the latest lead instead, but I need your confirmation first."}
       </p>
     </AgentOutputCard>
   );
@@ -2077,15 +2269,19 @@ function LeadLatestOfferCard({ onConfirm }: { onConfirm: () => void }) {
 
 function LeadStatusConfirmCard({
   preview,
-  onUpdated
+  onUpdated,
+  sourceMessage
 }: {
   preview: LeadStatusUpdatePreview;
   onUpdated: () => void;
+  sourceMessage?: string;
 }) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const language = getCardLanguage(sourceMessage);
+  const copy = getAgentCardCopy(language);
 
   async function handleConfirm() {
     if (isSaving || isSaved) {
@@ -2093,7 +2289,7 @@ function LeadStatusConfirmCard({
     }
 
     setIsSaving(true);
-    setStatus(preview.activityType ? "Saving follow-up..." : "Updating lead...");
+    setStatus(preview.activityType ? `${copy.generic.followUpRecord}...` : `${copy.buttons.updating}`);
     const response = await fetch(preview.activityType ? "/api/leads/followup-activities" : "/api/leads", {
       method: preview.activityType ? "POST" : "PATCH",
       headers: {
@@ -2120,12 +2316,12 @@ function LeadStatusConfirmCard({
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      setStatus(payload?.error ?? "Unable to update lead");
+      setStatus(payload?.error ?? copy.buttons.updating);
       setIsSaving(false);
       return;
     }
 
-    setStatus("Lead updated.");
+    setStatus(copy.buttons.updated);
     setIsSaved(true);
     onUpdated();
     setIsSaving(false);
@@ -2135,28 +2331,28 @@ function LeadStatusConfirmCard({
     <AgentOutputCard
       actions={
         <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaved ? "Updated" : isSaving ? "Updating..." : "Confirm update"}
+          <CheckCircle2 size={15} /> {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmUpdate}
         </button>
       }
       className="lead-chat-card"
-      hint="Confirm before I update this lead."
+      hint={copy.hints.confirmLeadUpdate}
       icon={<CheckCircle2 size={16} />}
       status={status}
-      summary={preview.urgency ? `Urgency will be set to ${preview.urgency}.` : undefined}
-      title="Confirm lead update"
+      summary={preview.urgency ? `Urgency: ${preview.urgency}` : undefined}
+      title={copy.generic.confirmLeadUpdate}
       tone="lead"
     >
       <div className="lead-chat-row standalone">
         <div>
-          <strong>{preview.lead.full_name || "Unnamed buyer"}</strong>
-          <p>{getLeadInterestLine(preview.lead)}</p>
+          <strong>{preview.lead.full_name || copy.lead.unnamedBuyer}</strong>
+          <p>{getLeadInterestLine(preview.lead, language)}</p>
           <small>
-            {formatLeadStatusLabel(preview.lead.status, preview.lead.urgency)} {preview.status ? `→ ${formatLeadStatusLabel(preview.status, preview.urgency)}` : ""} ·{" "}
-            {preview.lead.phone || "No phone"}
+            {formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language)} {preview.status ? `→ ${formatLeadStatusForLanguage(preview.status, preview.urgency, language)}` : ""} ·{" "}
+            {preview.lead.phone || copy.lead.noPhone}
           </small>
         </div>
         <span className={getLeadStatusClassName(preview.status ?? preview.lead.status, preview.urgency ?? preview.lead.urgency)}>
-          {formatLeadStatusLabel(preview.status ?? preview.lead.status, preview.urgency ?? preview.lead.urgency)}
+          {formatLeadStatusForLanguage(preview.status ?? preview.lead.status, preview.urgency ?? preview.lead.urgency, language)}
         </span>
       </div>
     </AgentOutputCard>
@@ -2172,15 +2368,19 @@ const leadDetailsFieldLabels: Record<keyof LeadDetailsUpdateChanges, string> = {
 
 function LeadDetailsConfirmCard({
   preview,
-  onUpdated
+  onUpdated,
+  sourceMessage
 }: {
   preview: LeadDetailsUpdatePreview;
   onUpdated: () => void;
+  sourceMessage?: string;
 }) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const language = getCardLanguage(sourceMessage);
+  const copy = getAgentCardCopy(language);
   const entries = Object.entries(preview.changes).filter(([, value]) => value !== undefined) as Array<
     [keyof LeadDetailsUpdateChanges, string | null]
   >;
@@ -2191,7 +2391,7 @@ function LeadDetailsConfirmCard({
     }
 
     setIsSaving(true);
-    setStatus("Updating lead...");
+    setStatus(copy.buttons.updating);
     const response = await fetch("/api/leads", {
       method: "PATCH",
       headers: {
@@ -2205,12 +2405,12 @@ function LeadDetailsConfirmCard({
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      setStatus(payload?.error ?? "Unable to update lead");
+      setStatus(payload?.error ?? copy.buttons.updating);
       setIsSaving(false);
       return;
     }
 
-    setStatus("Lead updated.");
+    setStatus(copy.buttons.updated);
     setIsSaved(true);
     onUpdated();
     setIsSaving(false);
@@ -2220,23 +2420,23 @@ function LeadDetailsConfirmCard({
     <AgentOutputCard
       actions={
         <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaved ? "Updated" : isSaving ? "Updating..." : "Confirm update"}
+          <CheckCircle2 size={15} /> {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmUpdate}
         </button>
       }
       className="lead-chat-card"
-      hint="Review the changed fields, then confirm."
+      hint={copy.hints.reviewLeadFields}
       icon={<Pencil size={16} />}
       status={status}
-      title="Confirm lead details"
+      title={copy.generic.confirmLeadDetails}
       tone="lead"
     >
       <div className="lead-chat-row standalone">
         <div>
-          <strong>{preview.lead.full_name || "Unnamed buyer"}</strong>
-          <p>{getLeadInterestLine(preview.lead)}</p>
-          <small>{preview.lead.phone || "No phone"}</small>
+          <strong>{preview.lead.full_name || copy.lead.unnamedBuyer}</strong>
+          <p>{getLeadInterestLine(preview.lead, language)}</p>
+          <small>{preview.lead.phone || copy.lead.noPhone}</small>
         </div>
-        <span className={getLeadStatusClassName(preview.lead.status, preview.lead.urgency)}>{formatLeadStatusLabel(preview.lead.status, preview.lead.urgency)}</span>
+        <span className={getLeadStatusClassName(preview.lead.status, preview.lead.urgency)}>{formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language)}</span>
       </div>
       <div className="listing-update-list">
         {entries.map(([field, nextValue]) => (
@@ -2255,15 +2455,19 @@ function LeadDetailsConfirmCard({
 
 function LeadCreateConfirmCard({
   preview,
-  onSaved
+  onSaved,
+  sourceMessage
 }: {
   preview: LeadCreatePreview;
   onSaved: (lead: LeadRecord | null, savedFollowUp: boolean) => void;
+  sourceMessage?: string;
 }) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const language = getCardLanguage(sourceMessage);
+  const copy = getAgentCardCopy(language);
 
   async function handleConfirm() {
     if (isSaving || isSaved) {
@@ -2271,7 +2475,7 @@ function LeadCreateConfirmCard({
     }
 
     setIsSaving(true);
-    setStatus(preview.followUp ? "Saving lead and follow-up..." : "Saving lead...");
+    setStatus(copy.buttons.saving);
     const response = await fetch("/api/leads", {
       method: "POST",
       headers: {
@@ -2282,7 +2486,7 @@ function LeadCreateConfirmCard({
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      setStatus(payload?.error ?? "Unable to save lead");
+      setStatus(payload?.error ?? copy.buttons.saving);
       setIsSaving(false);
       return;
     }
@@ -2310,7 +2514,7 @@ function LeadCreateConfirmCard({
 
       if (!followUpResponse.ok) {
         const payload = (await followUpResponse.json().catch(() => null)) as { error?: string } | null;
-        setStatus(payload?.error ?? "Lead saved, but follow-up was not saved.");
+        setStatus(payload?.error ?? copy.buttons.saved);
         onSaved(savedLead, false);
         router.refresh();
         setIsSaving(false);
@@ -2320,7 +2524,7 @@ function LeadCreateConfirmCard({
       savedFollowUp = true;
     }
 
-    setStatus(savedFollowUp ? "Lead and follow-up saved." : "Lead saved.");
+    setStatus(copy.buttons.saved);
     setIsSaved(true);
     onSaved(savedLead, savedFollowUp);
     router.refresh();
@@ -2331,23 +2535,23 @@ function LeadCreateConfirmCard({
     <AgentOutputCard
       actions={
         <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaved ? "Saved" : isSaving ? "Saving..." : "Confirm & save"}
+          <CheckCircle2 size={15} /> {isSaved ? copy.buttons.saved : isSaving ? copy.buttons.saving : copy.buttons.confirmSave}
         </button>
       }
       className="lead-chat-card"
-      hint="Confirm before I save this lead."
+      hint={copy.hints.confirmNewLead}
       icon={<UserPlus size={16} />}
       status={status}
-      title="Confirm new lead"
+      title={copy.generic.confirmNewLead}
       tone="lead"
     >
       <div className="listing-update-list">
         {[
-          ["Name", preview.payload.full_name],
-          ["Phone", preview.payload.phone],
-          ["Email", preview.payload.email],
-          ["Status", formatLeadStatusLabel(preview.payload.status ?? "new", preview.payload.urgency ?? "normal")],
-          ["Message", preview.payload.message]
+          [copy.generic.fieldName, preview.payload.full_name],
+          [copy.generic.fieldPhone, preview.payload.phone],
+          [copy.generic.fieldEmail, preview.payload.email],
+          [copy.generic.fieldStatus, formatLeadStatusForLanguage(preview.payload.status ?? "new", preview.payload.urgency ?? "normal", language)],
+          [copy.generic.fieldMessage, preview.payload.message]
         ]
           .filter(([, value]) => Boolean(value))
           .map(([label, value]) => (
@@ -2362,7 +2566,7 @@ function LeadCreateConfirmCard({
       {preview.followUp ? (
         <div className="listing-update-list compact">
           <div className="listing-update-row">
-            <span>Follow-up record</span>
+            <span>{copy.generic.followUpRecord}</span>
             <div>
               <strong>{preview.followUp.summary}</strong>
             </div>
@@ -2375,15 +2579,19 @@ function LeadCreateConfirmCard({
 
 function LeadBatchStatusConfirmCard({
   preview,
-  onUpdated
+  onUpdated,
+  sourceMessage
 }: {
   preview: LeadBatchStatusUpdatePreview;
   onUpdated: () => void;
+  sourceMessage?: string;
 }) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const language = getCardLanguage(sourceMessage);
+  const copy = getAgentCardCopy(language);
 
   async function handleConfirm() {
     if (isSaving || isSaved || !preview.status) {
@@ -2391,7 +2599,7 @@ function LeadBatchStatusConfirmCard({
     }
 
     setIsSaving(true);
-    setStatus(`Updating ${preview.leads.length} leads...`);
+    setStatus(copy.buttons.updating);
     const results = await Promise.all(
       preview.leads.map((lead) =>
         fetch("/api/leads", {
@@ -2410,12 +2618,12 @@ function LeadBatchStatusConfirmCard({
     const failed = results.filter((response) => !response.ok).length;
 
     if (failed) {
-      setStatus(`${failed} lead${failed === 1 ? "" : "s"} could not be updated.`);
+      setStatus(`${failed} ${copy.lead.title}`);
       setIsSaving(false);
       return;
     }
 
-    setStatus("Leads updated.");
+    setStatus(copy.buttons.updated);
     setIsSaved(true);
     onUpdated();
     router.refresh();
@@ -2431,34 +2639,33 @@ function LeadBatchStatusConfirmCard({
           disabled={isSaving || isSaved || !preview.status}
           onClick={handleConfirm}
         >
-          <CheckCircle2 size={15} /> {isSaved ? "Updated" : isSaving ? "Updating..." : "Confirm batch update"}
+          <CheckCircle2 size={15} /> {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmBatchUpdate}
         </button>
       }
       className="lead-chat-card"
-      hint="Review the selected leads before updating them."
+      hint={copy.hints.confirmLeadUpdate}
       icon={<CheckCircle2 size={16} />}
       status={status}
       summary={
         <>
-          {preview.leads.length} lead{preview.leads.length === 1 ? "" : "s"} will be changed to{" "}
-          {preview.status ?? "the selected status"}
-          {preview.urgency ? ` with ${preview.urgency} urgency` : ""}.
+          {preview.leads.length} {copy.lead.title} →{" "}
+          {preview.status ? formatLeadStatusForLanguage(preview.status, preview.urgency, language) : copy.generic.fieldStatus}
         </>
       }
-      title="Confirm batch update"
+      title={copy.generic.confirmBatchUpdate}
       tone="lead"
     >
       <div className="lead-chat-list">
         {preview.leads.slice(0, 6).map((lead) => (
           <div className="lead-chat-row" key={lead.id}>
             <div>
-              <strong>{lead.full_name || lead.phone || "Unnamed buyer"}</strong>
+              <strong>{lead.full_name || lead.phone || copy.lead.unnamedBuyer}</strong>
               <small>
-                {formatLeadStatusLabel(lead.status, lead.urgency)} {preview.status ? `→ ${formatLeadStatusLabel(preview.status, preview.urgency)}` : ""} · {lead.phone || "No phone"}
+                {formatLeadStatusForLanguage(lead.status, lead.urgency, language)} {preview.status ? `→ ${formatLeadStatusForLanguage(preview.status, preview.urgency, language)}` : ""} · {lead.phone || copy.lead.noPhone}
               </small>
             </div>
             <span className={getLeadStatusClassName(preview.status ?? lead.status, preview.urgency ?? lead.urgency)}>
-              {formatLeadStatusLabel(preview.status ?? lead.status, preview.urgency ?? lead.urgency)}
+              {formatLeadStatusForLanguage(preview.status ?? lead.status, preview.urgency ?? lead.urgency, language)}
             </span>
           </div>
         ))}
@@ -2469,25 +2676,29 @@ function LeadBatchStatusConfirmCard({
 
 function LeadListingConfirmCard({
   preview,
-  onUpdated
+  onUpdated,
+  sourceMessage
 }: {
   preview: LeadListingUpdatePreview;
   onUpdated: () => void;
+  sourceMessage?: string;
 }) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const language = getCardLanguage(sourceMessage);
+  const copy = getAgentCardCopy(language);
   const currentListingLabel =
     [preview.lead.listing_title, preview.lead.listing_area, preview.lead.listing_city]
       .filter(Boolean)
-      .join(", ") || "No primary listing";
+      .join(", ") || copy.generic.noPrimaryListing;
   const nextListingLabel =
     preview.listing.title ||
     [preview.listing.area_value, preview.listing.area_unit, preview.listing.property_type]
       .filter(Boolean)
       .join(" ") ||
-    "Untitled listing";
+    copy.generic.untitledListing;
 
   async function handleConfirm() {
     if (isSaving || isSaved) {
@@ -2495,7 +2706,7 @@ function LeadListingConfirmCard({
     }
 
     setIsSaving(true);
-    setStatus("Updating lead listing...");
+    setStatus(copy.buttons.updating);
     const response = await fetch("/api/leads", {
       method: "PATCH",
       headers: {
@@ -2509,12 +2720,12 @@ function LeadListingConfirmCard({
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      setStatus(payload?.error ?? "Unable to update lead listing");
+      setStatus(payload?.error ?? copy.buttons.updating);
       setIsSaving(false);
       return;
     }
 
-    setStatus("Lead listing updated.");
+    setStatus(copy.buttons.updated);
     setIsSaved(true);
     onUpdated();
     router.refresh();
@@ -2525,33 +2736,33 @@ function LeadListingConfirmCard({
     <AgentOutputCard
       actions={
         <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaved ? "Updated" : isSaving ? "Updating..." : "Confirm listing"}
+          <CheckCircle2 size={15} /> {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmListing}
         </button>
       }
       className="lead-chat-card"
-      hint="Confirm before I change this lead's primary listing."
+      hint={copy.hints.confirmLeadListing}
       icon={<House size={16} />}
       status={status}
-      title="Confirm lead listing"
+      title={copy.generic.confirmLeadListing}
       tone="lead"
     >
       <div className="lead-chat-row standalone">
         <div>
-          <strong>{preview.lead.full_name || preview.lead.phone || "Unnamed buyer"}</strong>
-          <p>{getLeadInterestLine(preview.lead)}</p>
-          <small>{preview.lead.phone || "No phone"}</small>
+          <strong>{preview.lead.full_name || preview.lead.phone || copy.lead.unnamedBuyer}</strong>
+          <p>{getLeadInterestLine(preview.lead, language)}</p>
+          <small>{preview.lead.phone || copy.lead.noPhone}</small>
         </div>
-        <span className={getLeadStatusClassName(preview.lead.status, preview.lead.urgency)}>{formatLeadStatusLabel(preview.lead.status, preview.lead.urgency)}</span>
+        <span className={getLeadStatusClassName(preview.lead.status, preview.lead.urgency)}>{formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language)}</span>
       </div>
       <div className="listing-update-list">
         <div className="listing-update-row">
-          <span>Primary listing</span>
+          <span>{copy.generic.primaryListing}</span>
           <div>
             <small>{currentListingLabel}</small>
             <strong>
               {nextListingLabel} ·{" "}
               {[preview.listing.location_area, preview.listing.city].filter(Boolean).join(", ") ||
-                "Location not set"}
+                copy.generic.locationNotSet}
             </strong>
           </div>
         </div>
@@ -2579,15 +2790,18 @@ const listingUpdateFieldLabels: Record<string, string> = {
 
 function ListingUpdateConfirmCard({
   preview,
-  onUpdated
+  onUpdated,
+  sourceMessage
 }: {
   preview: ListingUpdatePreview;
   onUpdated: () => void;
+  sourceMessage?: string;
 }) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
   const entries = Object.entries(preview.changes).filter(([, value]) => value !== undefined);
 
   async function handleConfirm() {
@@ -2596,7 +2810,7 @@ function ListingUpdateConfirmCard({
     }
 
     setIsSaving(true);
-    setStatus("Updating listing...");
+    setStatus(copy.buttons.updating);
     const response = await fetch("/api/listings/draft", {
       method: "PATCH",
       headers: {
@@ -2610,12 +2824,12 @@ function ListingUpdateConfirmCard({
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      setStatus(payload?.error ?? "Unable to update listing");
+      setStatus(payload?.error ?? copy.buttons.updating);
       setIsSaving(false);
       return;
     }
 
-    setStatus("Listing updated.");
+    setStatus(copy.buttons.updated);
     setIsSaved(true);
     onUpdated();
     router.refresh();
@@ -2626,21 +2840,21 @@ function ListingUpdateConfirmCard({
     <AgentOutputCard
       actions={
         <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaved ? "Updated" : isSaving ? "Updating..." : "Confirm update"}
+          <CheckCircle2 size={15} /> {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmUpdate}
         </button>
       }
       className="listing-update-card"
-      hint="Review the listing changes, then confirm."
+      hint={copy.hints.listingUpdate}
       icon={<Pencil size={16} />}
       status={status}
-      title="Confirm listing update"
+      title={copy.generic.confirmListingUpdate}
       tone="listing"
     >
       <div className="promotion-target-card">
-        <strong>{preview.listing.title || "Untitled listing"}</strong>
+        <strong>{preview.listing.title || copy.generic.untitledListing}</strong>
         <span>
-          {[preview.listing.area_value, preview.listing.area_unit].filter(Boolean).join(" ") || "Area not set"} ·{" "}
-          {[preview.listing.location_area, preview.listing.city].filter(Boolean).join(", ") || "Location not set"}
+          {[preview.listing.area_value, preview.listing.area_unit].filter(Boolean).join(" ") || copy.generic.areaNotSet} ·{" "}
+          {[preview.listing.location_area, preview.listing.city].filter(Boolean).join(", ") || copy.generic.locationNotSet}
         </span>
       </div>
       <div className="listing-update-list">
@@ -2660,34 +2874,37 @@ function ListingUpdateConfirmCard({
 
 function ListingUpdateSelectionCard({
   preview,
-  onSelect
+  onSelect,
+  sourceMessage
 }: {
   preview: ListingUpdateChoicePreview;
   onSelect: (listing: RecentListingSummary) => void;
+  sourceMessage?: string;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
 
   return (
     <AgentOutputCard
       className="listing-update-card"
-      hint="Select one listing to continue."
+      hint={copy.hints.selectListing}
       icon={<House size={16} />}
-      summary="I found multiple matching listings. Select the exact property, then I will show the update for confirmation."
-      title="Choose listing to update"
+      summary={copy.hints.selectListing}
+      title={copy.generic.chooseListingToUpdate}
       tone="listing"
     >
       <div className="listing-choice-grid">
         {preview.candidates.map((listing) => (
           <article className="listing-choice-card" key={listing.id}>
             <div>
-              <strong>{listing.title || "Untitled listing"}</strong>
+              <strong>{listing.title || copy.generic.untitledListing}</strong>
               <p>
-                {[listing.area_value, listing.area_unit].filter(Boolean).join(" ") || "Area not set"} ·{" "}
-                {[listing.location_area, listing.city].filter(Boolean).join(", ") || "Location not set"}
+                {[listing.area_value, listing.area_unit].filter(Boolean).join(" ") || copy.generic.areaNotSet} ·{" "}
+                {[listing.location_area, listing.city].filter(Boolean).join(", ") || copy.generic.locationNotSet}
               </p>
               <small>
                 {formatListingCurrency(listing.price_amount, listing.price_currency ?? "PKR")} ·{" "}
-                {listing.bedrooms ?? "-"} beds / {listing.bathrooms ?? "-"} baths
+                {listing.bedrooms ?? "-"} {copy.generic.beds} / {listing.bathrooms ?? "-"} {copy.generic.baths}
                 {listing.status ? ` · ${listing.status}` : ""}
               </small>
             </div>
@@ -2700,7 +2917,7 @@ function ListingUpdateSelectionCard({
                 onSelect(listing);
               }}
             >
-              <CheckCircle2 size={15} /> {selectedId === listing.id ? "Selected" : "Select"}
+              <CheckCircle2 size={15} /> {selectedId === listing.id ? copy.buttons.selected : copy.buttons.select}
             </button>
           </article>
         ))}
@@ -2712,17 +2929,19 @@ function ListingUpdateSelectionCard({
 function EntitySelectionCard({
   preview,
   onSelect,
-  onSkip
+  onSkip,
+  sourceMessage
 }: {
   preview: EntitySelectionPreview;
   onSelect: (candidate: AgentResolutionCandidate) => void;
   onSkip?: () => void;
+  sourceMessage?: string;
 }) {
   const isListingTarget = preview.targetType === "listing";
-  const title = isListingTarget ? "Choose listing" : "Choose lead";
-  const helper = isListingTarget
-    ? "I found multiple matching listings. Select the exact property before I continue."
-    : "I found multiple matching leads. Select the exact buyer before I continue.";
+  const language = getCardLanguage(sourceMessage);
+  const copy = getAgentCardCopy(language);
+  const title = isListingTarget ? copy.generic.chooseListing : copy.generic.chooseLead;
+  const helper = copy.hints.selectRecord;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [skipped, setSkipped] = useState(false);
   const isDone = Boolean(selectedId) || skipped;
@@ -2740,12 +2959,12 @@ function EntitySelectionCard({
               onSkip();
             }}
           >
-            {skipped ? "Continued" : "Continue without binding"}
+            {skipped ? copy.buttons.continued : copy.buttons.continueWithoutBinding}
           </button>
         ) : null
       }
       className={isListingTarget ? "listing-update-card" : "lead-chat-card"}
-      hint="Select one record to continue."
+      hint={copy.hints.selectRecord}
       icon={isListingTarget ? <House size={16} /> : <MessageCircle size={16} />}
       summary={helper}
       title={title}
@@ -2759,14 +2978,14 @@ function EntitySelectionCard({
           return isListingTarget && listing ? (
             <article className="listing-choice-card" key={candidate.id}>
               <div>
-                <strong>{listing.title || "Untitled listing"}</strong>
+                <strong>{listing.title || copy.generic.untitledListing}</strong>
                 <p>
-                  {[listing.area_value, listing.area_unit].filter(Boolean).join(" ") || "Area not set"} ·{" "}
-                  {[listing.location_area, listing.city].filter(Boolean).join(", ") || "Location not set"}
+                  {[listing.area_value, listing.area_unit].filter(Boolean).join(" ") || copy.generic.areaNotSet} ·{" "}
+                  {[listing.location_area, listing.city].filter(Boolean).join(", ") || copy.generic.locationNotSet}
                 </p>
                 <small>
                   {formatListingCurrency(listing.price_amount, listing.price_currency ?? "PKR")} ·{" "}
-                  {listing.bedrooms ?? "-"} beds / {listing.bathrooms ?? "-"} baths
+                  {listing.bedrooms ?? "-"} {copy.generic.beds} / {listing.bathrooms ?? "-"} {copy.generic.baths}
                   {listing.status ? ` · ${listing.status}` : ""}
                 </small>
               </div>
@@ -2779,21 +2998,21 @@ function EntitySelectionCard({
                   onSelect(candidate);
                 }}
               >
-                <CheckCircle2 size={15} /> {selectedId === candidate.id ? "Selected" : "Select"}
+                <CheckCircle2 size={15} /> {selectedId === candidate.id ? copy.buttons.selected : copy.buttons.select}
               </button>
             </article>
           ) : lead ? (
             <div className="lead-chat-row" key={candidate.id}>
               <div>
-                <strong>{lead.full_name || lead.phone || "Unnamed buyer"}</strong>
-                <p>{getLeadInterestLine(lead)}</p>
+                <strong>{lead.full_name || lead.phone || copy.lead.unnamedBuyer}</strong>
+                <p>{getLeadInterestLine(lead, language)}</p>
                 <small>
-                  {formatLeadStatusLabel(lead.status, lead.urgency)} · {lead.phone || "No phone"}
+                  {formatLeadStatusForLanguage(lead.status, lead.urgency, language)} · {lead.phone || copy.lead.noPhone}
                   {lead.email ? ` · ${lead.email}` : ""}
                 </small>
               </div>
               <div className="lead-chat-row-action">
-                <span className={getLeadStatusClassName(lead.status, lead.urgency)}>{formatLeadStatusLabel(lead.status, lead.urgency)}</span>
+                <span className={getLeadStatusClassName(lead.status, lead.urgency)}>{formatLeadStatusForLanguage(lead.status, lead.urgency, language)}</span>
                 <button
                   className="primary-button small"
                   type="button"
@@ -2803,7 +3022,7 @@ function EntitySelectionCard({
                     onSelect(candidate);
                   }}
                 >
-                  <CheckCircle2 size={15} /> {selectedId === candidate.id ? "Selected" : "Select"}
+                  <CheckCircle2 size={15} /> {selectedId === candidate.id ? copy.buttons.selected : copy.buttons.select}
                 </button>
               </div>
             </div>
@@ -2814,9 +3033,10 @@ function EntitySelectionCard({
   );
 }
 
-function LeadReplyCard({ draft }: { draft: LeadReplyDraftWithLink }) {
+function LeadReplyCard({ draft, sourceMessage }: { draft: LeadReplyDraftWithLink; sourceMessage?: string }) {
   const [copied, setCopied] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
 
   async function handleCopy() {
     await copyToClipboard(draft.reply_text);
@@ -2842,13 +3062,13 @@ function LeadReplyCard({ draft }: { draft: LeadReplyDraftWithLink }) {
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-        setStatus(payload?.error ?? "Could not record WhatsApp open.");
+        setStatus(payload?.error ?? copy.buttons.openWhatsApp);
         return;
       }
     }
 
     window.open(draft.whatsapp_url, "_blank", "noopener,noreferrer");
-    setStatus("WhatsApp opened. Mark Sent only after you send it.");
+    setStatus(copy.buttons.openWhatsApp);
   }
 
   return (
@@ -2856,10 +3076,10 @@ function LeadReplyCard({ draft }: { draft: LeadReplyDraftWithLink }) {
       actions={
         <>
           <button className="outline-button small" type="button" onClick={() => void handleCopy()}>
-            <Copy size={14} /> {copied ? "Copied" : "Copy"}
+            <Copy size={14} /> {copied ? copy.buttons.copied : copy.buttons.copy}
           </button>
           <button className="primary-button small" type="button" onClick={() => void handleOpenWhatsApp()}>
-            <Phone size={14} /> Open WhatsApp
+            <Phone size={14} /> {copy.buttons.openWhatsApp}
           </button>
         </>
       }
@@ -2867,7 +3087,7 @@ function LeadReplyCard({ draft }: { draft: LeadReplyDraftWithLink }) {
       icon={<MessageCircle size={16} />}
       summary={draft.next_step}
       status={status}
-      title="WhatsApp reply draft"
+      title={copy.generic.whatsappReplyDraft}
       tone="lead"
     >
       <p className="lead-chat-reply">{draft.reply_text}</p>
@@ -2882,7 +3102,8 @@ function ChatFollowupSummaryCard({
   recentLeads,
   onNeedsSummary,
   onDraftReply,
-  onManageFollowup
+  onManageFollowup,
+  sourceMessage
 }: {
   preview: ChatImportPreview;
   contextLeads: LeadListItem[];
@@ -2891,7 +3112,10 @@ function ChatFollowupSummaryCard({
   onNeedsSummary: (summary: ChatFollowupSummary) => void;
   onDraftReply: (summary: ChatFollowupSummary, lead: LeadListItem) => void;
   onManageFollowup: (summary: ChatFollowupSummary, lead: LeadListItem) => void;
+  sourceMessage?: string;
 }) {
+  const language = getCardLanguage(sourceMessage);
+  const copy = getAgentCardCopy(language);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(
     preview.selectedLeadId ?? preview.summary?.matched_lead?.id ?? preview.selectedLead?.id ?? contextLeads[0]?.id ?? null
   );
@@ -2907,7 +3131,7 @@ function ChatFollowupSummaryCard({
     summary?.candidate_leads.find((lead) => lead.id === selectedLeadId) ??
     summary?.matched_lead ??
     null;
-  const matchedLeadLabel = targetLead?.full_name || targetLead?.phone || targetLead?.email || "selected lead";
+  const matchedLeadLabel = targetLead?.full_name || targetLead?.phone || targetLead?.email || copy.lead.unnamedBuyer;
   const sourceLabel =
     summary?.source_type === "whatsapp_zip_upload"
       ? "WhatsApp zip"
@@ -2917,16 +3141,17 @@ function ChatFollowupSummaryCard({
 
   async function summarizeSelectedZipText() {
     if (!preview.pendingZipFile || !selectedZipTextName) {
-      setStatus("Choose which .txt chat file to summarize.");
+      setStatus(copy.buttons.select);
       return;
     }
 
     setIsWorking(true);
-    setStatus("Summarizing selected chat...");
+    setStatus(copy.buttons.generating);
     const formData = new FormData();
     formData.append("source_type", "whatsapp_zip_upload");
     formData.append("selected_txt_name", selectedZipTextName);
     formData.append("save_original_chat_text", "false");
+    formData.append("broker_display_language", language);
     if (selectedLeadId) {
       formData.append("lead_id", selectedLeadId);
     }
@@ -2940,14 +3165,14 @@ function ChatFollowupSummaryCard({
     setIsWorking(false);
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      setStatus(payload?.error ?? "Unable to summarize this chat.");
+      setStatus(payload?.error ?? copy.buttons.generating);
       return;
     }
 
     const payload = (await response.json()) as ChatFollowupSummary;
     setSummary(payload);
     setSelectedLeadId(payload.matched_lead?.id ?? selectedLeadId);
-    setStatus("Chat summary ready. Review before saving.");
+    setStatus(copy.buttons.generated);
     onNeedsSummary(payload);
   }
 
@@ -2958,8 +3183,8 @@ function ChatFollowupSummaryCard({
       </div>
 
       {preview.zipCandidates?.length && !summary ? (
-        <div className="zip-candidate-list" role="group" aria-label="Choose chat text file">
-          <span>Choose chat text</span>
+        <div className="zip-candidate-list" role="group" aria-label={copy.buttons.select}>
+          <span>{copy.buttons.select}</span>
           {preview.zipCandidates.map((candidate) => (
             <button
               className={selectedZipTextName === candidate.name ? "primary-button small" : "outline-button small"}
@@ -2971,7 +3196,7 @@ function ChatFollowupSummaryCard({
             </button>
           ))}
           <button className="primary-button small" type="button" disabled={isWorking} onClick={() => void summarizeSelectedZipText()}>
-            <Sparkles size={14} /> Summarize
+            <Sparkles size={14} /> {copy.buttons.generatePromotionPack}
           </button>
         </div>
       ) : null}
@@ -2979,8 +3204,8 @@ function ChatFollowupSummaryCard({
       {summary ? (
         <>
           {activeAction === "choose_lead" && getVerifiedChatLeadCandidates(summary).length ? (
-            <div className="lead-candidate-list" role="group" aria-label="Choose matching lead">
-              <span>Choose matching lead</span>
+            <div className="lead-candidate-list" role="group" aria-label={copy.generic.chooseLead}>
+              <span>{copy.generic.chooseLead}</span>
               {getVerifiedChatLeadCandidates(summary).map((candidate) => (
                 <button
                   className={selectedLeadId === candidate.id ? "primary-button small" : "outline-button small"}
@@ -2991,27 +3216,27 @@ function ChatFollowupSummaryCard({
                     setActiveAction("manage_followup");
                   }}
                 >
-                  <UserPlus size={14} /> {candidate.full_name || candidate.phone || "Unnamed buyer"}
+                  <UserPlus size={14} /> {candidate.full_name || candidate.phone || copy.lead.unnamedBuyer}
                 </button>
               ))}
             </div>
           ) : null}
           <div className="chat-import-fields">
             <div>
-              <span>Matched lead</span>
-              <strong>{targetLead ? matchedLeadLabel : "Not matched"}</strong>
+              <span>{copy.generic.chooseLead}</span>
+              <strong>{targetLead ? matchedLeadLabel : copy.generic.notMatched}</strong>
             </div>
             <div>
-              <span>Phone</span>
-              <strong>{targetLead?.phone || summary.detected_phone || "Not detected"}</strong>
+              <span>{copy.generic.fieldPhone}</span>
+              <strong>{targetLead?.phone || summary.detected_phone || copy.generic.notDetected}</strong>
             </div>
             <div>
-              <span>Current status</span>
-              <strong>{targetLead?.status || "No lead yet"}</strong>
+              <span>{copy.generic.fieldStatus}</span>
+              <strong>{targetLead ? formatLeadStatusForLanguage(targetLead.status, targetLead.urgency, language) : copy.lead.empty}</strong>
             </div>
             <div>
-              <span>Detected customer</span>
-              <strong>{summary.detected_customer_name || targetLead?.full_name || "Not detected"}</strong>
+              <span>{copy.generic.fieldName}</span>
+              <strong>{summary.detected_customer_name || targetLead?.full_name || copy.generic.notDetected}</strong>
             </div>
             <div>
               <span>Source</span>
@@ -3019,24 +3244,24 @@ function ChatFollowupSummaryCard({
             </div>
           </div>
 
-          <div className="chat-next-actions" aria-label="Choose next action">
-            <span>What should I do next?</span>
+          <div className="chat-next-actions" aria-label={copy.buttons.select}>
+            <span>{copy.buttons.select}</span>
             <div className="card-actions">
               <button
                 className={activeAction === "reply" ? "primary-button small" : "outline-button small"}
                 type="button"
                 disabled={Boolean(activeAction) || !targetLead}
-                title={!targetLead ? "Choose a matching lead before drafting a WhatsApp reply." : undefined}
+                title={!targetLead ? copy.hints.selectRecord : undefined}
                 onClick={() => {
                   if (!targetLead) {
-                    setStatus("Choose a matching lead before drafting a WhatsApp reply.");
+                    setStatus(copy.hints.selectRecord);
                     return;
                   }
                   setActiveAction("reply");
                   onDraftReply(summary, targetLead);
                 }}
               >
-                <MessageCircle size={14} /> Draft reply
+                <MessageCircle size={14} /> {copy.generic.draftReply}
               </button>
               {targetLead ? (
                 <button
@@ -3048,12 +3273,12 @@ function ChatFollowupSummaryCard({
                     onManageFollowup(summary, targetLead);
                   }}
                 >
-                  <FileText size={14} /> Manage follow-up
+                  <FileText size={14} /> {copy.generic.manageFollowUp}
                 </button>
               ) : (
                 <>
                   <button className={activeAction === "choose_lead" ? "primary-button small" : "outline-button small"} type="button" onClick={() => setActiveAction("choose_lead")}>
-                    <UserPlus size={14} /> Choose existing lead
+                    <UserPlus size={14} /> {copy.generic.chooseLead}
                   </button>
                   <button
                     className="outline-button small"
@@ -3069,13 +3294,13 @@ function ChatFollowupSummaryCard({
                       }, buildLeadCreateFollowUpFromChat(summary))
                     }
                   >
-                    <UserPlus size={14} /> Create lead
+                    <UserPlus size={14} /> {copy.generic.confirmNewLead}
                   </button>
                 </>
               )}
             </div>
           </div>
-          {activeAction ? <p className="agent-draft-status">Selected: {activeAction === "reply" ? "Draft reply" : activeAction === "manage_followup" ? "Manage follow-up" : "Choose lead"}.</p> : null}
+          {activeAction ? <p className="agent-draft-status">{copy.buttons.selected}</p> : null}
         </>
       ) : null}
       {status ? <p className="agent-draft-status">{status}</p> : null}
@@ -3083,26 +3308,28 @@ function ChatFollowupSummaryCard({
   );
 }
 
-function LeadMiniCard({ lead }: { lead: LeadListItem }) {
+function LeadMiniCard({ lead, sourceMessage }: { lead: LeadListItem; sourceMessage?: string }) {
+  const language = getCardLanguage(sourceMessage);
+  const copy = getAgentCardCopy(language);
   return (
     <div className="chat-lead-mini-card">
       <div>
-        <span>Lead</span>
-        <strong>{lead.full_name || lead.phone || "Unnamed buyer"}</strong>
+        <span>{copy.generic.chooseLead}</span>
+        <strong>{lead.full_name || lead.phone || copy.lead.unnamedBuyer}</strong>
       </div>
       <div>
-        <span>Status</span>
-        <strong>{formatLeadStatusLabel(lead.status, lead.urgency)}</strong>
+        <span>{copy.generic.fieldStatus}</span>
+        <strong>{formatLeadStatusForLanguage(lead.status, lead.urgency, language)}</strong>
       </div>
       {lead.phone ? (
         <div>
-          <span>Phone</span>
+          <span>{copy.generic.fieldPhone}</span>
           <strong>{lead.phone}</strong>
         </div>
       ) : null}
       {lead.listing_title ? (
         <div>
-          <span>Listing</span>
+          <span>{copy.generic.primaryListing}</span>
           <strong>{lead.listing_title}</strong>
         </div>
       ) : null}
@@ -3110,24 +3337,25 @@ function LeadMiniCard({ lead }: { lead: LeadListItem }) {
   );
 }
 
-function ChatReplyActionCard({ preview }: { preview: ChatReplyActionPreview }) {
+function ChatReplyActionCard({ preview, sourceMessage }: { preview: ChatReplyActionPreview; sourceMessage?: string }) {
   const { summary, lead } = preview;
   const [status, setStatus] = useState<string | null>(null);
   const [isCopied, setIsCopied] = useState(false);
+  const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
 
   async function copyReply() {
     try {
       await copyToClipboard(summary.reply_draft.reply_text);
       setIsCopied(true);
-      setStatus("Reply copied.");
+      setStatus(copy.buttons.copied);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Copy is not available in this browser.");
+      setStatus(error instanceof Error ? error.message : copy.buttons.copy);
     }
   }
 
   return (
-    <div className="chat-reply-card" aria-label={lead ? `Recommended reply for ${lead.full_name || lead.phone || "lead"}` : "Recommended reply"}>
-      <button className="icon-button subtle" type="button" aria-label="Copy reply" title="Copy reply" onClick={() => void copyReply()}>
+    <div className="chat-reply-card" aria-label={copy.generic.whatsappReplyDraft}>
+      <button className="icon-button subtle" type="button" aria-label={copy.buttons.copy} title={copy.buttons.copy} onClick={() => void copyReply()}>
         {isCopied ? <CheckCircle2 size={16} /> : <Copy size={16} />}
       </button>
       <div className="chat-reply-text">
@@ -3142,25 +3370,29 @@ function ChatFollowupManageCard({
   preview,
   onSaved,
   onNeedsReminder,
-  onDeclined
+  onDeclined,
+  sourceMessage
 }: {
   preview: ChatFollowupManagePreview;
   onSaved: (message: string, updatedLead?: LeadRecord | null) => void;
   onNeedsReminder: (preview: ChatFollowupManagePreview) => void;
   onDeclined: () => void;
+  sourceMessage?: string;
 }) {
   const [decision, setDecision] = useState<"yes" | "no" | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [isWorking, setIsWorking] = useState(false);
   const [followUpTime] = useState(() => new Date());
   const action = preview.suggestedAction ?? recommendChatFollowupAction(preview.summary, preview.lead);
+  const language = getCardLanguage(sourceMessage);
+  const copy = getAgentCardCopy(language);
   const suggestedStatus = getSuggestedLeadStatus(preview.summary);
   const title =
     action === "status"
-      ? "Confirm lead follow-up status update?"
+      ? copy.generic.confirmLeadUpdate
       : action === "reminder"
-        ? "Confirm follow-up reminder?"
-        : "Confirm saving this follow-up note?";
+        ? copy.generic.schedulePreview
+        : copy.generic.followUpRecord;
   const followUpTimeLabel = followUpTime.toLocaleString("en-PK", {
     year: "numeric",
     month: "short",
@@ -3181,7 +3413,7 @@ function ChatFollowupManageCard({
     }
 
     setIsWorking(true);
-    setStatus("Saving...");
+    setStatus(copy.buttons.saving);
     try {
       if (action === "status") {
         const updatedLead = await saveChatFollowUpActivity({
@@ -3191,7 +3423,7 @@ function ChatFollowupManageCard({
           newStatus: suggestedStatus.status,
           urgency: suggestedStatus.urgency
         });
-        setStatus("Saved follow-up and updated status.");
+        setStatus(copy.buttons.saved);
         onSaved(`Done. I saved the follow-up summary and updated ${preview.lead.full_name || "this lead"} to ${formatLeadStatusLabel(suggestedStatus.status, suggestedStatus.urgency)}.`, updatedLead);
       } else {
         const updatedLead = await saveChatFollowUpActivity({
@@ -3199,12 +3431,12 @@ function ChatFollowupManageCard({
           summary: preview.summary,
           activityType: "followup_summary_saved"
         });
-        setStatus("Saved follow-up summary.");
+        setStatus(copy.buttons.saved);
         onSaved("Done. I saved this chat summary to the lead follow-up record.", updatedLead);
       }
       setDecision("yes");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Unable to save this follow-up.");
+      setStatus(error instanceof Error ? error.message : copy.buttons.saving);
     } finally {
       setIsWorking(false);
     }
@@ -3231,23 +3463,23 @@ function ChatFollowupManageCard({
       </div>
       {action === "status" ? (
         <div className="chat-status-change" aria-label="Suggested status change">
-          <span>{preview.lead.full_name || preview.lead.phone || "Unnamed buyer"}</span>
+          <span>{preview.lead.full_name || preview.lead.phone || copy.lead.unnamedBuyer}</span>
           <div className="chat-status-change-row">
-            <strong className={getLeadStatusClassName(preview.lead.status, preview.lead.urgency)}>{formatLeadStatusLabel(preview.lead.status, preview.lead.urgency)}</strong>
+            <strong className={getLeadStatusClassName(preview.lead.status, preview.lead.urgency)}>{formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language)}</strong>
             <span className="chat-status-arrow">→</span>
             <strong className={getLeadStatusClassName(suggestedStatus.status, suggestedStatus.urgency, "target")}>
-              {formatLeadStatusLabel(suggestedStatus.status, suggestedStatus.urgency)}
+              {formatLeadStatusForLanguage(suggestedStatus.status, suggestedStatus.urgency, language)}
             </strong>
           </div>
         </div>
       ) : (
         <div className="chat-compact-lead-line">
-          <span>{preview.lead.full_name || preview.lead.phone || "Unnamed buyer"}</span>
+          <span>{preview.lead.full_name || preview.lead.phone || copy.lead.unnamedBuyer}</span>
         </div>
       )}
       <div className="chat-followup-record">
         <div className="chat-followup-record-header">
-          <span>Follow-up record</span>
+          <span>{copy.generic.followUpRecord}</span>
           <small>{followUpTimeLabel}</small>
         </div>
         <p>{preview.summary.chat_summary}</p>
@@ -3255,7 +3487,7 @@ function ChatFollowupManageCard({
       {action === "reminder" ? (
         <div className="chat-import-fields single">
           <div>
-            <span>Reminder note</span>
+            <span>{copy.generic.fieldMessage}</span>
             <strong>{preview.summary.next_action_suggestion || "Follow up on this WhatsApp chat."}</strong>
           </div>
         </div>
@@ -3276,16 +3508,19 @@ function ChatFollowupManageCard({
 function ChatLeadChoiceCard({
   preview,
   onChooseLead,
-  onCreateLead
+  onCreateLead,
+  sourceMessage
 }: {
   preview: ChatLeadChoicePreview;
   onChooseLead: (lead: LeadListItem) => void;
   onCreateLead: (payload: LeadCreatePayload, followUp?: LeadCreateFollowUpPreview) => void;
+  sourceMessage?: string;
 }) {
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [created, setCreated] = useState(false);
   const candidates = getVerifiedChatLeadCandidates(preview.summary);
   const hasDetectedIdentity = Boolean(preview.summary.detected_customer_name || preview.summary.detected_phone);
+  const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
 
   function createLead() {
     if (created || selectedLeadId) {
@@ -3306,21 +3541,21 @@ function ChatLeadChoiceCard({
   return (
     <div className="chat-import-card">
       <div className="card-title">
-        <UserPlus size={16} /> Which lead does this chat belong to?
+        <UserPlus size={16} /> {copy.generic.chooseLead}
       </div>
       <div className="chat-import-fields">
         <div>
-          <span>Detected customer</span>
-          <strong>{preview.summary.detected_customer_name || "Not detected"}</strong>
+          <span>{copy.generic.fieldName}</span>
+          <strong>{preview.summary.detected_customer_name || copy.generic.notDetected}</strong>
         </div>
         <div>
-          <span>Detected phone</span>
-          <strong>{preview.summary.detected_phone || "Not detected"}</strong>
+          <span>{copy.generic.fieldPhone}</span>
+          <strong>{preview.summary.detected_phone || copy.generic.notDetected}</strong>
         </div>
       </div>
       {candidates.length ? (
-        <div className="lead-candidate-list" role="group" aria-label="Choose existing lead">
-          <span>Choose existing lead</span>
+        <div className="lead-candidate-list" role="group" aria-label={copy.generic.chooseLead}>
+          <span>{copy.generic.chooseLead}</span>
           {candidates.map((candidate) => (
             <button
               className={selectedLeadId === candidate.id ? "primary-button small" : "outline-button small"}
@@ -3332,30 +3567,31 @@ function ChatLeadChoiceCard({
                 onChooseLead(candidate);
               }}
             >
-              <UserPlus size={14} /> {candidate.full_name || candidate.phone || "Unnamed buyer"}
+              <UserPlus size={14} /> {candidate.full_name || candidate.phone || copy.lead.unnamedBuyer}
             </button>
           ))}
         </div>
       ) : (
-        <p className="agent-draft-status">No likely existing lead candidates were found.</p>
+        <p className="agent-draft-status">{copy.lead.empty}</p>
       )}
       {hasDetectedIdentity ? (
         <div className="card-actions">
           <button className="outline-button small" type="button" disabled={Boolean(selectedLeadId) || created} onClick={createLead}>
-            <UserPlus size={14} /> Create new lead
+            <UserPlus size={14} /> {copy.generic.confirmNewLead}
           </button>
         </div>
       ) : null}
-      {selectedLeadId ? <p className="agent-draft-status">Selected existing lead.</p> : null}
-      {created ? <p className="agent-draft-status">Creating a new lead preview.</p> : null}
+      {selectedLeadId ? <p className="agent-draft-status">{copy.buttons.selected}</p> : null}
+      {created ? <p className="agent-draft-status">{copy.generic.confirmNewLead}</p> : null}
     </div>
   );
 }
 
-function ChatFollowupNoteCard({ preview, onSaved }: { preview: ChatFollowupManagePreview; onSaved: (message: string) => void }) {
+function ChatFollowupNoteCard({ preview, onSaved, sourceMessage }: { preview: ChatFollowupManagePreview; onSaved: (message: string) => void; sourceMessage?: string }) {
   const [status, setStatus] = useState<string | null>(null);
   const [isWorking, setIsWorking] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
 
   async function saveNote() {
     if (isSaved || isWorking) {
@@ -3363,14 +3599,14 @@ function ChatFollowupNoteCard({ preview, onSaved }: { preview: ChatFollowupManag
     }
 
     setIsWorking(true);
-    setStatus("Saving follow-up note...");
+    setStatus(copy.buttons.saving);
     try {
       await saveChatFollowUpActivity({ lead: preview.lead, summary: preview.summary, activityType: "followup_summary_saved" });
       setIsSaved(true);
-      setStatus("Follow-up note saved.");
+      setStatus(copy.buttons.saved);
       onSaved("Done. I saved the chat summary as a follow-up note. The original chat text was not saved by default.");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Unable to save follow-up note.");
+      setStatus(error instanceof Error ? error.message : copy.buttons.saving);
     } finally {
       setIsWorking(false);
     }
@@ -3379,18 +3615,18 @@ function ChatFollowupNoteCard({ preview, onSaved }: { preview: ChatFollowupManag
   return (
     <div className="chat-import-card">
       <div className="card-title">
-        <FileText size={16} /> Confirm saving this follow-up note?
+        <FileText size={16} /> {copy.generic.followUpRecord}
       </div>
-      <LeadMiniCard lead={preview.lead} />
+      <LeadMiniCard lead={preview.lead} sourceMessage={sourceMessage} />
       <div className="chat-import-fields single">
         <div>
-          <span>Summary to save</span>
+          <span>{copy.generic.fieldMessage}</span>
           <strong>{preview.summary.chat_summary}</strong>
         </div>
       </div>
       <div className="card-actions">
         <button className="primary-button small" type="button" disabled={isSaved || isWorking} onClick={() => void saveNote()}>
-          <CheckCircle2 size={15} /> Save note
+          <CheckCircle2 size={15} /> {copy.buttons.confirmSave}
         </button>
       </div>
       {status ? <p className="agent-draft-status">{status}</p> : null}
@@ -3398,12 +3634,13 @@ function ChatFollowupNoteCard({ preview, onSaved }: { preview: ChatFollowupManag
   );
 }
 
-function ChatReminderCard({ preview, onSaved }: { preview: ChatFollowupManagePreview; onSaved: (message: string) => void }) {
+function ChatReminderCard({ preview, onSaved, sourceMessage }: { preview: ChatFollowupManagePreview; onSaved: (message: string) => void; sourceMessage?: string }) {
   const [reminderAt, setReminderAt] = useState(getDefaultFollowUpReminderLocalValue);
   const [note, setNote] = useState(preview.summary.next_action_suggestion || "Follow up on WhatsApp chat.");
   const [status, setStatus] = useState<string | null>(null);
   const [isWorking, setIsWorking] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
 
   async function saveReminder() {
     if (isSaved || isWorking) {
@@ -3411,12 +3648,12 @@ function ChatReminderCard({ preview, onSaved }: { preview: ChatFollowupManagePre
     }
 
     if (!reminderAt) {
-      setStatus("Choose a reminder time.");
+      setStatus(copy.hints.editSchedule);
       return;
     }
 
     setIsWorking(true);
-    setStatus("Saving reminder...");
+    setStatus(copy.buttons.saving);
     try {
       await saveChatFollowUpActivity({
         lead: preview.lead,
@@ -3426,10 +3663,10 @@ function ChatReminderCard({ preview, onSaved }: { preview: ChatFollowupManagePre
         note
       });
       setIsSaved(true);
-      setStatus("Reminder saved.");
+      setStatus(copy.buttons.saved);
       onSaved("Done. I set the next follow-up reminder on the lead.");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Unable to save reminder.");
+      setStatus(error instanceof Error ? error.message : copy.buttons.saving);
     } finally {
       setIsWorking(false);
     }
@@ -3438,22 +3675,22 @@ function ChatReminderCard({ preview, onSaved }: { preview: ChatFollowupManagePre
   return (
     <div className="chat-import-card">
       <div className="card-title">
-        <CalendarClock size={16} /> Confirm follow-up reminder?
+        <CalendarClock size={16} /> {copy.generic.schedulePreview}
       </div>
-      <LeadMiniCard lead={preview.lead} />
+      <LeadMiniCard lead={preview.lead} sourceMessage={sourceMessage} />
       <div className="chat-action-nested">
         <label>
-          <span>Reminder time</span>
+          <span>{copy.generic.schedulePreview}</span>
           <input type="datetime-local" value={reminderAt} disabled={isSaved} onChange={(event) => setReminderAt(event.target.value)} />
         </label>
         <label>
-          <span>Note</span>
+          <span>{copy.generic.fieldMessage}</span>
           <input value={note} disabled={isSaved} onChange={(event) => setNote(event.target.value)} />
         </label>
       </div>
       <div className="card-actions">
         <button className="primary-button small" type="button" disabled={isSaved || isWorking} onClick={() => void saveReminder()}>
-          <CalendarClock size={15} /> Save reminder
+          <CalendarClock size={15} /> {copy.buttons.confirmSchedule}
         </button>
       </div>
       {status ? <p className="agent-draft-status">{status}</p> : null}
@@ -3461,10 +3698,12 @@ function ChatReminderCard({ preview, onSaved }: { preview: ChatFollowupManagePre
   );
 }
 
-function ChatStatusCard({ preview, onSaved }: { preview: ChatFollowupManagePreview; onSaved: (message: string) => void }) {
+function ChatStatusCard({ preview, onSaved, sourceMessage }: { preview: ChatFollowupManagePreview; onSaved: (message: string) => void; sourceMessage?: string }) {
   const [status, setStatus] = useState<string | null>(null);
   const [isWorking, setIsWorking] = useState(false);
   const [selected, setSelected] = useState<LeadRecord["status"] | null>(null);
+  const language = getCardLanguage(sourceMessage);
+  const copy = getAgentCardCopy(language);
 
   async function updateStatus(nextStatus: LeadRecord["status"], urgency?: LeadRecord["urgency"]) {
     if (selected || isWorking) {
@@ -3472,7 +3711,7 @@ function ChatStatusCard({ preview, onSaved }: { preview: ChatFollowupManagePrevi
     }
 
     setIsWorking(true);
-    setStatus("Updating lead status...");
+    setStatus(copy.buttons.updating);
     try {
       await saveChatFollowUpActivity({
         lead: preview.lead,
@@ -3482,10 +3721,10 @@ function ChatStatusCard({ preview, onSaved }: { preview: ChatFollowupManagePrevi
         urgency
       });
       setSelected(nextStatus);
-      setStatus(`Status updated to ${formatLeadStatusLabel(nextStatus, urgency)}.`);
+      setStatus(`${copy.buttons.updated}: ${formatLeadStatusForLanguage(nextStatus, urgency, language)}.`);
       onSaved(`Done. I updated ${preview.lead.full_name || "this lead"} to ${formatLeadStatusLabel(nextStatus, urgency)}.`);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Unable to update status.");
+      setStatus(error instanceof Error ? error.message : copy.buttons.updating);
     } finally {
       setIsWorking(false);
     }
@@ -3494,24 +3733,24 @@ function ChatStatusCard({ preview, onSaved }: { preview: ChatFollowupManagePrevi
   return (
     <div className="chat-import-card">
       <div className="card-title">
-        <CheckCircle2 size={16} /> Confirm lead status update?
+        <CheckCircle2 size={16} /> {copy.generic.confirmLeadUpdate}
       </div>
-      <LeadMiniCard lead={preview.lead} />
+      <LeadMiniCard lead={preview.lead} sourceMessage={sourceMessage} />
       <div className="chat-import-fields single">
         <div>
-          <span>Suggested status</span>
-          <strong>{formatLeadStatusLabel(preview.summary.status_suggestion, preview.summary.urgency_suggestion)}</strong>
+          <span>{copy.generic.fieldStatus}</span>
+          <strong>{formatLeadStatusForLanguage(preview.summary.status_suggestion, preview.summary.urgency_suggestion, language)}</strong>
         </div>
       </div>
       <div className="card-actions">
         <button className="primary-button small" type="button" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("qualified", "high")}>
-          <CheckCircle2 size={15} /> Hot lead
+          <CheckCircle2 size={15} /> {formatLeadStatusForLanguage("qualified", "high", language)}
         </button>
         <button className="outline-button small" type="button" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("contacted")}>
-          <CheckCircle2 size={15} /> Contacted
+          <CheckCircle2 size={15} /> {formatLeadStatusForLanguage("contacted", undefined, language)}
         </button>
         <button className="outline-button small" type="button" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("lost")}>
-          <X size={15} /> Not interested
+          <X size={15} /> {formatLeadStatusForLanguage("lost", undefined, language)}
         </button>
       </div>
       {status ? <p className="agent-draft-status">{status}</p> : null}
@@ -3524,7 +3763,8 @@ function DraftPreviewCard({
   onAttachMedia,
   onRemoveMedia,
   pendingMedia,
-  onSaved
+  onSaved,
+  sourceMessage
 }: {
   draft: ListingDraftInput;
   onAttachMedia: () => void;
@@ -3536,6 +3776,7 @@ function DraftPreviewCard({
     mediaPreview: ListingSavedMediaPreview[],
     failedMedia: FailedMediaUpload[]
   ) => void;
+  sourceMessage?: string;
 }) {
   const router = useRouter();
   const [form, setForm] = useState(() => draftToFormState(draft));
@@ -3544,6 +3785,7 @@ function DraftPreviewCard({
   const [isSaved, setIsSaved] = useState(false);
   const [mediaUploadStatus, setMediaUploadStatus] = useState<Record<string, PendingMediaUploadStatus>>({});
   const [status, setStatus] = useState<string | null>(null);
+  const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
   const previewDraft = useMemo(() => formStateToDraft(form), [form]);
   const remoteImages = useMemo(() => getDraftRemoteImages(draft), [draft]);
 
@@ -3643,7 +3885,7 @@ function DraftPreviewCard({
       actions={
         <>
           <button className="primary-button small" type="button" onClick={handleConfirm} disabled={isSaving || isSaved}>
-            <CheckCircle2 size={15} /> {isSaved ? "Saved" : isSaving ? "Adding..." : "Confirm & add"}
+            <CheckCircle2 size={15} /> {isSaved ? copy.buttons.saved : isSaving ? copy.buttons.generating : copy.buttons.confirmAdd}
           </button>
           <button
             className="outline-button small"
@@ -3651,29 +3893,29 @@ function DraftPreviewCard({
             disabled={isSaving || isSaved}
             onClick={() => setIsEditing(!isEditing)}
           >
-            <Pencil size={14} /> {isEditing ? "Preview" : "Edit card"}
+            <Pencil size={14} /> {isEditing ? copy.buttons.preview : copy.buttons.editCard}
           </button>
         </>
       }
       className="agent-draft-card"
       icon={<Sparkles size={16} />}
       status={status}
-      summary={isEditing ? "Edit the parsed listing fields before saving." : "Review the key listing details before adding it to your library."}
-      title="Listing preview"
+      summary={isEditing ? copy.hints.reviewListing : copy.hints.reviewListing}
+      title={copy.generic.listingPreview}
       tone="listing"
     >
 
       {isEditing ? (
         <div className="agent-draft-form">
           <label>
-            <span>Title</span>
+            <span>{copy.generic.fieldTitle}</span>
             <input
               value={form.title}
               onChange={(event) => setForm({ ...form, title: event.target.value })}
             />
           </label>
           <label>
-            <span>Description</span>
+            <span>{copy.generic.fieldDescription}</span>
             <textarea
               value={form.description}
               onChange={(event) => setForm({ ...form, description: event.target.value })}
@@ -3681,28 +3923,28 @@ function DraftPreviewCard({
           </label>
           <div className="agent-draft-grid">
             <label>
-              <span>City</span>
+              <span>{copy.generic.fieldCity}</span>
               <input
                 value={form.city}
                 onChange={(event) => setForm({ ...form, city: event.target.value })}
               />
             </label>
             <label>
-              <span>Area</span>
+              <span>{copy.generic.fieldArea}</span>
               <input
                 value={form.location_area}
                 onChange={(event) => setForm({ ...form, location_area: event.target.value })}
               />
             </label>
             <label>
-              <span>Type</span>
+              <span>{copy.generic.fieldPropertyType}</span>
               <input
                 value={form.property_type}
                 onChange={(event) => setForm({ ...form, property_type: event.target.value })}
               />
             </label>
             <label>
-              <span>Intent</span>
+              <span>{copy.generic.fieldIntent}</span>
               <select
                 value={form.listing_type}
                 onChange={(event) =>
@@ -3714,7 +3956,7 @@ function DraftPreviewCard({
               </select>
             </label>
             <label>
-              <span>Price PKR</span>
+              <span>{copy.generic.fieldPrice} PKR</span>
               <input
                 inputMode="numeric"
                 value={form.price_amount}
@@ -3722,7 +3964,7 @@ function DraftPreviewCard({
               />
             </label>
             <label>
-              <span>Area size</span>
+              <span>{copy.generic.fieldAreaSize}</span>
               <div className="agent-draft-inline">
                 <input
                   inputMode="decimal"
@@ -3747,7 +3989,7 @@ function DraftPreviewCard({
               </div>
             </label>
             <label>
-              <span>Beds</span>
+              <span>{copy.generic.fieldBeds}</span>
               <input
                 inputMode="numeric"
                 value={form.bedrooms}
@@ -3755,7 +3997,7 @@ function DraftPreviewCard({
               />
             </label>
             <label>
-              <span>Baths</span>
+              <span>{copy.generic.fieldBaths}</span>
               <input
                 inputMode="numeric"
                 value={form.bathrooms}
@@ -3764,7 +4006,7 @@ function DraftPreviewCard({
             </label>
           </div>
           <label>
-            <span>Features</span>
+            <span>{copy.generic.fieldFeatures}</span>
             <input
               value={form.features}
               onChange={(event) => setForm({ ...form, features: event.target.value })}
@@ -3779,10 +4021,10 @@ function DraftPreviewCard({
             <span>{formatPrice(form.price_amount)}</span>
             <span>{[previewDraft.location_area, previewDraft.city].filter(Boolean).join(", ")}</span>
             <span>
-              {[previewDraft.area_value, previewDraft.area_unit].filter(Boolean).join(" ") || "Area not set"}
+              {[previewDraft.area_value, previewDraft.area_unit].filter(Boolean).join(" ") || copy.generic.areaNotSet}
             </span>
             <span>
-              {previewDraft.bedrooms ?? "-"} beds / {previewDraft.bathrooms ?? "-"} baths
+              {previewDraft.bedrooms ?? "-"} {copy.generic.beds} / {previewDraft.bathrooms ?? "-"} {copy.generic.baths}
             </span>
           </div>
         </div>
@@ -3858,12 +4100,12 @@ function DraftPreviewCard({
               );
             })}
             <button className="agent-media-add" type="button" disabled={isSaving || isSaved} onClick={onAttachMedia}>
-              <Upload size={14} /> Add more
+              <Upload size={14} /> {copy.buttons.addMore}
             </button>
           </div>
         ) : (
           <button className="agent-media-add empty" type="button" disabled={isSaving || isSaved} onClick={onAttachMedia}>
-            <ImagePlus size={16} /> Add photos / video
+            <ImagePlus size={16} /> {copy.buttons.addMedia}
           </button>
         )}
       </div>
@@ -3874,34 +4116,37 @@ function DraftPreviewCard({
 function ListingSavedCard({
   mediaPreview = [],
   onAskAgent,
-  preview
+  preview,
+  sourceMessage
 }: {
   mediaPreview?: ListingSavedMediaPreview[];
   onAskAgent?: (preview: ListingSavedPreview, mediaPreview: ListingSavedMediaPreview[]) => void;
   preview: ListingSavedPreview;
+  sourceMessage?: string;
 }) {
   const visibleMedia = mediaPreview.filter((item) => item.previewUrl).slice(0, 3);
+  const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
 
   return (
     <AgentOutputCard
       actions={
         <>
           <a className="primary-button small" href={preview.libraryHref}>
-            <House size={14} /> Open listing
+            <House size={14} /> {copy.buttons.openListing}
           </a>
           <button className="outline-button small" type="button" onClick={() => onAskAgent?.(preview, mediaPreview)}>
-            <MessageCircle size={14} /> Ask Agent
+            <MessageCircle size={14} /> {copy.buttons.askAgent}
           </button>
         </>
       }
       className="listing-saved-card"
       icon={<CheckCircle2 size={16} />}
-      title="Listing saved"
+      title={copy.generic.listingSaved}
       tone="listing"
     >
       <div className="listing-saved-summary">
         <div>
-          <strong>{preview.title || "Saved listing"}</strong>
+          <strong>{preview.title || copy.generic.savedListing}</strong>
           {preview.location ? <span>{preview.location}</span> : null}
         </div>
         <div className="listing-saved-media" aria-label="Saved listing media">
@@ -3920,12 +4165,12 @@ function ListingSavedCard({
                 ))}
               </div>
               <span>
-                {preview.uploadedCount} media file{preview.uploadedCount === 1 ? "" : "s"}
+                {preview.uploadedCount} {copy.generic.mediaFiles}
               </span>
             </>
           ) : (
             <span className="listing-saved-badge">
-              <ImageIcon size={14} /> No media added
+              <ImageIcon size={14} /> {copy.generic.noMediaAdded}
             </span>
           )}
         </div>
@@ -3937,11 +4182,13 @@ function ListingSavedCard({
 function SchedulePreviewCard({
   event,
   onSaved,
-  timeZone
+  timeZone,
+  sourceMessage
 }: {
   event: BrokerEventDraftInput;
   onSaved: () => void;
   timeZone?: string | null;
+  sourceMessage?: string;
 }) {
   const router = useRouter();
   const [form, setForm] = useState(() => eventToFormState(event, timeZone));
@@ -3949,6 +4196,8 @@ function SchedulePreviewCard({
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const language = getCardLanguage(sourceMessage);
+  const copy = getAgentCardCopy(language);
   const previewEvent = useMemo(() => formStateToEvent(form, timeZone), [form, timeZone]);
   const hasScheduleTime = Boolean(previewEvent.start_at || previewEvent.reminder_at);
 
@@ -3958,13 +4207,13 @@ function SchedulePreviewCard({
     }
 
     if (!hasScheduleTime) {
-      setStatus("Please add a start or reminder time before saving.");
+      setStatus(copy.hints.editSchedule);
       setIsEditing(true);
       return;
     }
 
     setIsSaving(true);
-    setStatus("Adding schedule item...");
+    setStatus(copy.buttons.generating);
     const response = await fetch("/api/events", {
       method: "POST",
       headers: {
@@ -3975,12 +4224,12 @@ function SchedulePreviewCard({
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      setStatus(payload?.error ?? "Unable to add schedule item");
+      setStatus(payload?.error ?? copy.hints.editSchedule);
       setIsSaving(false);
       return;
     }
 
-    setStatus("Added to Schedule.");
+    setStatus(copy.buttons.saved);
     setIsSaved(true);
     onSaved();
     router.refresh();
@@ -3997,7 +4246,7 @@ function SchedulePreviewCard({
             onClick={handleConfirm}
             disabled={isSaving || isSaved || !hasScheduleTime}
           >
-            <CheckCircle2 size={15} /> {isSaved ? "Added" : isSaving ? "Adding..." : "Confirm schedule"}
+            <CheckCircle2 size={15} /> {isSaved ? copy.buttons.saved : isSaving ? copy.buttons.generating : copy.buttons.confirmSchedule}
           </button>
           <button
             className="outline-button small"
@@ -4005,23 +4254,23 @@ function SchedulePreviewCard({
             disabled={isSaving || isSaved}
             onClick={() => setIsEditing(!isEditing)}
           >
-            <Pencil size={14} /> {isEditing ? "Preview" : "Edit card"}
+            <Pencil size={14} /> {isEditing ? copy.buttons.preview : copy.buttons.editCard}
           </button>
         </>
       }
       className="schedule-preview-card"
-      hint={isEditing ? "Edit the timing before saving." : "Review the schedule item before adding it."}
+      hint={isEditing ? copy.hints.editSchedule : copy.hints.reviewSchedule}
       icon={<CalendarClock size={16} />}
       status={status}
-      summary={isEditing ? "Edit timing and references before saving." : "Review the schedule item before adding it."}
-      title="Schedule preview"
+      summary={isEditing ? copy.hints.editSchedule : copy.hints.reviewSchedule}
+      title={copy.generic.schedulePreview}
       tone="schedule"
     >
 
       {isEditing ? (
         <div className="agent-draft-form">
           <label>
-            <span>Title</span>
+            <span>{copy.generic.fieldTitle}</span>
             <input
               value={form.title}
               onChange={(event) => setForm({ ...form, title: event.target.value })}
@@ -4045,7 +4294,7 @@ function SchedulePreviewCard({
               </select>
             </label>
             <label>
-              <span>Type</span>
+              <span>{copy.generic.fieldPropertyType}</span>
               <select
                 value={form.event_type}
                 onChange={(event) =>
@@ -4081,7 +4330,7 @@ function SchedulePreviewCard({
             </label>
             <label>
               <span>Lead</span>
-              {form.lead_id ? <small>Bound lead</small> : null}
+              {form.lead_id ? <small>{copy.lead.title}</small> : null}
               <input
                 value={form.lead_name}
                 onChange={(event) => setForm({ ...form, lead_name: event.target.value })}
@@ -4089,7 +4338,7 @@ function SchedulePreviewCard({
             </label>
             <label>
               <span>Listing</span>
-              {form.listing_id ? <small>Bound listing</small> : null}
+              {form.listing_id ? <small>{copy.generic.primaryListing}</small> : null}
               <input
                 value={form.listing_reference}
                 onChange={(event) => setForm({ ...form, listing_reference: event.target.value })}
@@ -4097,7 +4346,7 @@ function SchedulePreviewCard({
             </label>
           </div>
           <label>
-            <span>Description</span>
+            <span>{copy.generic.fieldDescription}</span>
             <textarea
               value={form.description}
               onChange={(event) => setForm({ ...form, description: event.target.value })}
@@ -4107,10 +4356,10 @@ function SchedulePreviewCard({
       ) : (
         <div className="schedule-preview">
           <h3>{previewEvent.title}</h3>
-          <p>{previewEvent.description || "No notes yet."}</p>
+          <p>{previewEvent.description || copy.generic.noNotes}</p>
           <div className="schedule-facts">
             <span>{previewEvent.event_category}</span>
-            <span>{previewEvent.event_type.replace(/_/g, " ")}</span>
+            <span>{formatScheduleEventType(previewEvent.event_type, language)}</span>
             <span>{formatEventTime(previewEvent, timeZone)}</span>
             {previewEvent.lead_name ? <span>{previewEvent.lead_name}</span> : null}
             {previewEvent.listing_reference ? <span>{previewEvent.listing_reference}</span> : null}
@@ -4121,16 +4370,32 @@ function SchedulePreviewCard({
   );
 }
 
-function ScheduleResultsCard({ events, timeZone }: { events: BrokerEventRecord[]; timeZone?: string | null }) {
+function formatScheduleEventType(eventType: BrokerEventRecord["event_type"], language: AgentResponseLanguage) {
+  const copy = getScheduleCardCopy(language);
+  return copy.eventTypes[eventType] ?? eventType.replace(/_/g, " ");
+}
+
+function ScheduleResultsCard({
+  events,
+  timeZone,
+  sourceMessage
+}: {
+  events: BrokerEventRecord[];
+  timeZone?: string | null;
+  sourceMessage?: string;
+}) {
+  const language = detectAgentResponseLanguage(sourceMessage ?? "");
+  const copy = getScheduleCardCopy(language);
+
   return (
     <AgentOutputCard
       className="chat-card schedule-results-card"
       icon={<CalendarClock size={16} />}
-      title="Schedule items"
+      title={copy.title}
       tone="schedule"
     >
       {events.length === 0 ? (
-        <p>No matching schedule items.</p>
+        <p>{copy.empty}</p>
       ) : (
         <div className="event-mini-list">
           {events.map((event) => (
@@ -4140,7 +4405,7 @@ function ScheduleResultsCard({ events, timeZone }: { events: BrokerEventRecord[]
                 <strong>{event.title}</strong>
                 <small>
                   {[
-                    event.event_type.replace(/_/g, " "),
+                    formatScheduleEventType(event.event_type, language),
                     event.lead_name,
                     event.listing_reference,
                     event.location_text
@@ -4197,6 +4462,9 @@ export function AgentWorkspace({
   const [oldestMessageCreatedAt, setOldestMessageCreatedAt] = useState<string | null>(
     initialMessages[0]?.created_at ?? null
   );
+  const [preferredUiLanguage, setPreferredUiLanguage] = useState<AgentResponseLanguage | null>(() =>
+    detectLatestExplicitLanguagePreference(initialMessages)
+  );
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -4234,6 +4502,14 @@ export function AgentWorkspace({
   useEffect(() => {
     setUserTimeZone(getResolvedTimeZone());
   }, []);
+
+  useEffect(() => {
+    const detectedPreference = detectLatestExplicitLanguagePreference(initialMessages);
+    if (detectedPreference) {
+      setPreferredUiLanguage((current) => current ?? detectedPreference);
+    }
+  }, [initialMessages]);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const voiceChunksRef = useRef<Blob[]>([]);
   const voiceStreamRef = useRef<MediaStream | null>(null);
@@ -4692,7 +4968,8 @@ export function AgentWorkspace({
         body: JSON.stringify({
           conversationId,
           role: "user",
-          content: message.content
+          content: message.content,
+          structured_payload: structuredPayloadForMessage(message)
         })
       });
 
@@ -4804,8 +5081,13 @@ export function AgentWorkspace({
 
   function appendAssistantMessage(message: Omit<ChatMessage, "id" | "role"> & { id?: string }) {
     const progressMessageId = pendingProgressMessageIdRef.current;
+    const lastUserMessage = [...messages].reverse().find((item) => item.role === "user" && item.content.trim());
+    const sourceMessage = message.sourceMessage ?? message.scheduleSourceMessage ?? message.leadSourceMessage ?? lastUserMessage?.content;
+    const uiLanguage = message.uiLanguage ?? getCardLanguage(sourceMessage);
     const nextMessage: ChatMessage = {
       ...message,
+      sourceMessage,
+      uiLanguage,
       id: message.id ?? progressMessageId ?? createId(),
       role: "assistant"
     };
@@ -5291,14 +5573,16 @@ export function AgentWorkspace({
     if (!matchedLeads.length) {
       appendAssistantMessage({
         content: formatLeadResultCount(0, payload, responseContext),
-        leadLatestOffer: workspaceLeads.length > 0
+        leadLatestOffer: workspaceLeads.length > 0,
+        leadSourceMessage: fallbackQuery
       });
       return;
     }
 
     appendAssistantMessage({
       content: formatLeadResultCount(matchedLeads.length, payload, responseContext),
-      leadResults: matchedLeads
+      leadResults: matchedLeads,
+      leadSourceMessage: fallbackQuery
     });
   }
 
@@ -5322,7 +5606,7 @@ export function AgentWorkspace({
     });
   }
 
-  async function showScheduleResults(actionResponse: string, payload: ScheduleEventListPayload) {
+  async function showScheduleResults(actionResponse: string, payload: ScheduleEventListPayload, sourceMessage: string) {
     const params = new URLSearchParams({
       status: payload.status,
       limit: String(payload.limit)
@@ -5359,8 +5643,9 @@ export function AgentWorkspace({
     }
 
     appendAssistantMessage({
-      content: actionResponse,
-      scheduleEvents: result.events ?? []
+      content: formatScheduleQueryResponse(payload, sourceMessage) || actionResponse,
+      scheduleEvents: result.events ?? [],
+      scheduleSourceMessage: sourceMessage
     });
   }
 
@@ -5732,7 +6017,8 @@ export function AgentWorkspace({
     messageText: string,
     files: PendingFileAttachment[],
     selectedLeadId: string | null,
-    requestedAction: ChatImportRequestedAction = "unknown"
+    requestedAction: ChatImportRequestedAction = "unknown",
+    uiLanguage: AgentResponseLanguage = "english"
   ) {
     const chatFile = files.find((item) => item.kind === "whatsapp_chat" || isWhatsAppChatFile(item.file));
     const selectedLead = selectedLeadId
@@ -5741,6 +6027,7 @@ export function AgentWorkspace({
     const formData = new FormData();
 
     formData.append("save_original_chat_text", "false");
+    formData.append("broker_display_language", uiLanguage);
     if (selectedLeadId) {
       formData.append("lead_id", selectedLeadId);
     }
@@ -5762,6 +6049,7 @@ export function AgentWorkspace({
     if (!response.ok) {
       const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null;
       appendAssistantMessage({
+        uiLanguage,
         content: errorPayload?.error ?? "I could not summarize that WhatsApp chat yet."
       });
       return;
@@ -5774,6 +6062,7 @@ export function AgentWorkspace({
 
     if (payload.needs_txt_selection) {
       appendAssistantMessage({
+        uiLanguage,
         content: "I found more than one text file in the WhatsApp export. Choose the chat file before I summarize it.",
         chatImport: {
           zipCandidates: payload.txt_candidates ?? [],
@@ -5789,14 +6078,23 @@ export function AgentWorkspace({
 
     if (requestedAction === "analyze_only") {
       appendAssistantMessage({
-        content: buildChatImportNarrative(payload, resolvedLead)
+        uiLanguage,
+        content: buildChatImportNarrative(payload, resolvedLead, uiLanguage)
       });
       return;
     }
 
     if (requestedAction === "reply") {
       appendAssistantMessage({
-        content: `I read the chat and drafted a reply${resolvedLead ? ` for ${resolvedLead.full_name || resolvedLead.phone || "this lead"}` : ""}. Review it before opening WhatsApp.`,
+        uiLanguage,
+        content:
+          uiLanguage === "chinese"
+            ? `我已阅读聊天并起草了回复${resolvedLead ? `，对象是 ${resolvedLead.full_name || resolvedLead.phone || "这条线索"}` : ""}。打开 WhatsApp 前请先检查。`
+            : uiLanguage === "urdu"
+              ? `میں نے chat پڑھ کر reply draft کر دیا ہے${resolvedLead ? `، ${resolvedLead.full_name || resolvedLead.phone || "اس lead"} کے لیے` : ""}۔ WhatsApp کھولنے سے پہلے review کر لیں۔`
+              : uiLanguage === "roman_urdu"
+                ? `Main ne chat parh kar reply draft kar diya hai${resolvedLead ? `, ${resolvedLead.full_name || resolvedLead.phone || "is lead"} ke liye` : ""}. WhatsApp kholne se pehle review kar lein.`
+                : `I read the chat and drafted a reply${resolvedLead ? ` for ${resolvedLead.full_name || resolvedLead.phone || "this lead"}` : ""}. Review it before opening WhatsApp.`,
         chatReplyAction: {
           summary: payload,
           lead: resolvedLead
@@ -5807,6 +6105,7 @@ export function AgentWorkspace({
 
     if (resolvedLead && requestedAction === "save_followup") {
       appendAssistantMessage({
+        uiLanguage,
         content: "",
         chatFollowupManage: {
           summary: payload,
@@ -5819,7 +6118,15 @@ export function AgentWorkspace({
 
     if (resolvedLead && requestedAction === "set_reminder") {
       appendAssistantMessage({
-        content: `I found ${resolvedLead.full_name || resolvedLead.phone || "the matching lead"}. Choose the reminder time, then confirm.`,
+        uiLanguage,
+        content:
+          uiLanguage === "chinese"
+            ? `我找到了 ${resolvedLead.full_name || resolvedLead.phone || "匹配线索"}。请选择提醒时间，然后确认。`
+            : uiLanguage === "urdu"
+              ? `مجھے ${resolvedLead.full_name || resolvedLead.phone || "matching lead"} مل گئی۔ reminder time منتخب کر کے confirm کریں۔`
+              : uiLanguage === "roman_urdu"
+                ? `Mujhe ${resolvedLead.full_name || resolvedLead.phone || "matching lead"} mil gayi. Reminder time choose karke confirm karein.`
+                : `I found ${resolvedLead.full_name || resolvedLead.phone || "the matching lead"}. Choose the reminder time, then confirm.`,
         chatReminder: {
           summary: payload,
           lead: resolvedLead
@@ -5830,6 +6137,7 @@ export function AgentWorkspace({
 
     if (resolvedLead && requestedAction === "update_status") {
       appendAssistantMessage({
+        uiLanguage,
         content: "",
         chatFollowupManage: {
           summary: payload,
@@ -5841,11 +6149,20 @@ export function AgentWorkspace({
     }
 
     await appendAssistantMessageSequential({
-      content: buildChatImportNarrative(payload, resolvedLead)
+      uiLanguage,
+      content: buildChatImportNarrative(payload, resolvedLead, uiLanguage)
     });
 
     await appendAssistantMessageSequential({
-      content: "Suggested reply:",
+      uiLanguage,
+      content:
+        uiLanguage === "chinese"
+          ? "建议回复："
+          : uiLanguage === "urdu"
+            ? "تجویز کردہ جواب:"
+            : uiLanguage === "roman_urdu"
+              ? "Suggested reply:"
+              : "Suggested reply:",
       chatReplyAction: {
         summary: payload,
         lead: resolvedLead
@@ -5856,6 +6173,7 @@ export function AgentWorkspace({
       const suggestedAction = recommendChatFollowupAction(payload, resolvedLead);
       if (suggestedAction) {
         await appendAssistantMessageSequential({
+          uiLanguage,
           content: "",
           chatFollowupManage: {
             summary: payload,
@@ -5872,15 +6190,36 @@ export function AgentWorkspace({
 
     if (!verifiedCandidates.length && !hasDetectedIdentity) {
       await appendAssistantMessageSequential({
-        content: "I did not find enough customer identity information to match or create a lead. Please send the customer name or phone if you want me to attach this chat to a lead."
+        uiLanguage,
+        content:
+          uiLanguage === "chinese"
+            ? "我没有找到足够的客户身份信息来匹配或创建线索。如果要把这段聊天关联到线索，请发送客户姓名或电话。"
+            : uiLanguage === "urdu"
+              ? "مجھے lead match یا create کرنے کے لیے کافی customer identity information نہیں ملی۔ اگر اس chat کو lead سے attach کرنا ہے تو customer name یا phone بھیجیں۔"
+              : uiLanguage === "roman_urdu"
+                ? "Mujhe lead match ya create karne ke liye kaafi customer identity information nahi mili. Agar is chat ko lead se attach karna hai to customer name ya phone bhejein."
+                : "I did not find enough customer identity information to match or create a lead. Please send the customer name or phone if you want me to attach this chat to a lead."
       });
       return;
     }
 
     await appendAssistantMessageSequential({
+      uiLanguage,
       content: verifiedCandidates.length
-        ? "I found possible matching leads. Choose one only if it is the same customer."
-        : "I did not find an existing lead with matching customer information. You can create a new lead from the detected customer details.",
+        ? uiLanguage === "chinese"
+          ? "我找到了可能匹配的线索。只有确认是同一个客户时才选择。"
+          : uiLanguage === "urdu"
+            ? "مجھے possible matching leads ملی ہیں۔ صرف اسی وقت select کریں جب یہ same customer ہو۔"
+            : uiLanguage === "roman_urdu"
+              ? "Mujhe possible matching leads mili hain. Sirf tab select karein jab yeh same customer ho."
+              : "I found possible matching leads. Choose one only if it is the same customer."
+        : uiLanguage === "chinese"
+          ? "我没有找到客户信息匹配的现有线索。你可以用识别到的客户信息创建新线索。"
+          : uiLanguage === "urdu"
+            ? "مجھے matching customer information والی existing lead نہیں ملی۔ detected customer details سے new lead create کر سکتے ہیں۔"
+            : uiLanguage === "roman_urdu"
+              ? "Mujhe matching customer information wali existing lead nahi mili. Detected customer details se new lead create kar sakte hain."
+              : "I did not find an existing lead with matching customer information. You can create a new lead from the detected customer details.",
       chatLeadChoice: {
         summary: {
           ...payload,
@@ -6092,6 +6431,11 @@ export function AgentWorkspace({
       isWhatsAppImportMode ||
       hasWhatsAppChatFile ||
       (!hasOutgoingMedia && !hasOutgoingFiles && !isScheduleRequest(trimmed) && looksLikeWhatsAppChatText(trimmed));
+    const explicitUiLanguage = detectExplicitResponseLanguage(trimmed);
+    const turnUiLanguage = await detectTurnUiLanguage(trimmed, outgoingFiles, explicitUiLanguage ?? preferredUiLanguage);
+    if (explicitUiLanguage) {
+      setPreferredUiLanguage(explicitUiLanguage);
+    }
 
     setInput("");
     setComposerMedia([]);
@@ -6123,8 +6467,7 @@ export function AgentWorkspace({
     const userMessage = appendUserMessage(visibleUserMessageContent, {
       attachments: outgoingMedia,
       contextAttachments: outgoingContext,
-      fileAttachments: outgoingFiles,
-      persist: false
+      fileAttachments: outgoingFiles
     });
     activeTurnAnchorRef.current = userMessage.id;
     activeOutputRef.current = null;
@@ -6133,13 +6476,40 @@ export function AgentWorkspace({
     window.requestAnimationFrame(() => positionTurnAnchor(userMessage.id));
 
     if (shouldImportWhatsAppChat && (trimmed || hasWhatsAppChatFile)) {
-      await summarizeWhatsAppChatFromComposer(trimmed, outgoingFiles, outgoingLeadId, detectChatImportRequestedAction(trimmed));
-      setIsSubmitting(false);
+      const progressCopy = getWhatsAppImportProgressCopy(turnUiLanguage);
+      const progressMessageId = appendProgressMessage(progressCopy[0]);
+      const progressTimers = [
+        window.setTimeout(() => updateProgressMessage(progressMessageId, progressCopy[1]), 900),
+        window.setTimeout(() => updateProgressMessage(progressMessageId, progressCopy[2]), 2600),
+        window.setTimeout(() => updateProgressMessage(progressMessageId, progressCopy[3]), 7000)
+      ];
+
+      try {
+        await summarizeWhatsAppChatFromComposer(
+          trimmed,
+          outgoingFiles,
+          outgoingLeadId,
+          detectChatImportRequestedAction(trimmed),
+          turnUiLanguage
+        );
+      } catch (error) {
+        appendAssistantMessage({
+          uiLanguage: turnUiLanguage,
+          content:
+            error instanceof Error
+              ? error.message
+              : "I could not summarize that WhatsApp chat yet. Please try again."
+        });
+      } finally {
+        progressTimers.forEach((timer) => window.clearTimeout(timer));
+        setIsSubmitting(false);
+      }
       return;
     }
 
     if (!trimmed) {
       appendAssistantMessage({
+        uiLanguage: turnUiLanguage,
         content: hasOutgoingMedia
           ? activeDraftId
             ? "I added these media files to the current listing preview. They will upload when you confirm the listing."
@@ -6184,6 +6554,7 @@ export function AgentWorkspace({
       }
 
       appendAssistantMessage({
+        uiLanguage: turnUiLanguage,
         content:
           "I attached those leads, but bulk replies and follow-up scheduling need their own batch preview before I create anything. I can handle one selected lead now, or we can add those batch workflows next."
       });
@@ -6277,7 +6648,8 @@ export function AgentWorkspace({
       if (payload.action.intent === "list_schedule_events") {
         await showScheduleResults(
           payload.action.response,
-          payload.action.payload as ScheduleEventListPayload
+          payload.action.payload as ScheduleEventListPayload,
+          agentMessageContent
         );
         return;
       }
@@ -6768,6 +7140,7 @@ export function AgentWorkspace({
                 {message.draft ? (
                   <DraftPreviewCard
                     draft={message.draft}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onAttachMedia={() => openDraftMediaPicker(message.id)}
                     onRemoveMedia={(mediaId) => removeDraftMedia(message.id, mediaId)}
                     pendingMedia={draftMediaByMessageId[message.id] ?? []}
@@ -6790,7 +7163,8 @@ export function AgentWorkspace({
                           libraryHref: `/listings#listing-${listingId}`,
                           agentHref: `/?listing=${listingId}`
                         },
-                        listingSavedMedia: mediaPreview
+                        listingSavedMedia: mediaPreview,
+                        sourceMessage: message.sourceMessage
                       });
                     }}
                   />
@@ -6800,31 +7174,48 @@ export function AgentWorkspace({
                     mediaPreview={message.listingSavedMedia}
                     onAskAgent={addSavedListingContext}
                     preview={message.listingSaved}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                   />
                 ) : null}
                 {message.scheduleEvent ? (
                   <SchedulePreviewCard
                     event={message.scheduleEvent}
                     timeZone={userTimeZone}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onSaved={() => {
                       appendAssistantMessage({
                         content:
-                          "Done. I added it to Schedule. Next, I can show today's appointments and reminders from the workspace."
+                          "Done. I added it to Schedule. Next, I can show today's appointments and reminders from the workspace.",
+                        sourceMessage: message.sourceMessage
                       });
                     }}
                   />
                 ) : null}
-                {message.scheduleEvents ? <ScheduleResultsCard events={message.scheduleEvents} timeZone={userTimeZone} /> : null}
-                {message.leadResults ? <LeadResultsCard leads={message.leadResults} onSelect={addLeadContext} /> : null}
+                {message.scheduleEvents ? (
+                  <ScheduleResultsCard
+                    events={message.scheduleEvents}
+                    timeZone={userTimeZone}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage ?? message.scheduleSourceMessage ?? message.content}
+                  />
+                ) : null}
+                {message.leadResults ? (
+                  <LeadResultsCard
+                    leads={message.leadResults}
+                    onSelect={addLeadContext}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage ?? message.leadSourceMessage ?? message.content}
+                  />
+                ) : null}
                 {message.leadLatestOffer ? (
                   <LeadLatestOfferCard
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onConfirm={() => {
                       const latestLead = workspaceLeads[0] ? [workspaceLeads[0]] : [];
                       appendAssistantMessage({
                         content: latestLead.length
                           ? "Confirmed. Here is the latest lead from your inbox."
                           : "There are no leads in your recent inbox yet.",
-                        leadResults: latestLead
+                        leadResults: latestLead,
+                        sourceMessage: message.sourceMessage
                       });
                     }}
                   />
@@ -6832,9 +7223,11 @@ export function AgentWorkspace({
                 {message.leadStatusUpdate ? (
                   <LeadStatusConfirmCard
                     preview={message.leadStatusUpdate}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onUpdated={() => {
                       appendAssistantMessage({
-                        content: "Done. I updated the lead status. You can review all lead activity from the Leads page."
+                        content: "Done. I updated the lead status. You can review all lead activity from the Leads page.",
+                        sourceMessage: message.sourceMessage
                       });
                     }}
                   />
@@ -6842,9 +7235,11 @@ export function AgentWorkspace({
                 {message.leadDetailsUpdate ? (
                   <LeadDetailsConfirmCard
                     preview={message.leadDetailsUpdate}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onUpdated={() => {
                       appendAssistantMessage({
-                        content: "Done. I updated the lead details. You can review the latest contact record from the Leads page."
+                        content: "Done. I updated the lead details. You can review the latest contact record from the Leads page.",
+                        sourceMessage: message.sourceMessage
                       });
                     }}
                   />
@@ -6852,12 +7247,14 @@ export function AgentWorkspace({
                 {message.leadCreate ? (
                   <LeadCreateConfirmCard
                     preview={message.leadCreate}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onSaved={(lead, savedFollowUp) => {
                       mergeUpdatedLead(lead);
                       appendAssistantMessage({
                         content: savedFollowUp
                           ? "Done. I created the lead and saved the WhatsApp chat summary as its first follow-up record."
-                          : "Done. I saved the lead. You can review it from the Leads page."
+                          : "Done. I saved the lead. You can review it from the Leads page.",
+                        sourceMessage: message.sourceMessage
                       });
                     }}
                   />
@@ -6865,9 +7262,11 @@ export function AgentWorkspace({
                 {message.leadBatchStatusUpdate ? (
                   <LeadBatchStatusConfirmCard
                     preview={message.leadBatchStatusUpdate}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onUpdated={() => {
                       appendAssistantMessage({
-                        content: "Done. I updated the selected leads. You can review them from the Leads page."
+                        content: "Done. I updated the selected leads. You can review them from the Leads page.",
+                        sourceMessage: message.sourceMessage
                       });
                     }}
                   />
@@ -6875,9 +7274,11 @@ export function AgentWorkspace({
                 {message.leadListingUpdate ? (
                   <LeadListingConfirmCard
                     preview={message.leadListingUpdate}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onUpdated={() => {
                       appendAssistantMessage({
-                        content: "Done. I updated the lead's primary listing. You can review the latest record from the Leads page."
+                        content: "Done. I updated the lead's primary listing. You can review the latest record from the Leads page.",
+                        sourceMessage: message.sourceMessage
                       });
                     }}
                   />
@@ -6885,9 +7286,11 @@ export function AgentWorkspace({
                 {message.listingUpdate ? (
                   <ListingUpdateConfirmCard
                     preview={message.listingUpdate}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onUpdated={() => {
                       appendAssistantMessage({
-                        content: "Done. I updated the listing. You can open Listings from the sidebar to review it."
+                        content: "Done. I updated the listing. You can open Listings from the sidebar to review it.",
+                        sourceMessage: message.sourceMessage
                       });
                     }}
                   />
@@ -6895,6 +7298,7 @@ export function AgentWorkspace({
                 {message.listingUpdateChoices ? (
                   <ListingUpdateSelectionCard
                     preview={message.listingUpdateChoices}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onSelect={(listing) => {
                       setActiveListingId(listing.id);
                       appendAssistantMessage({
@@ -6902,7 +7306,8 @@ export function AgentWorkspace({
                         listingUpdate: {
                           listing,
                           changes: message.listingUpdateChoices?.changes ?? {}
-                        }
+                        },
+                        sourceMessage: message.sourceMessage
                       });
                     }}
                   />
@@ -6910,6 +7315,7 @@ export function AgentWorkspace({
                 {message.entitySelection ? (
                   <EntitySelectionCard
                     preview={message.entitySelection}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onSelect={(candidate) => {
                       void continueAfterEntitySelection(message.entitySelection as EntitySelectionPreview, candidate);
                     }}
@@ -6918,17 +7324,19 @@ export function AgentWorkspace({
                         ? () => {
                             appendAssistantMessage({
                               content: message.entitySelection?.actionResponse ?? "Please confirm this schedule item.",
-                              scheduleEvent: message.entitySelection?.payload as BrokerEventDraftInput
+                              scheduleEvent: message.entitySelection?.payload as BrokerEventDraftInput,
+                              sourceMessage: message.sourceMessage
                             });
                           }
                         : undefined
                     }
                   />
                 ) : null}
-                {message.leadReply ? <LeadReplyCard draft={message.leadReply} /> : null}
+                {message.leadReply ? <LeadReplyCard draft={message.leadReply} sourceMessage={message.uiLanguage ?? message.sourceMessage} /> : null}
                 {message.chatImport ? (
                   <ChatFollowupSummaryCard
                     preview={message.chatImport}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     contextLeads={
                       [
                         ...(message.contextAttachments
@@ -6986,11 +7394,12 @@ export function AgentWorkspace({
                   />
                 ) : null}
                 {message.chatReplyAction ? (
-                  <ChatReplyActionCard preview={message.chatReplyAction} />
+                  <ChatReplyActionCard preview={message.chatReplyAction} sourceMessage={message.uiLanguage ?? message.sourceMessage} />
                 ) : null}
                 {message.chatFollowupManage ? (
                   <ChatFollowupManageCard
                     preview={message.chatFollowupManage}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onSaved={(content, updatedLead) => {
                       mergeUpdatedLead(updatedLead);
                       appendAssistantMessage({ content });
@@ -7011,6 +7420,7 @@ export function AgentWorkspace({
                 {message.chatLeadChoice ? (
                   <ChatLeadChoiceCard
                     preview={message.chatLeadChoice}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onChooseLead={(lead) => {
                       const summary = (message.chatLeadChoice as ChatLeadChoicePreview).summary;
                       const suggestedAction = recommendChatFollowupAction(summary, lead);
@@ -7033,6 +7443,7 @@ export function AgentWorkspace({
                 {message.chatFollowupNote ? (
                   <ChatFollowupNoteCard
                     preview={message.chatFollowupNote}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onSaved={(content) => {
                       appendAssistantMessage({ content });
                     }}
@@ -7041,6 +7452,7 @@ export function AgentWorkspace({
                 {message.chatReminder ? (
                   <ChatReminderCard
                     preview={message.chatReminder}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onSaved={(content) => {
                       appendAssistantMessage({ content });
                     }}
@@ -7049,16 +7461,18 @@ export function AgentWorkspace({
                 {message.chatStatus ? (
                   <ChatStatusCard
                     preview={message.chatStatus}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onSaved={(content) => {
                       appendAssistantMessage({ content });
                     }}
                   />
                 ) : null}
-                {message.promotion ? <PromotionPack promotion={message.promotion} /> : null}
+                {message.promotion ? <PromotionPack promotion={message.promotion} sourceMessage={message.uiLanguage ?? message.sourceMessage} /> : null}
                 {message.promotionTarget ? (
                   <PromotionConfirmCard
                     initialChannels={message.promotionChannels}
                     listing={message.promotionTarget}
+                    sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onGenerate={(channels) =>
                       generatePromotionForListing(
                         message.promotionTarget as RecentListingSummary,

@@ -14,9 +14,17 @@ const getMessagesSchema = z.object({
 const appendMessageSchema = z.object({
   conversationId: z.string().uuid().optional(),
   role: z.enum(["user", "assistant"]),
-  content: z.string().min(1),
+  content: z.string(),
   message_type: z.string().min(1).optional(),
   structured_payload: z.record(z.unknown()).optional()
+}).superRefine((value, context) => {
+  if (!value.content.trim() && !value.structured_payload) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Content or structured payload is required",
+      path: ["content"]
+    });
+  }
 });
 
 export async function GET(request: Request) {

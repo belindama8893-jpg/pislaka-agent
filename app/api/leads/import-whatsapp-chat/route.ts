@@ -10,11 +10,13 @@ import {
   readZipTextFile,
   type ZipTextCandidate
 } from "@/lib/leads/whatsapp-zip";
+import type { AgentResponseLanguage } from "@/lib/agent/response-language";
 
 const jsonImportSchema = z.object({
   source_type: z.enum(["whatsapp_paste", "whatsapp_txt_upload", "whatsapp_zip_upload"]).default("whatsapp_paste"),
   text: z.string().min(1).max(2_000_000),
   lead_id: z.string().uuid().optional(),
+  broker_display_language: z.enum(["english", "urdu", "roman_urdu", "chinese"]).optional(),
   save_original_chat_text: z.boolean().default(false)
 });
 
@@ -23,15 +25,21 @@ type ParsedChatImport =
       source_type: "whatsapp_paste" | "whatsapp_txt_upload" | "whatsapp_zip_upload";
       text: string;
       lead_id?: string;
+      broker_display_language?: AgentResponseLanguage;
       save_original_chat_text: boolean;
     }
   | {
       needs_txt_selection: true;
       source_type: "whatsapp_zip_upload";
       lead_id?: string;
+      broker_display_language?: AgentResponseLanguage;
       save_original_chat_text: boolean;
       txt_candidates: ZipTextCandidate[];
     };
+
+function parseDisplayLanguage(value: FormDataEntryValue | null): AgentResponseLanguage | undefined {
+  return value === "english" || value === "urdu" || value === "roman_urdu" || value === "chinese" ? value : undefined;
+}
 
 function normalizeText(value: string | null | undefined) {
   return (value ?? "")
@@ -122,6 +130,7 @@ async function parseRequest(request: Request): Promise<ParsedChatImport> {
     const formData = await request.formData();
     const sourceType = String(formData.get("source_type") ?? "whatsapp_txt_upload");
     const leadId = formData.get("lead_id");
+    const brokerDisplayLanguage = parseDisplayLanguage(formData.get("broker_display_language"));
     const selectedTxtName = formData.get("selected_txt_name");
     const saveOriginal = formData.get("save_original_chat_text") === "true";
     const pastedText = formData.get("text");
@@ -132,6 +141,7 @@ async function parseRequest(request: Request): Promise<ParsedChatImport> {
         source_type: "whatsapp_paste" as const,
         text: pastedText,
         lead_id: typeof leadId === "string" && leadId ? leadId : undefined,
+        broker_display_language: brokerDisplayLanguage,
         save_original_chat_text: saveOriginal
       };
     }
@@ -149,6 +159,7 @@ async function parseRequest(request: Request): Promise<ParsedChatImport> {
           needs_txt_selection: true,
           source_type: "whatsapp_zip_upload",
           lead_id: typeof leadId === "string" && leadId ? leadId : undefined,
+          broker_display_language: brokerDisplayLanguage,
           save_original_chat_text: saveOriginal,
           txt_candidates: zipResult.txt_candidates
         };
@@ -158,6 +169,7 @@ async function parseRequest(request: Request): Promise<ParsedChatImport> {
         source_type: "whatsapp_zip_upload" as const,
         text: zipResult.text,
         lead_id: typeof leadId === "string" && leadId ? leadId : undefined,
+        broker_display_language: brokerDisplayLanguage,
         save_original_chat_text: saveOriginal
       };
     }
@@ -170,6 +182,7 @@ async function parseRequest(request: Request): Promise<ParsedChatImport> {
       source_type: "whatsapp_txt_upload" as const,
       text: await readTxtFile(file),
       lead_id: typeof leadId === "string" && leadId ? leadId : undefined,
+      broker_display_language: brokerDisplayLanguage,
       save_original_chat_text: saveOriginal
     };
   }
@@ -253,7 +266,8 @@ export async function POST(request: Request) {
       : null;
     const summary = await generateChatFollowUpSummary({
       text: cleanedText,
-      lead: selectedLeadListItem
+      lead: selectedLeadListItem,
+      displayLanguage: parsed.broker_display_language
     });
     const resolution = selectedLeadListItem
       ? {

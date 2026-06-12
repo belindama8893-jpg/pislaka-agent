@@ -31,6 +31,7 @@ import {
   toBrokerDatetimeLocal
 } from "@/lib/events/time";
 import { getListingImportUrl, importListingDraftFromUrl } from "@/lib/listings/import-from-url";
+import { formatScheduleQueryResponse, localizeAgentActionResponse } from "@/lib/agent/response-language";
 
 const deepseekRequestTimeoutMs = 8000;
 
@@ -49,7 +50,7 @@ Your job:
 - If the user says today/tomorrow/next week, interpret it from the current date and timezone provided by the user message context.
 - Convert prices into numeric PKR. Examples: 8.5 crore = 85000000, 2 lakh = 200000.
 - Normalize area units to kanal, marla, sqft, or sqm.
-- Use short practical English in response text.
+- Use the same language/script as the broker's latest message in response text. If the broker uses Urdu script, reply in Urdu script. If the broker uses Roman Urdu, reply in Roman Urdu. If the broker uses English, reply in English.
 - If a required listing detail is missing, still return a draft with known fields and mention what is missing in response.
 
 Supported intents:
@@ -604,11 +605,11 @@ function parseLocalScheduleEvent(message: string, timeZone?: string | null): Age
 }
 
 function parseLocalScheduleQuery(message: string): AgentAction {
-  const dateFilter = /tomorrow|明天/i.test(message)
+  const dateFilter = /tomorrow|\bkal\b|明天|کل/iu.test(message)
     ? "tomorrow"
-    : /week|本周|下周/i.test(message)
+    : /week|hafta|haftay|本周|下周|ہفت/u.test(message)
       ? "week"
-      : /all|全部|所有/i.test(message)
+      : /all|全部|所有|تمام/u.test(message)
         ? "all"
         : "today";
   const eventType = /viewing|visit|showing|看房/i.test(message)
@@ -624,7 +625,7 @@ function parseLocalScheduleQuery(message: string): AgentAction {
   return {
     intent: "list_schedule_events",
     requires_confirmation: false,
-    response: "Here are your schedule items.",
+    response: formatScheduleQueryResponse({ date_filter: dateFilter }, message),
     payload: {
       date_filter: dateFilter,
       status: "scheduled",
@@ -1009,11 +1010,15 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
     localIntent === "listing_update" ||
     localIntent === "lead_details_update"
   ) {
-    return stripInternalLocationContextFromAction(parseLocalAgentAction(routingMessage, context));
+    return stripInternalLocationContextFromAction(
+      localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
+    );
   }
 
   if (!env.deepseekApiKey) {
-    return stripInternalLocationContextFromAction(parseLocalAgentAction(routingMessage, context));
+    return stripInternalLocationContextFromAction(
+      localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
+    );
   }
 
   const apiKey = requireServerEnv("deepseekApiKey");
@@ -1051,30 +1056,40 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
     clearTimeout(timeout);
 
     if (!response.ok) {
-      return stripInternalLocationContextFromAction(parseLocalAgentAction(routingMessage, context));
+      return stripInternalLocationContextFromAction(
+        localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
+      );
     }
 
     const json = await response.json();
     const content = json?.choices?.[0]?.message?.content;
 
     if (typeof content !== "string") {
-      return stripInternalLocationContextFromAction(parseLocalAgentAction(routingMessage, context));
+      return stripInternalLocationContextFromAction(
+        localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
+      );
     }
 
     const action = agentActionSchema.parse(JSON.parse(extractJsonObject(content)));
     const normalizedAction = normalizeAgentAction(action, routingMessage, context);
 
     if (normalizedAction.intent === "general_reply" && localIntent !== "general_reply") {
-      return stripInternalLocationContextFromAction(parseLocalAgentAction(routingMessage, context));
+      return stripInternalLocationContextFromAction(
+        localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
+      );
     }
 
     if (localIntent === "promotion" && normalizedAction.intent !== "create_campaign_links") {
-      return stripInternalLocationContextFromAction(parseLocalAgentAction(routingMessage, context));
+      return stripInternalLocationContextFromAction(
+        localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
+      );
     }
 
-    return stripInternalLocationContextFromAction(normalizedAction);
+    return stripInternalLocationContextFromAction(localizeAgentActionResponse(normalizedAction, message));
   } catch {
-    return stripInternalLocationContextFromAction(parseLocalAgentAction(routingMessage, context));
+    return stripInternalLocationContextFromAction(
+      localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
+    );
   } finally {
     clearTimeout(timeout);
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { BellRing, CalendarClock, X } from "lucide-react";
+import { BellRing, CalendarClock, CheckCircle2, Clock3, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { BrokerEventRecord } from "@/lib/events/types";
@@ -18,6 +18,10 @@ function getReminderTime(event: BrokerEventRecord) {
 
 function getEventContext(event: BrokerEventRecord) {
   return [event.lead_name, event.listing_reference, event.location_text].filter(Boolean).join(" · ");
+}
+
+function getSnoozeReminderAt(minutes: number) {
+  return new Date(Date.now() + minutes * 60 * 1000).toISOString();
 }
 
 export function ScheduleReminderToasts() {
@@ -80,6 +84,39 @@ export function ScheduleReminderToasts() {
     }).catch(() => null);
   }
 
+  async function completeReminder(eventId: string) {
+    setReminders((current) => current.filter((event) => event.id !== eventId));
+    const completedAt = new Date().toISOString();
+    await fetch("/api/events", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        id: eventId,
+        status: "completed",
+        in_app_reminder_dismissed_at: completedAt
+      })
+    }).catch(() => null);
+  }
+
+  async function snoozeReminder(eventId: string, minutes = 30) {
+    setReminders((current) => current.filter((event) => event.id !== eventId));
+    await fetch("/api/events", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        id: eventId,
+        status: "scheduled",
+        reminder_at: getSnoozeReminderAt(minutes),
+        in_app_reminded_at: null,
+        in_app_reminder_dismissed_at: null
+      })
+    }).catch(() => null);
+  }
+
   if (!visibleReminders.length) {
     return null;
   }
@@ -99,10 +136,16 @@ export function ScheduleReminderToasts() {
               <time dateTime={getReminderTime(event)}>{formatBrokerDateTime(getReminderTime(event), timeZone)}</time>
               {context ? <p>{context}</p> : null}
               <div className="schedule-reminder-actions">
-                <Link href="/schedule">
-                  <CalendarClock size={14} /> Open schedule
+                <button className="primary" type="button" onClick={() => void completeReminder(event.id)}>
+                  <CheckCircle2 size={14} /> Done
+                </button>
+                <button type="button" onClick={() => void snoozeReminder(event.id)}>
+                  <Clock3 size={14} /> Snooze 30m
+                </button>
+                <Link className="secondary" href={`/schedule?event=${event.id}`}>
+                  <CalendarClock size={14} /> Open
                 </Link>
-                <button type="button" onClick={() => void dismissReminder(event.id)}>
+                <button className="ghost" type="button" onClick={() => void dismissReminder(event.id)}>
                   Dismiss
                 </button>
               </div>

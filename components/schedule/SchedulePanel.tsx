@@ -36,6 +36,7 @@ type SchedulePanelProps = {
   leads?: LeadListItem[];
   listings?: ListingRecord[];
   className?: string;
+  initialEventId?: string | null;
   migrationRequired?: boolean;
 };
 
@@ -233,6 +234,7 @@ function getListingMatchForEvent(
 export function SchedulePanel({
   className = "",
   events,
+  initialEventId = null,
   leads = [],
   listings = [],
   migrationRequired = false
@@ -259,6 +261,23 @@ export function SchedulePanel({
   useEffect(() => {
     setUserTimeZone(getResolvedTimeZone());
   }, []);
+
+  useEffect(() => {
+    if (!initialEventId || !localEvents.some((event) => event.id === initialEventId)) {
+      return;
+    }
+
+    setRangeFilter("all");
+    setStatusFilter("all");
+    setSearchQuery("");
+
+    window.setTimeout(() => {
+      document.querySelector(`[data-schedule-event-id="${initialEventId}"]`)?.scrollIntoView({
+        block: "center",
+        behavior: "smooth"
+      });
+    }, 120);
+  }, [initialEventId, localEvents]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -567,7 +586,11 @@ export function SchedulePanel({
                 </div>
               </form>
             ) : (
-              <article className={`schedule-row ${scheduleEvent.status}`} key={scheduleEvent.id}>
+              <article
+                className={`schedule-row ${scheduleEvent.status}${scheduleEvent.id === initialEventId ? " highlighted" : ""}`}
+                data-schedule-event-id={scheduleEvent.id}
+                key={scheduleEvent.id}
+              >
                 {(() => {
                   const linkedLead = scheduleEvent.lead_id ? leadById.get(scheduleEvent.lead_id) : undefined;
                   const linkedListing = getListingMatchForEvent(scheduleEvent, listings, listingById);

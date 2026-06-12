@@ -1,8 +1,10 @@
 import { env, requireServerEnv } from "@/lib/env";
+import { detectAgentResponseLanguage, type AgentResponseLanguage } from "@/lib/agent/response-language";
 import { leadReplyDraftSchema, type LeadReplyDraft } from "@/lib/leads/reply-types";
 import type { LeadListItem } from "@/lib/leads/types";
 
 export type ChatFollowUpSummary = {
+  detected_chat_language: AgentResponseLanguage;
   detected_customer_name: string | null;
   detected_phone: string | null;
   chat_summary: string;
@@ -25,6 +27,7 @@ export type ChatFollowUpSummary = {
 type ChatImportContext = {
   text: string;
   lead?: LeadListItem | null;
+  displayLanguage?: AgentResponseLanguage | null;
 };
 
 const chatImportSystemPrompt = `
@@ -37,6 +40,7 @@ Generate a preview only. Do not claim anything was saved, sent, or updated.
 Output shape:
 {
   "detected_customer_name": "Ahmed or null",
+  "detected_chat_language": "english | urdu | roman_urdu | chinese",
   "detected_phone": "+923001234567 or null",
   "chat_summary": "Short factual follow-up summary",
   "customer_needs": ["needs DHA Phase 5 villa"],
@@ -57,6 +61,10 @@ Output shape:
 
 Rules:
 - Keep summaries concise and factual.
+- Detect the dominant customer chat language and set detected_chat_language.
+- Write chat_summary, customer_needs, viewing_intent, main_objections, and next_action_suggestion in broker_display_language from the user prompt.
+- Write reply_draft.reply_text, reply_draft.tone, and reply_draft.next_step in the detected customer chat language, because it is sent to the customer.
+- If the customer chat uses Urdu script, reply_draft fields must use Urdu script, not English.
 - Do not invent property facts, availability, discounts, or guarantees.
 - If buyer wants a visit, suggest qualified + high urgency.
 - If buyer says no/not interested, suggest lost.
@@ -135,8 +143,32 @@ function parsePriceText(text: string) {
   return { min: null, max: null, text: null };
 }
 
-function fallbackReply(summary: string, lead?: LeadListItem | null): LeadReplyDraft {
+function fallbackReply(summary: string, language: AgentResponseLanguage, lead?: LeadListItem | null): LeadReplyDraft {
   const name = lead?.full_name?.trim() || "there";
+
+  if (language === "urdu") {
+    return {
+      reply_text: `Hi ${name}، update کا شکریہ۔ ${summary} کیا آپ چاہیں گے کہ میں next step confirm کر دوں؟`,
+      tone: "دوستانہ اور professional",
+      next_step: "Buyer interest اور next action confirm کریں۔"
+    };
+  }
+
+  if (language === "roman_urdu") {
+    return {
+      reply_text: `Hi ${name}, update ka shukriya. ${summary} Kya aap chahenge ke main next step confirm kar dun?`,
+      tone: "friendly and professional",
+      next_step: "Buyer interest aur next action confirm karein."
+    };
+  }
+
+  if (language === "chinese") {
+    return {
+      reply_text: `${name}，谢谢你的更新。${summary} 需要我帮你确认下一步吗？`,
+      tone: "友好且专业",
+      next_step: "确认买家兴趣和下一步行动。"
+    };
+  }
 
   return {
     reply_text: `Hi ${name}, thanks for the update. ${summary} Would you like me to confirm the next step for you?`,
@@ -147,6 +179,8 @@ function fallbackReply(summary: string, lead?: LeadListItem | null): LeadReplyDr
 
 function fallbackSummary(context: ChatImportContext): ChatFollowUpSummary {
   const text = normalizeWhatsAppChatText(context.text);
+  const language = detectAgentResponseLanguage(text);
+  const displayLanguage = context.displayLanguage ?? language;
   const area = extractArea(text);
   const budget = parsePriceText(text);
   const hasViewingIntent = /visit|viewing|see|come|tomorrow|today|after\s+\d|看房|参观/i.test(text);
@@ -161,27 +195,67 @@ function fallbackSummary(context: ChatImportContext): ChatFollowUpSummary {
     hasViewingIntent ? "and asked about a possible visit" : null
   ].filter(Boolean);
   const chatSummary = `${summaryParts.join(" ")}.`;
+  const localizedChatSummary =
+    displayLanguage === "urdu"
+      ? `${detectedName ? `${detectedName} نے property discuss کی` : "Customer نے property discuss کی"}${area ? ` in ${area}` : ""}${budget.text ? ` around ${budget.text}` : ""}${hasViewingIntent ? " اور possible visit کے بارے میں پوچھا" : ""}.`
+      : displayLanguage === "roman_urdu"
+        ? `${detectedName ? `${detectedName} ne property discuss ki` : "Customer ne property discuss ki"}${area ? ` in ${area}` : ""}${budget.text ? ` around ${budget.text}` : ""}${hasViewingIntent ? " aur possible visit ke bare mein poocha" : ""}.`
+        : displayLanguage === "chinese"
+          ? `${detectedName ? `${detectedName} 讨论了房源` : "客户讨论了房源"}${area ? `，区域是 ${area}` : ""}${budget.text ? `，预算约 ${budget.text}` : ""}${hasViewingIntent ? "，并询问了看房" : ""}。`
+          : chatSummary;
+  const customerLanguageSummary =
+    language === "urdu"
+      ? `${detectedName ? `${detectedName} نے property discuss کی` : "Customer نے property discuss کی"}${area ? ` in ${area}` : ""}${budget.text ? ` around ${budget.text}` : ""}${hasViewingIntent ? " اور possible visit کے بارے میں پوچھا" : ""}.`
+      : language === "roman_urdu"
+        ? `${detectedName ? `${detectedName} ne property discuss ki` : "Customer ne property discuss ki"}${area ? ` in ${area}` : ""}${budget.text ? ` around ${budget.text}` : ""}${hasViewingIntent ? " aur possible visit ke bare mein poocha" : ""}.`
+        : language === "chinese"
+          ? `${detectedName ? `${detectedName} 讨论了房源` : "客户讨论了房源"}${area ? `，区域是 ${area}` : ""}${budget.text ? `，预算约 ${budget.text}` : ""}${hasViewingIntent ? "，并询问了看房" : ""}。`
+          : chatSummary;
   const statusSuggestion = notInterested ? "lost" : interested ? "qualified" : "contacted";
 
   return {
+    detected_chat_language: language,
     detected_customer_name: detectedName,
     detected_phone: detectedPhone,
-    chat_summary: chatSummary,
+    chat_summary: localizedChatSummary,
     customer_needs: [area ? `Interested in ${area}` : "Needs follow-up based on WhatsApp chat"].filter(Boolean),
     interested_area: area,
     interested_listing_text: area ? `${area} property` : null,
     budget,
-    viewing_intent: hasViewingIntent ? "Customer mentioned a possible visit or timing." : null,
+    viewing_intent: hasViewingIntent
+      ? displayLanguage === "urdu"
+        ? "Customer نے possible visit یا timing mention کی۔"
+        : displayLanguage === "roman_urdu"
+          ? "Customer ne possible visit ya timing mention ki."
+          : displayLanguage === "chinese"
+            ? "客户提到了可能的看房或时间。"
+            : "Customer mentioned a possible visit or timing."
+      : null,
     main_objections: /final price|discount|negotiat/i.test(text) ? ["Asked about final price"] : [],
     status_suggestion: statusSuggestion,
     urgency_suggestion: statusSuggestion === "qualified" ? "high" : "normal",
-    next_action_suggestion: hasViewingIntent ? "Confirm viewing availability." : "Send a short WhatsApp follow-up.",
-    reply_draft: fallbackReply(chatSummary, context.lead)
+    next_action_suggestion: hasViewingIntent
+      ? displayLanguage === "urdu"
+        ? "Viewing availability confirm کریں۔"
+        : displayLanguage === "roman_urdu"
+          ? "Viewing availability confirm karein."
+          : displayLanguage === "chinese"
+            ? "确认看房可预约时间。"
+            : "Confirm viewing availability."
+      : displayLanguage === "urdu"
+        ? "مختصر WhatsApp follow-up بھیجیں۔"
+        : displayLanguage === "roman_urdu"
+          ? "Short WhatsApp follow-up bhejein."
+          : displayLanguage === "chinese"
+            ? "发送简短 WhatsApp 跟进。"
+            : "Send a short WhatsApp follow-up.",
+    reply_draft: fallbackReply(customerLanguageSummary, language, context.lead)
   };
 }
 
 function formatPromptContext(context: ChatImportContext) {
   return {
+    broker_display_language: context.displayLanguage ?? detectAgentResponseLanguage(context.text),
     lead: context.lead
       ? {
           full_name: context.lead.full_name,
@@ -223,7 +297,14 @@ function coerceSummary(value: unknown, fallback: ChatFollowUpSummary): ChatFollo
   const status = record.status_suggestion;
   const urgency = record.urgency_suggestion;
 
-  return {
+  const summary = {
+    detected_chat_language:
+      record.detected_chat_language === "english" ||
+      record.detected_chat_language === "urdu" ||
+      record.detected_chat_language === "roman_urdu" ||
+      record.detected_chat_language === "chinese"
+        ? record.detected_chat_language
+        : fallback.detected_chat_language,
     detected_customer_name:
       typeof record.detected_customer_name === "string" ? record.detected_customer_name : fallback.detected_customer_name,
     detected_phone: typeof record.detected_phone === "string" ? record.detected_phone : fallback.detected_phone,
@@ -256,6 +337,53 @@ function coerceSummary(value: unknown, fallback: ChatFollowUpSummary): ChatFollo
         : fallback.next_action_suggestion,
     reply_draft: replyDraft.success ? replyDraft.data : fallback.reply_draft
   };
+
+  return enforceSummaryLanguage(summary, fallback);
+}
+
+function hasUrduScript(value: string | null | undefined) {
+  return /[\u0600-\u06ff]/u.test(value ?? "");
+}
+
+function hasChineseScript(value: string | null | undefined) {
+  return /[\u3400-\u9fff]/u.test(value ?? "");
+}
+
+function enforceSummaryLanguage(summary: ChatFollowUpSummary, fallback: ChatFollowUpSummary): ChatFollowUpSummary {
+  let nextSummary = summary;
+
+  if (
+    detectAgentResponseLanguage(fallback.chat_summary) === "english" &&
+    (hasChineseScript(summary.chat_summary) || hasUrduScript(summary.chat_summary))
+  ) {
+    nextSummary = {
+      ...nextSummary,
+      chat_summary: fallback.chat_summary,
+      customer_needs: fallback.customer_needs,
+      viewing_intent: fallback.viewing_intent,
+      main_objections: fallback.main_objections,
+      next_action_suggestion: fallback.next_action_suggestion
+    };
+  }
+
+  if (
+    fallback.detected_chat_language === "urdu" &&
+    !hasUrduScript(nextSummary.reply_draft.reply_text)
+  ) {
+    return {
+      ...nextSummary,
+      reply_draft: fallback.reply_draft,
+      detected_customer_name: nextSummary.detected_customer_name ?? fallback.detected_customer_name,
+      detected_phone: nextSummary.detected_phone ?? fallback.detected_phone,
+      interested_area: nextSummary.interested_area ?? fallback.interested_area,
+      interested_listing_text: nextSummary.interested_listing_text ?? fallback.interested_listing_text,
+      budget: nextSummary.budget,
+      status_suggestion: nextSummary.status_suggestion,
+      urgency_suggestion: nextSummary.urgency_suggestion
+    };
+  }
+
+  return nextSummary;
 }
 
 export async function generateChatFollowUpSummary(context: ChatImportContext): Promise<ChatFollowUpSummary> {

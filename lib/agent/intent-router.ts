@@ -29,15 +29,15 @@ export function isScheduleRequest(message: string) {
 
 export function isScheduleQueryRequest(message: string) {
   const hasReadVerb =
-    /\b(show|list|view|check|what|what's|whats|do i have|anything|agenda|calendar)\b|查看|显示|列出|有什么|安排|日程/u.test(
+    /\b(show|list|view|check|what|what's|whats|do i have|anything|agenda|calendar|kya|kia)\b|查看|显示|列出|有什么|安排|日程|کیا/u.test(
       message
     );
   const hasScheduleNoun =
-    /\b(schedule|calendar|appointment|appointments|viewings|reminders|agenda)\b|日程|安排|预约|看房|提醒/u.test(
+    /\b(schedule|calendar|appointment|appointments|viewings|reminders|agenda|plan|plans)\b|日程|安排|预约|看房|提醒|شیڈول|پلانز|پلان/u.test(
       message
     );
   const hasDateOnlyAgenda =
-    /\b(?:what(?:'s| is)?|what do i have|do i have anything).*\b(today|tomorrow|this week|next week)\b|\b(today|tomorrow|this week|next week)\b.*\b(anything|plan|plans|appointment|appointments|viewing|viewings|reminder|reminders)\b|今天.*安排|今天.*日程|明天.*安排|本周.*安排/u.test(
+    /\b(?:what(?:'s| is)?|what do i have|do i have anything|kya|kia).*\b(today|tomorrow|kal|aaj|this week|next week)\b|\b(today|tomorrow|kal|aaj|this week|next week)\b.*\b(anything|plan|plans|appointment|appointments|viewing|viewings|reminder|reminders)\b|今天.*安排|今天.*日程|明天.*安排|本周.*安排|کل.*(?:پلانز|پلان|شیڈول)|(?:پلانز|پلان|شیڈول).*کل/u.test(
       message
     );
   const hasCreateVerb =

@@ -195,7 +195,14 @@ async function getScheduleListingsForBroker(
   );
 }
 
-export default async function SchedulePage() {
+type SchedulePageProps = {
+  searchParams?: Promise<{
+    event?: string;
+  }>;
+};
+
+export default async function SchedulePage({ searchParams }: SchedulePageProps) {
+  const resolvedSearchParams = await searchParams;
   const { supabase, broker } = await getCurrentBrokerContext();
   const [leads, listingsCount, eventsResult] = await Promise.all([
     getRecentLeadsForBroker(supabase, broker.id, 30),
@@ -235,6 +242,7 @@ export default async function SchedulePage() {
       <SchedulePanel
         className="library-page-panel"
         events={events}
+        initialEventId={resolvedSearchParams?.event ?? null}
         leads={scheduleLeads}
         listings={scheduleListings}
         migrationRequired={eventsResult.migrationRequired}

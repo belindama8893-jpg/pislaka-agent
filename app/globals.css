@@ -4775,14 +4775,25 @@ a {
   cursor: pointer;
 }
 
-.schedule-reminder-actions a {
+.schedule-reminder-actions .primary {
   color: #fff;
   background: var(--primary);
 }
 
-.schedule-reminder-actions button {
+.schedule-reminder-actions button,
+.schedule-reminder-actions .secondary {
   color: var(--text);
   background: rgba(236, 241, 244, 0.92);
+}
+
+.schedule-reminder-actions .ghost {
+  color: var(--muted);
+  background: transparent;
+}
+
+.schedule-row.highlighted {
+  border-color: rgba(20, 199, 184, 0.55);
+  box-shadow: 0 0 0 3px rgba(20, 199, 184, 0.12);
 }
 
 .schedule-reminder-close {
