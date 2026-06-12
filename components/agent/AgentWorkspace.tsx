@@ -4631,29 +4631,29 @@ export function AgentWorkspace({
   const quickActions = [
     {
       icon: House,
-      label: "List a Property",
+      label: "List from Link",
       onClick: () =>
-        void submitMessage("Create a listing for 1 Kanal house in DHA Phase 6, price 8.5 crore.")
+        void submitMessage("I want to list from a property link. Ask me to paste the link, then prepare a listing draft for review.")
     },
     {
       icon: Megaphone,
-      label: "Promote Listing",
+      label: "Create Promo Post",
       onClick: () =>
-        void submitMessage("Promote my latest listing for WhatsApp, Facebook, Instagram, and portals.")
+        void submitMessage("I want to create a promo post for a listing. Ask me which listing and channel to use.")
     },
     {
-      icon: UserPlus,
-      label: "Add a Lead",
+      icon: MessageCircle,
+      label: "Import WhatsApp Leads",
       onClick: () =>
         void submitMessage(
-          "Record a new lead named Ahmed. He wants a 5 marla house in DHA Phase 5 with a budget around 1 crore."
+          "I want to import leads from a WhatsApp chat. Ask me to paste the chat, then identify names, phone numbers, budgets, areas, and follow-up actions."
         )
     },
     {
       icon: CalendarClock,
-      label: "Schedule Viewing",
+      label: "Today's Follow-ups",
       onClick: () =>
-        void submitMessage("Schedule a viewing with Ahmed tomorrow at 3pm for my DHA Phase 5 villa.")
+        void submitMessage("Show today's follow-ups.")
     }
   ];
   const attachActions = [
@@ -7790,7 +7790,7 @@ export function AgentWorkspace({
         placeholder={
           isWhatsAppImportMode
             ? "Paste WhatsApp chat or drop a .txt/.zip export..."
-            : "Ask Pislaka Agent to help..."
+            : "Paste a listing link, WhatsApp chat, or ask anything..."
         }
         sendDisabled={isSubmitting || isListening || isTranscribing}
         topSlot={

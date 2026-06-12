@@ -1,31 +1,31 @@
 "use client";
 
 import { type FormEvent, useState } from "react";
-import { BarChart3, CalendarClock, Home, List, Megaphone, UserPlus, Users } from "lucide-react";
+import { BarChart3, CalendarClock, Home, List, Megaphone, MessageCircle, Users } from "lucide-react";
 import Image from "next/image";
 import { AgentComposer } from "@/components/agent/AgentComposer";
 import { AuthForm } from "@/components/auth/AuthForm";
 
 const quickActions = [
   {
-    label: "List a Property",
+    label: "List from Link",
     icon: Home,
-    prompt: "List a property"
+    prompt: "I want to list from a property link."
   },
   {
-    label: "Promote Listing",
+    label: "Create Promo Post",
     icon: Megaphone,
-    prompt: "Promote a listing"
+    prompt: "I want to create a promo post for a listing."
   },
   {
-    label: "Add a Lead",
-    icon: UserPlus,
-    prompt: "Add a lead"
+    label: "Import WhatsApp Leads",
+    icon: MessageCircle,
+    prompt: "I want to import leads from a WhatsApp chat."
   },
   {
-    label: "Schedule Viewing",
+    label: "Today's Follow-ups",
     icon: CalendarClock,
-    prompt: "Schedule a viewing"
+    prompt: "Show today's follow-ups."
   }
 ];
 
@@ -114,7 +114,7 @@ export function AuthLanding() {
               onChange={setDraft}
               onSubmit={requireSignIn}
               onVoice={() => setShowAuth(true)}
-              placeholder="Ask Pislaka Agent to help..."
+              placeholder="Paste a listing link, WhatsApp chat, or ask anything..."
               value={draft}
             />
           ) : null}
