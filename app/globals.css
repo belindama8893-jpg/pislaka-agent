@@ -6850,11 +6850,11 @@ a {
   }
 
   .chat-panel.has-thread.has-guest-note .messages::before {
-    flex-basis: clamp(118px, 18vh, 150px);
+    flex-basis: clamp(96px, 14vh, 128px);
   }
 
   .agent-start {
-    padding: clamp(96px, 13vh, 140px) 10px 0;
+    padding: clamp(8px, 4vh, 40px) 10px 0;
   }
 
   .agent-start span {

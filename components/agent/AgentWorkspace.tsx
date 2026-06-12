@@ -4991,7 +4991,10 @@ export function AgentWorkspace({
 
     const containerRect = container.getBoundingClientRect();
     const messageRect = messageElement.getBoundingClientRect();
-    const anchorOffset = containerRect.height * offsetRatio;
+    const guestNote = chatPanelRef.current?.querySelector<HTMLElement>(".guest-mode-note");
+    const guestNoteRect = guestNote?.getBoundingClientRect();
+    const guestSafeTop = guestNoteRect ? Math.max(0, guestNoteRect.bottom - containerRect.top + 28) : 0;
+    const anchorOffset = Math.max(containerRect.height * offsetRatio, guestSafeTop);
     const currentMessageTop = messageRect.top - containerRect.top;
     const nextScrollTop = container.scrollTop + currentMessageTop - anchorOffset;
 
@@ -5011,7 +5014,7 @@ export function AgentWorkspace({
 
   function positionTurnAnchor(messageId: string) {
     const isDesktop = window.matchMedia("(min-width: 900px)").matches;
-    scheduleMessagePosition(messageId, isDesktop ? 0.18 : 0.3);
+    scheduleMessagePosition(messageId, isDesktop ? 0.18 : 0.12);
   }
 
   function keepOutputVisible(messageId: string) {
@@ -5030,24 +5033,27 @@ export function AgentWorkspace({
     const readableBottom = composerRect
       ? Math.max(0, composerRect.top - containerRect.top - (isDesktop ? 28 : 20))
       : containerRect.height - (isDesktop ? 36 : 28);
-    const topReserve = isDesktop ? containerRect.height * 0.28 : containerRect.height * 0.36;
-    const visibleTop = Math.max(24, topReserve);
+    const guestNote = chatPanelRef.current?.querySelector<HTMLElement>(".guest-mode-note");
+    const guestNoteRect = guestNote?.getBoundingClientRect();
+    const guestSafeTop = guestNoteRect ? Math.max(24, guestNoteRect.bottom - containerRect.top + 28) : 24;
+    const topReserve = isDesktop ? containerRect.height * 0.28 : containerRect.height * 0.16;
+    const visibleTop = Math.max(guestSafeTop, topReserve);
     const visibleBottom = Math.max(visibleTop + 80, readableBottom);
     const messageTop = messageRect.top - containerRect.top;
     const messageBottom = messageRect.bottom - containerRect.top;
 
     if (!positionedOutputIdsRef.current.has(messageId)) {
       positionedOutputIdsRef.current.add(messageId);
-      const isComfortablyVisible = messageTop >= 24 && messageTop <= visibleBottom;
+      const isComfortablyVisible = messageTop >= visibleTop && messageTop <= visibleBottom;
       if (!isComfortablyVisible) {
-        scheduleMessagePosition(messageId, isDesktop ? 0.34 : 0.42);
+        scheduleMessagePosition(messageId, isDesktop ? 0.34 : 0.16);
       }
       return;
     }
 
-    if (messageTop < 24) {
+    if (messageTop < visibleTop) {
       container.scrollTo({
-        top: Math.max(0, container.scrollTop + messageTop - 24),
+        top: Math.max(0, container.scrollTop + messageTop - visibleTop),
         behavior: "smooth"
       });
       return;
