@@ -6931,7 +6931,7 @@ a {
     display: grid;
     align-content: start;
     flex: 1;
-    padding: clamp(88px, 15svh, 128px) 10px calc(260px + env(safe-area-inset-bottom));
+    padding: clamp(12px, 4svh, 48px) 10px calc(260px + env(safe-area-inset-bottom));
   }
 
   .message {
@@ -7651,7 +7651,7 @@ a {
     display: grid;
     align-content: start;
     flex: 1;
-    padding: clamp(88px, 15svh, 128px) 8px calc(260px + env(safe-area-inset-bottom));
+    padding: clamp(12px, 4svh, 48px) 8px calc(260px + env(safe-area-inset-bottom));
     overflow: visible;
   }
 
