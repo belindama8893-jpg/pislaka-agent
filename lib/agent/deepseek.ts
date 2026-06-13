@@ -1,4 +1,5 @@
 import { env, requireServerEnv } from "@/lib/env";
+import { requiresConfirmationForAgentAction } from "@/lib/agent/confirmation-policy";
 import {
   agentActionSchema,
   leadCreatePayloadSchema,
@@ -855,9 +856,10 @@ function normalizeAgentAction(action: AgentAction, message: string, context?: Ag
 
     return {
       ...action,
-      requires_confirmation:
-        action.intent === "update_lead_status" ||
-        (action.intent === "record_lead_followup" && parsedPayload.data.activity_type === "status_changed"),
+      requires_confirmation: requiresConfirmationForAgentAction({
+        intent: action.intent,
+        payload: parsedPayload.data
+      }),
       payload: parsedPayload.data
     };
   }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireCurrentBroker } from "@/lib/auth/current-user";
+import { getLeadPatchForFollowUpActivity } from "@/lib/leads/followup-effects";
 import { leadBaseSelect } from "@/lib/leads/queries";
 import type { FollowUpActivityRecord, LeadRecord } from "@/lib/leads/types";
 
@@ -30,45 +31,6 @@ const followUpActivitySchema = z.object({
   original_chat_saved: z.boolean().default(false),
   original_chat_text: z.string().max(24000).nullable().optional()
 });
-
-function getLeadPatch(
-  lead: LeadRecord,
-  payload: z.infer<typeof followUpActivitySchema>,
-  occurredAt: string
-) {
-  const patch: Record<string, unknown> = {
-    updated_at: occurredAt
-  };
-
-  if (payload.activity_type === "message_sent") {
-    patch.last_contacted_at = occurredAt;
-    patch.last_note = payload.summary ?? "Sent WhatsApp message.";
-
-    if (lead.status === "new") {
-      patch.status = "contacted";
-    }
-  }
-
-  if (payload.activity_type === "status_changed" && payload.new_status) {
-    patch.status = payload.new_status;
-    patch.last_note = payload.summary ?? `Lead status changed to ${payload.new_status}.`;
-
-    if (payload.urgency) {
-      patch.urgency = payload.urgency;
-    }
-  }
-
-  if (payload.activity_type === "reminder_created" && payload.next_follow_up_at) {
-    patch.next_follow_up_at = payload.next_follow_up_at;
-    patch.last_note = payload.summary ?? "Follow-up reminder created.";
-  }
-
-  if (payload.activity_type === "followup_summary_saved" || payload.activity_type === "note_added") {
-    patch.last_note = payload.summary ?? lead.last_note;
-  }
-
-  return patch;
-}
 
 export async function POST(request: Request) {
   const body = await request.json();
@@ -134,7 +96,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const leadPatch = getLeadPatch(leadRow, payload, occurredAt);
+    const leadPatch = getLeadPatchForFollowUpActivity(leadRow, payload, occurredAt);
     let updatedLead: LeadRecord = leadRow;
 
     if (Object.keys(leadPatch).length > 1) {

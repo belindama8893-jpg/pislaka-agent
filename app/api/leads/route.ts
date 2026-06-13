@@ -1,55 +1,12 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { insertAgentChatMessage } from "@/lib/agent/conversations";
 import { generateLeadSummary } from "@/lib/agent/lead-summaries";
 import { requireCurrentBroker } from "@/lib/auth/current-user";
+import { leadRequestSchema, leadUpdateSchema, manualLeadCreateSchema } from "@/lib/leads/lead-api-schemas";
 import { getLeadsByIdsForBroker, getRecentLeadsForBroker, leadBaseSelect } from "@/lib/leads/queries";
 import type { TodayFollowUpLead } from "@/lib/leads/types";
 import type { ListingRecord } from "@/lib/listings/types";
 import { createServiceClient } from "@/lib/supabase/server";
-
-const leadRequestSchema = z.object({
-  campaign_code: z.string().min(1),
-  full_name: z.string().min(1),
-  phone: z.string().min(3),
-  email: z.string().email().optional().or(z.literal("")),
-  message: z.string().max(1000).optional()
-});
-
-const manualLeadCreateSchema = z
-  .object({
-    listing_id: z.string().uuid().optional(),
-    full_name: z.string().min(1).optional(),
-    phone: z.string().min(3).optional(),
-    email: z.string().email().optional().or(z.literal("")),
-    message: z.string().max(1000).optional(),
-    status: z.enum(["new", "contacted", "qualified", "closed", "lost"]).default("new"),
-    urgency: z.enum(["low", "normal", "high"]).default("normal"),
-    source_channel: z.string().default("manual")
-  })
-  .refine((value) => Boolean(value.full_name || value.phone || value.email), {
-    message: "A lead needs at least a name, phone, or email"
-  });
-
-const leadUpdateSchema = z.object({
-  id: z.string().uuid(),
-  listing_id: z.string().uuid().nullable().optional(),
-  full_name: z.string().min(1).optional(),
-  phone: z.string().min(3).optional(),
-  email: z.string().email().nullable().optional(),
-  message: z.string().max(1000).nullable().optional(),
-  status: z.enum(["new", "contacted", "qualified", "closed", "lost"]).optional(),
-  urgency: z.enum(["low", "normal", "high"]).optional(),
-  last_contacted_at: z.string().datetime().nullable().optional(),
-  next_follow_up_at: z.string().datetime().nullable().optional(),
-  last_note: z.string().max(4000).nullable().optional(),
-  interested_listing_id: z.string().uuid().nullable().optional(),
-  interested_area: z.string().max(200).nullable().optional(),
-  budget_min: z.number().nullable().optional(),
-  budget_max: z.number().nullable().optional()
-}).refine((value) => Object.keys(value).some((key) => key !== "id"), {
-  message: "At least one lead field must be provided"
-});
 
 async function insertCampaignLeadAlert({
   brokerId,

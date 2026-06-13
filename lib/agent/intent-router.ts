@@ -29,7 +29,7 @@ export function isScheduleRequest(message: string) {
 
 export function isScheduleQueryRequest(message: string) {
   const hasReadVerb =
-    /\b(show|list|view|check|what|what's|whats|do i have|anything|agenda|calendar|kya|kia)\b|查看|显示|列出|有什么|安排|日程|کیا/u.test(
+    /\b(show|list|view|check|what|what's|whats|do i have|anything|agenda|calendar|kya|kia)\b|查看|显示|列出|有什么|安排|日程|کیا/iu.test(
       message
     );
   const hasScheduleNoun =
@@ -37,7 +37,7 @@ export function isScheduleQueryRequest(message: string) {
       message
     );
   const hasDateOnlyAgenda =
-    /\b(?:what(?:'s| is)?|what do i have|do i have anything|kya|kia).*\b(today|tomorrow|kal|aaj|this week|next week)\b|\b(today|tomorrow|kal|aaj|this week|next week)\b.*\b(anything|plan|plans|appointment|appointments|viewing|viewings|reminder|reminders)\b|今天.*安排|今天.*日程|明天.*安排|本周.*安排|کل.*(?:پلانز|پلان|شیڈول)|(?:پلانز|پلان|شیڈول).*کل/u.test(
+    /\b(?:what(?:'s| is)?|what do i have|do i have anything|kya|kia).*\b(today|tomorrow|kal|aaj|this week|next week)\b|\b(today|tomorrow|kal|aaj|this week|next week)\b.*\b(anything|plan|plans|appointment|appointments|viewing|viewings|reminder|reminders)\b|今天.*安排|今天.*日程|明天.*安排|本周.*安排|کل.*(?:پلانز|پلان|شیڈول)|(?:پلانز|پلان|شیڈول).*کل/iu.test(
       message
     );
   const hasCreateVerb =
@@ -60,10 +60,21 @@ export function isLeadQueryRequest(message: string) {
 
 export function isLeadCreateRequest(message: string) {
   const hasCreateVerb = /\b(add|create|record|save|new)\b|新增|添加|记录|保存|新建/iu.test(message);
-  return hasCreateVerb && isLeadQueryRequest(message);
+  const hasReadVerb = /\b(show|list|view|check|find|search|which|who|what|any)\b|查看|显示|列出|搜索|哪些|哪个/iu.test(
+    message
+  );
+  return hasCreateVerb && !hasReadVerb && isLeadQueryRequest(message);
 }
 
 export function isLeadStatusRequest(message: string) {
+  const hasReadVerb = /\b(show|list|view|check|find|search|which|who|what|any)\b|查看|显示|列出|搜索|哪些|哪个/iu.test(
+    message
+  );
+
+  if (hasReadVerb) {
+    return false;
+  }
+
   return (
     /mark|set|change|update|status|contacted|qualified|closed|lost|hot|cold|标记|改成|状态|已联系|成交|丢失|无效|高意向/i.test(
       message

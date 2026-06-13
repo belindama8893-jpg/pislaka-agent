@@ -1,16 +1,10 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { generateListingPromotion } from "@/lib/agent/promotions";
 import { requireCurrentBroker } from "@/lib/auth/current-user";
 import { env } from "@/lib/env";
 import type { ListingMediaRecord, ListingRecord } from "@/lib/listings/types";
-import { promotionChannelSchema, type PromotionCard } from "@/lib/promotions/types";
-
-const promoteListingRequestSchema = z.object({
-  listing_id: z.string().uuid(),
-  instruction: z.string().max(1000).optional(),
-  channels: z.array(promotionChannelSchema).min(1).max(4).optional()
-});
+import { promoteListingRequestSchema } from "@/lib/promotions/promotion-api-schemas";
+import type { PromotionCard } from "@/lib/promotions/types";
 
 type RawListingRecord = Omit<ListingRecord, "media"> & {
   listing_media?: ListingMediaRecord[] | null;
