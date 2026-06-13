@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { AgentComposer, type AgentComposerContextPreview } from "@/components/agent/AgentComposer";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
+import { AuthForm } from "@/components/auth/AuthForm";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { AgentChatMessageRecord } from "@/lib/agent/conversations";
@@ -4799,6 +4800,7 @@ export function AgentWorkspace({
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isFollowUpNudgeVisible, setIsFollowUpNudgeVisible] = useState(false);
   const [isFollowUpNudgeLoading, setIsFollowUpNudgeLoading] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [voiceLevels, setVoiceLevels] = useState(idleVoiceLevels);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -4891,7 +4893,7 @@ export function AgentWorkspace({
       onClick: () =>
         appendAssistantMessage({
           content:
-            "Send me a property link. I’ll extract the details, rewrite the listing, and prepare it for promotion."
+            "I can help you create a property listing in seconds. Send me a property link, photos, details — or just tell me what you want to list."
         })
     },
     {
@@ -4900,7 +4902,7 @@ export function AgentWorkspace({
       onClick: () =>
         appendAssistantMessage({
           content:
-            "Send me a listing link, photos, or property details. I’ll create a WhatsApp-ready promotion post."
+            "I can help you promote a property on WhatsApp or Facebook. Send me a listing link, photos, details — or just tell me what kind of buyers you want to attract."
         })
     },
     {
@@ -4909,7 +4911,7 @@ export function AgentWorkspace({
       onClick: () =>
         appendAssistantMessage({
           content:
-            "Paste a WhatsApp chat, customer list, or lead screenshot. I’ll turn it into clean leads with follow-up suggestions."
+            "I can turn chats or messy customer lists into organized leads. Paste a WhatsApp chat, upload a screenshot/list — or just tell me about your customers."
         })
     },
     {
@@ -4918,7 +4920,7 @@ export function AgentWorkspace({
       onClick: () =>
         appendAssistantMessage({
           content:
-            "Send me your recent chats or lead list. I’ll find who needs follow-up today and help you draft replies."
+            "I can help you decide who to follow up with today. Send recent chats, a lead list, screenshots — or just tell me who you’ve been talking to."
         })
     }
   ];
@@ -7547,10 +7549,11 @@ export function AgentWorkspace({
   }
 
   return (
-    <section
-      className={`chat-panel ${hasStarted ? "has-thread" : "is-empty"} ${activeTurnAnchorId || activeOutputId ? "has-active-turn" : ""}`}
-      ref={chatPanelRef}
-    >
+    <>
+      <section
+        className={`chat-panel ${hasStarted ? "has-thread" : "is-empty"} ${activeTurnAnchorId || activeOutputId ? "has-active-turn" : ""}`}
+        ref={chatPanelRef}
+      >
       <div className="messages" ref={messagesContainerRef}>
         {!hasStarted ? (
           <div className="agent-start">
@@ -7592,9 +7595,9 @@ export function AgentWorkspace({
               </p>
             ) : null}
             {message.authRequiredReason ? (
-              <Link className="message-auth-link" href="/auth/sign-in">
+              <button className="message-auth-link" type="button" onClick={() => setIsAuthModalOpen(true)}>
                 Sign in to continue
-              </Link>
+              </button>
             ) : null}
             {message.attachments?.length ? (
               <div className="message-media-preview" aria-label="Sent media">
@@ -8164,6 +8167,25 @@ export function AgentWorkspace({
           ) : undefined
         }
       />
-    </section>
+      </section>
+      {isAuthModalOpen ? (
+        <div className="auth-modal-backdrop" role="presentation" onClick={() => setIsAuthModalOpen(false)}>
+          <section
+            aria-label="Sign in to Pislaka Agent"
+            className="auth-modal"
+            role="dialog"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="auth-modal-heading">
+              <span>Sign in to continue</span>
+              <button type="button" onClick={() => setIsAuthModalOpen(false)}>
+                Close
+              </button>
+            </div>
+            <AuthForm />
+          </section>
+        </div>
+      ) : null}
+    </>
   );
 }
