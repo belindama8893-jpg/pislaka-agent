@@ -116,20 +116,20 @@ function isUnauthorizedResponse(response: Response) {
 function getAuthRequiredMessage(reason: AuthRequiredReason) {
   switch (reason) {
     case "read_workspace":
-      return "Sign in to view your saved workspace data.";
+      return "I need access to your saved workspace to check this. Sign in and I can continue from here.";
     case "save_listing":
-      return "Sign in to save this listing draft to your workspace. You can keep previewing it here as a guest.";
+      return "I can preview the listing draft here. To save it to your workspace, sign in and I can continue from this draft.";
     case "save_lead":
-      return "Sign in to save this lead to your workspace. Guest mode can preview the result, but it will not be stored.";
+      return "I can preview the lead details here. To save the lead and keep the chat history, sign in and I can continue from this point.";
     case "update_lead":
-      return "Sign in to update this lead record. Guest mode does not change saved customer data.";
+      return "Updating a saved lead needs your workspace account. Sign in and I can continue with this change.";
     case "save_followup":
-      return "Sign in to save this follow-up to your workspace. Guest chats and summaries are not stored.";
+      return "To save this follow-up and keep the chat history, sign in and I can continue from here.";
     case "save_schedule":
-      return "Sign in to save this schedule item to your workspace.";
+      return "To save this schedule item to your workspace, sign in and I can continue from here.";
     case "chat_history":
     default:
-      return "Guest mode is active. Sign in to save chat history and workspace data.";
+      return "Sign in to save this chat history and workspace data.";
   }
 }
 
@@ -140,6 +140,7 @@ type ChatMessage = {
   createdAt?: string;
   role: "user" | "assistant";
   content: string;
+  authRequiredReason?: AuthRequiredReason;
   sourceMessage?: string;
   uiLanguage?: AgentResponseLanguage;
   isProgress?: boolean;
@@ -4888,27 +4889,37 @@ export function AgentWorkspace({
       icon: House,
       label: "List from Link",
       onClick: () =>
-        void submitMessage("I want to list from a property link. Ask me to paste the link, then prepare a listing draft for review.")
+        appendAssistantMessage({
+          content:
+            "Send me a property link. I’ll extract the details, rewrite the listing, and prepare it for promotion."
+        })
     },
     {
       icon: Megaphone,
       label: "Create Promo Post",
       onClick: () =>
-        void submitMessage("I want to create a promo post for a listing. Ask me which listing and channel to use.")
+        appendAssistantMessage({
+          content:
+            "Send me a listing link, photos, or property details. I’ll create a WhatsApp-ready promotion post."
+        })
     },
     {
       icon: MessageCircle,
       label: "Import WhatsApp Leads",
       onClick: () =>
-        void submitMessage(
-          "I want to import leads from a WhatsApp chat. Ask me to paste the chat, then identify names, phone numbers, budgets, areas, and follow-up actions."
-        )
+        appendAssistantMessage({
+          content:
+            "Paste a WhatsApp chat, customer list, or lead screenshot. I’ll turn it into clean leads with follow-up suggestions."
+        })
     },
     {
       icon: CalendarClock,
       label: "Today's Follow-ups",
       onClick: () =>
-        isGuest ? handleAuthRequired("read_workspace") : void submitMessage("Show today's follow-ups.")
+        appendAssistantMessage({
+          content:
+            "Send me your recent chats or lead list. I’ll find who needs follow-up today and help you draft replies."
+        })
     }
   ];
   const attachActions = [
@@ -4991,10 +5002,7 @@ export function AgentWorkspace({
 
     const containerRect = container.getBoundingClientRect();
     const messageRect = messageElement.getBoundingClientRect();
-    const guestNote = chatPanelRef.current?.querySelector<HTMLElement>(".guest-mode-note");
-    const guestNoteRect = guestNote?.getBoundingClientRect();
-    const guestSafeTop = guestNoteRect ? Math.max(0, guestNoteRect.bottom - containerRect.top + 28) : 0;
-    const anchorOffset = Math.max(containerRect.height * offsetRatio, guestSafeTop);
+    const anchorOffset = containerRect.height * offsetRatio;
     const currentMessageTop = messageRect.top - containerRect.top;
     const nextScrollTop = container.scrollTop + currentMessageTop - anchorOffset;
 
@@ -5033,11 +5041,8 @@ export function AgentWorkspace({
     const readableBottom = composerRect
       ? Math.max(0, composerRect.top - containerRect.top - (isDesktop ? 28 : 20))
       : containerRect.height - (isDesktop ? 36 : 28);
-    const guestNote = chatPanelRef.current?.querySelector<HTMLElement>(".guest-mode-note");
-    const guestNoteRect = guestNote?.getBoundingClientRect();
-    const guestSafeTop = guestNoteRect ? Math.max(24, guestNoteRect.bottom - containerRect.top + 28) : 24;
     const topReserve = isDesktop ? containerRect.height * 0.28 : containerRect.height * 0.16;
-    const visibleTop = Math.max(guestSafeTop, topReserve);
+    const visibleTop = Math.max(24, topReserve);
     const visibleBottom = Math.max(visibleTop + 80, readableBottom);
     const messageTop = messageRect.top - containerRect.top;
     const messageBottom = messageRect.bottom - containerRect.top;
@@ -5539,6 +5544,7 @@ export function AgentWorkspace({
 
     lastAuthPromptRef.current = reason;
     appendAssistantMessage({
+      authRequiredReason: reason,
       content: getAuthRequiredMessage(reason)
     });
   }
@@ -7542,15 +7548,9 @@ export function AgentWorkspace({
 
   return (
     <section
-      className={`chat-panel ${hasStarted ? "has-thread" : "is-empty"} ${isGuest && hasStarted ? "has-guest-note" : ""} ${activeTurnAnchorId || activeOutputId ? "has-active-turn" : ""}`}
+      className={`chat-panel ${hasStarted ? "has-thread" : "is-empty"} ${activeTurnAnchorId || activeOutputId ? "has-active-turn" : ""}`}
       ref={chatPanelRef}
     >
-      {isGuest && hasStarted ? (
-        <p className="guest-mode-note">
-          Guest mode. Chat history is not saved.{" "}
-          <Link href="/auth/sign-in">Sign in</Link> to save your work.
-        </p>
-      ) : null}
       <div className="messages" ref={messagesContainerRef}>
         {!hasStarted ? (
           <div className="agent-start">
@@ -7590,6 +7590,11 @@ export function AgentWorkspace({
                   </span>
                 ) : null}
               </p>
+            ) : null}
+            {message.authRequiredReason ? (
+              <Link className="message-auth-link" href="/auth/sign-in">
+                Sign in to continue
+              </Link>
             ) : null}
             {message.attachments?.length ? (
               <div className="message-media-preview" aria-label="Sent media">

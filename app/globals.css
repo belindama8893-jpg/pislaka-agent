@@ -433,28 +433,41 @@ a {
 
 .account-signin-link {
   display: inline-flex;
-  gap: 7px;
   align-items: center;
   justify-content: center;
+  width: 58px;
+  height: 58px;
+  color: #ffffff;
+  background: var(--primary);
+  border: 0;
+  border-radius: 999px;
+  box-shadow: 0 18px 40px rgba(20, 184, 166, 0.18);
+  text-decoration: none;
+}
+
+.account-signin-link:hover {
+  color: #ffffff;
+  background: #0fb5a6;
+}
+
+.account-signin-link.sidebar {
+  gap: 7px;
+  width: 100%;
+  height: auto;
   min-height: 38px;
   padding: 0 14px;
   color: #0b4b45;
   background: rgba(255, 255, 255, 0.58);
   border: 1px solid rgba(20, 184, 166, 0.22);
-  border-radius: 999px;
+  border-radius: 8px;
+  box-shadow: none;
   font-size: 0.84rem;
   font-weight: 300;
-  text-decoration: none;
 }
 
-.account-signin-link:hover {
+.account-signin-link.sidebar:hover {
   color: #063b38;
   background: rgba(20, 184, 166, 0.08);
-}
-
-.account-signin-link.sidebar {
-  width: 100%;
-  border-radius: 8px;
 }
 
 .workspace-sidebar-account {
@@ -804,28 +817,6 @@ a {
   display: none;
 }
 
-.guest-mode-note {
-  position: absolute;
-  top: 14px;
-  left: 50%;
-  z-index: 4;
-  width: min(760px, calc(100% - 56px));
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 300;
-  line-height: 1.45;
-  text-align: center;
-  transform: translateX(-50%);
-}
-
-.guest-mode-note a {
-  color: #0b4b45;
-  font-weight: 420;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
 .agent-start {
   width: min(760px, 100%);
   margin: 0 auto;
@@ -917,10 +908,6 @@ a {
   flex: 0 0 clamp(72px, 22vh, 220px);
 }
 
-.chat-panel.has-thread.has-guest-note .messages::before {
-  flex-basis: clamp(118px, 24vh, 230px);
-}
-
 .messages::-webkit-scrollbar {
   width: 6px;
 }
@@ -986,6 +973,26 @@ a {
 
 .message p:last-child {
   margin-bottom: 0;
+}
+
+.message-auth-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  margin-top: 4px;
+  padding: 0 12px;
+  color: #0b4b45;
+  background: rgba(20, 184, 166, 0.08);
+  border: 1px solid rgba(20, 184, 166, 0.24);
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 420;
+  text-decoration: none;
+}
+
+.message-auth-link:hover {
+  background: rgba(20, 184, 166, 0.13);
 }
 
 .message.ai,
@@ -6867,16 +6874,6 @@ a {
 
   .chat-panel.is-empty {
     justify-content: flex-start;
-  }
-
-  .guest-mode-note {
-    top: 10px;
-    width: calc(100% - 32px);
-    font-size: 0.74rem;
-  }
-
-  .chat-panel.has-thread.has-guest-note .messages::before {
-    flex-basis: clamp(96px, 14vh, 128px);
   }
 
   .agent-start {

@@ -61,8 +61,8 @@ export function AccountMenu({ initials, name, email, agency, city, isGuest = fal
 
   if (isGuest) {
     return (
-      <Link className="account-signin-link" href="/auth/sign-in">
-        <LogIn size={16} /> Sign in
+      <Link aria-label="Sign in" className="account-signin-link" href="/auth/sign-in" title="Sign in">
+        <LogIn size={18} />
       </Link>
     );
   }
