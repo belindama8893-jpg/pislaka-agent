@@ -3,6 +3,7 @@
 import { BarChart3, CalendarClock, List, LogOut, MessageCircle, Users } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { AuthForm } from "@/components/auth/AuthForm";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type AccountMenuProps = {
@@ -18,6 +19,7 @@ type AccountMenuProps = {
 export function AccountMenu({ initials, name, email, agency, city, isGuest = false, leadsCount }: AccountMenuProps) {
   const menuRef = useRef<HTMLDetailsElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   useEffect(() => {
     if (!isOpen) {
@@ -61,9 +63,29 @@ export function AccountMenu({ initials, name, email, agency, city, isGuest = fal
 
   if (isGuest) {
     return (
-      <Link className="account-signin-link" href="/auth/sign-in">
-        Sign in
-      </Link>
+      <>
+        <button className="account-signin-link" type="button" onClick={() => setIsAuthModalOpen(true)}>
+          Sign in
+        </button>
+        {isAuthModalOpen ? (
+          <div className="auth-modal-backdrop" role="presentation" onClick={() => setIsAuthModalOpen(false)}>
+            <section
+              aria-label="Sign in to Pislaka Agent"
+              className="auth-modal"
+              role="dialog"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="auth-modal-heading">
+                <span>Sign in to continue</span>
+                <button type="button" onClick={() => setIsAuthModalOpen(false)}>
+                  Close
+                </button>
+              </div>
+              <AuthForm />
+            </section>
+          </div>
+        ) : null}
+      </>
     );
   }
 

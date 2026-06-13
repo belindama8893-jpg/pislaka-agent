@@ -441,6 +441,8 @@ a {
   background: rgba(18, 200, 182, 0.1);
   border: 1px solid rgba(18, 200, 182, 0.34);
   border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
   font-size: 0.92rem;
   font-weight: 300;
   text-decoration: none;
