@@ -431,6 +431,32 @@ a {
   border-radius: 0 0 8px 8px;
 }
 
+.account-signin-link {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  color: #0b4b45;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(20, 184, 166, 0.22);
+  border-radius: 999px;
+  font-size: 0.84rem;
+  font-weight: 300;
+  text-decoration: none;
+}
+
+.account-signin-link:hover {
+  color: #063b38;
+  background: rgba(20, 184, 166, 0.08);
+}
+
+.account-signin-link.sidebar {
+  width: 100%;
+  border-radius: 8px;
+}
+
 .workspace-sidebar-account {
   display: grid;
   gap: 8px;

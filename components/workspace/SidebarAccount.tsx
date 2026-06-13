@@ -19,6 +19,16 @@ export function SidebarAccount({ agency, city, initials, isGuest = false, name }
     window.location.href = "/auth/sign-in";
   }
 
+  if (isGuest) {
+    return (
+      <div className="workspace-sidebar-account">
+        <Link className="account-signin-link sidebar" href="/auth/sign-in">
+          <LogIn size={16} /> Sign in
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <div className="workspace-sidebar-account">
       <div className="account-menu-profile">
@@ -28,15 +38,9 @@ export function SidebarAccount({ agency, city, initials, isGuest = false, name }
           <small>{[agency, city].filter(Boolean).join(", ") || "Pislaka workspace"}</small>
         </div>
       </div>
-      {isGuest ? (
-        <Link className="account-signout" href="/auth/sign-in">
-          <LogIn size={16} /> Sign in
-        </Link>
-      ) : (
-        <button className="account-signout" type="button" onClick={handleSignOut}>
-          <LogOut size={16} /> Sign out
-        </button>
-      )}
+      <button className="account-signout" type="button" onClick={handleSignOut}>
+        <LogOut size={16} /> Sign out
+      </button>
     </div>
   );
 }

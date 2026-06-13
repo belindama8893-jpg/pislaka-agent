@@ -59,6 +59,14 @@ export function AccountMenu({ initials, name, email, agency, city, isGuest = fal
     window.location.href = "/auth/sign-in";
   }
 
+  if (isGuest) {
+    return (
+      <Link className="account-signin-link" href="/auth/sign-in">
+        <LogIn size={16} /> Sign in
+      </Link>
+    );
+  }
+
   return (
     <details
       className="account-menu"
@@ -99,15 +107,9 @@ export function AccountMenu({ initials, name, email, agency, city, isGuest = fal
           </Link>
         </nav>
 
-        {isGuest ? (
-          <Link className="account-signout" href="/auth/sign-in">
-            <LogIn size={16} /> Sign in
-          </Link>
-        ) : (
-          <button className="account-signout" type="button" onClick={handleSignOut}>
-            <LogOut size={16} /> Sign out
-          </button>
-        )}
+        <button className="account-signout" type="button" onClick={handleSignOut}>
+          <LogOut size={16} /> Sign out
+        </button>
       </div>
     </details>
   );
