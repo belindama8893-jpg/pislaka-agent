@@ -1,6 +1,6 @@
 "use client";
 
-import { BarChart3, CalendarClock, List, LogIn, LogOut, MessageCircle, Users } from "lucide-react";
+import { BarChart3, CalendarClock, List, LogOut, MessageCircle, Users } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -61,8 +61,8 @@ export function AccountMenu({ initials, name, email, agency, city, isGuest = fal
 
   if (isGuest) {
     return (
-      <Link aria-label="Sign in" className="account-signin-link" href="/auth/sign-in" title="Sign in">
-        <LogIn size={18} />
+      <Link className="account-signin-link" href="/auth/sign-in">
+        Sign in
       </Link>
     );
   }
