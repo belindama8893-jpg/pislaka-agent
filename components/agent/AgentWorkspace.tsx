@@ -4750,6 +4750,8 @@ export function AgentWorkspace({
   recentLeads: initialRecentLeads,
   recentListings
 }: AgentWorkspaceProps) {
+  const welcomeMessageContent = `Good morning, ${firstName}. Tell me the property details in English, Urdu, or Roman Urdu. I will draft a listing preview for you to edit and confirm.`;
+  const shouldHandleHomeBackNavigation = initialMessages.length === 0;
   const [userTimeZone, setUserTimeZone] = useState(() => getResolvedTimeZone());
   const [input, setInput] = useState("");
   const [composerMedia, setComposerMedia] = useState<PendingMedia[]>([]);
@@ -4788,7 +4790,7 @@ export function AgentWorkspace({
     {
       id: createId(),
       role: "assistant",
-      content: `Good morning, ${firstName}. Tell me the property details in English, Urdu, or Roman Urdu. I will draft a listing preview for you to edit and confirm.`
+      content: welcomeMessageContent
     },
     ...initialMessages.map(chatMessageFromRecord)
   ]);
@@ -4812,6 +4814,8 @@ export function AgentWorkspace({
   const activeTurnAnchorRef = useRef<string | null>(null);
   const activeOutputRef = useRef<string | null>(null);
   const hasPositionedInitialThreadRef = useRef(false);
+  const hasStartedRef = useRef(false);
+  const hasPushedHomeHistoryRef = useRef(false);
   const assistantStreamTimersRef = useRef<Map<string, number>>(new Map());
   const pendingProgressMessageIdRef = useRef<string | null>(null);
   const lastAuthPromptRef = useRef<AuthRequiredReason | null>(null);
@@ -4886,6 +4890,60 @@ export function AgentWorkspace({
   const voiceTimerRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const hasStarted = messages.length > 1;
+
+  useEffect(() => {
+    hasStartedRef.current = hasStarted;
+  }, [hasStarted]);
+
+  useEffect(() => {
+    if (!shouldHandleHomeBackNavigation || !hasStarted || hasPushedHomeHistoryRef.current) {
+      return;
+    }
+
+    window.history.pushState({ pislakaAgentChat: true }, "", window.location.href);
+    hasPushedHomeHistoryRef.current = true;
+  }, [hasStarted, shouldHandleHomeBackNavigation]);
+
+  useEffect(() => {
+    if (!shouldHandleHomeBackNavigation) {
+      return;
+    }
+
+    function resetToHomeState() {
+      assistantStreamTimersRef.current.forEach((timer) => window.clearInterval(timer));
+      assistantStreamTimersRef.current.clear();
+      hasPushedHomeHistoryRef.current = false;
+      hasPositionedInitialThreadRef.current = false;
+      activeTurnAnchorRef.current = null;
+      activeOutputRef.current = null;
+      pendingProgressMessageIdRef.current = null;
+      setMessages([
+        {
+          id: createId(),
+          role: "assistant",
+          content: welcomeMessageContent
+        }
+      ]);
+      setInput("");
+      setContextPickerMode(null);
+      setActiveTurnAnchorId(null);
+      setActiveOutputId(null);
+      setIsWhatsAppImportMode(false);
+      setIsSubmitting(false);
+    }
+
+    function handlePopState() {
+      if (!hasPushedHomeHistoryRef.current || !hasStartedRef.current) {
+        return;
+      }
+
+      resetToHomeState();
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [shouldHandleHomeBackNavigation, welcomeMessageContent]);
+
   const quickActions = [
     {
       icon: House,
