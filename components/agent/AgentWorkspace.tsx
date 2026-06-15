@@ -1902,7 +1902,7 @@ function normalizeListingText(value: string) {
 }
 
 function messageMentionsCurrentListing(message: string) {
-  return /这套|这个|刚才|刚刚|current|this listing|this property/i.test(message);
+  return /这套|这个|刚才|刚刚|链接|推广链接|专属链接|link|links|tracking|current|this listing|this property/i.test(message);
 }
 
 function scoreListingMatch(message: string, listing: RecentListingSummary) {
@@ -1946,6 +1946,40 @@ function scoreListingMatch(message: string, listing: RecentListingSummary) {
   }
 
   return score;
+}
+
+function draftToRecentListingSummary(listingId: string, draft: ListingDraftInput): RecentListingSummary {
+  return {
+    id: listingId,
+    status: "draft",
+    title: draft.title ?? null,
+    description: draft.description ?? null,
+    location_area: draft.location_area ?? null,
+    city: draft.city ?? null,
+    property_type: draft.property_type ?? null,
+    listing_type: draft.listing_type ?? null,
+    price_amount: draft.price_amount ?? null,
+    price_currency: draft.price_currency ?? null,
+    area_value: draft.area_value ?? null,
+    area_unit: draft.area_unit ?? null,
+    bedrooms: draft.bedrooms ?? null,
+    bathrooms: draft.bathrooms ?? null,
+    features: draft.features ?? null
+  };
+}
+
+function getPromotionAssetChannels(draft: ListingDraftInput): PromotionChannel[] {
+  const channels = draft.ai_extracted_payload?.channels;
+
+  if (!Array.isArray(channels)) {
+    return ["facebook"];
+  }
+
+  const validChannels = channels.filter((channel): channel is PromotionChannel =>
+    ["whatsapp", "facebook", "instagram", "portal"].includes(String(channel))
+  );
+
+  return validChannels.length ? validChannels : ["facebook"];
 }
 
 function formatLeadStatusForLanguage(
@@ -4355,6 +4389,7 @@ function DraftPreviewCard({
   onSaved: (
     uploadedCount: number,
     listingId: string,
+    savedDraft: ListingDraftInput,
     mediaPreview: ListingSavedMediaPreview[],
     failedMedia: FailedMediaUpload[]
   ) => void;
@@ -4455,6 +4490,7 @@ function DraftPreviewCard({
       onSaved(
         uploadedCount,
         listingId,
+        draftToSave,
         uploadedMedia.slice(0, 3).map((item, index) => ({
           id: item.id,
           name: `Uploaded media ${index + 1}`,
@@ -5053,6 +5089,7 @@ export function AgentWorkspace({
   const [contextPickerMode, setContextPickerMode] = useState<"listing" | "lead" | null>(null);
   const [isWhatsAppImportMode, setIsWhatsAppImportMode] = useState(initialWhatsAppImportOpen);
   const [workspaceLeads, setWorkspaceLeads] = useState(initialRecentLeads);
+  const [sessionSavedListings, setSessionSavedListings] = useState<RecentListingSummary[]>([]);
   const [pendingMedia, setPendingMedia] = useState<PendingMedia[]>([]);
   const [draftMediaByMessageId, setDraftMediaByMessageId] = useState<Record<string, PendingMedia[]>>({});
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
@@ -6287,6 +6324,8 @@ export function AgentWorkspace({
   }
 
   function getPromotionTarget(messageText: string, resolution?: AgentResolution) {
+    const availableListings = [...sessionSavedListings, ...recentListings.filter((listing) => !sessionSavedListings.some((saved) => saved.id === listing.id))];
+
     if (resolution?.status === "ambiguous") {
       return { listing: null, ambiguous: true, candidates: resolution.candidates ?? [] };
     }
@@ -6297,7 +6336,7 @@ export function AgentWorkspace({
 
     if (resolution?.status === "matched") {
       const matchedListing =
-        recentListings.find((listing) => listing.id === resolution.target_id) ??
+        availableListings.find((listing) => listing.id === resolution.target_id) ??
         (resolution.matched ? candidateToListing(resolution.matched) : null);
 
       return { listing: matchedListing, ambiguous: false, candidates: [] };
@@ -6305,13 +6344,13 @@ export function AgentWorkspace({
 
     if (messageMentionsCurrentListing(messageText) && activeListingId) {
       return {
-        listing: recentListings.find((listing) => listing.id === activeListingId) ?? null,
+        listing: availableListings.find((listing) => listing.id === activeListingId) ?? null,
         ambiguous: false,
         candidates: []
       };
     }
 
-    const scoredListings = recentListings
+    const scoredListings = availableListings
       .map((listing) => ({ listing, score: scoreListingMatch(messageText, listing) }))
       .filter((item) => item.score > 0)
       .sort((left, right) => right.score - left.score);
@@ -6341,7 +6380,7 @@ export function AgentWorkspace({
     }
 
     return {
-      listing: recentListings.find((listing) => listing.id === activeListingId) ?? recentListings[0] ?? null,
+      listing: availableListings.find((listing) => listing.id === activeListingId) ?? availableListings[0] ?? null,
       ambiguous: false,
       candidates: []
     };
@@ -8278,23 +8317,29 @@ export function AgentWorkspace({
                     onAttachMedia={() => openDraftMediaPicker(message.id)}
                     onRemoveMedia={(mediaId) => removeDraftMedia(message.id, mediaId)}
                     pendingMedia={draftMediaByMessageId[message.id] ?? message.draftMedia ?? []}
-                    onSaved={(uploadedCount, listingId, mediaPreview, failedMedia) => {
-                      const location = [message.draft?.location_area, message.draft?.city].filter(Boolean).join(", ");
+                    onSaved={(uploadedCount, listingId, savedDraft, mediaPreview, failedMedia) => {
+                      const savedListing = draftToRecentListingSummary(listingId, savedDraft);
+                      const location = [savedDraft.location_area, savedDraft.city].filter(Boolean).join(", ");
                       const failedCount = failedMedia.length;
                       const failedNames = failedMedia.slice(0, 3).map((item) => item.name).join(", ");
-                      const isPromotionAssetDraft = message.draft?.ai_extracted_payload?.source === "social_copy_promotion_asset";
+                      const isPromotionAssetDraft = savedDraft.ai_extracted_payload?.source === "social_copy_promotion_asset";
+                      const promotionChannels = getPromotionAssetChannels(savedDraft);
+                      setSessionSavedListings((current) => [
+                        savedListing,
+                        ...current.filter((listing) => listing.id !== listingId)
+                      ]);
                       setActiveListingId(listingId);
                       appendAssistantMessage({
                         content: failedCount
                           ? `Done. I saved the listing and uploaded ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}. ${failedCount} media file${failedCount === 1 ? "" : "s"} failed${failedNames ? `: ${failedNames}` : ""}.`
                           : isPromotionAssetDraft
-                            ? `Done. I saved this promotion asset to your library${uploadedCount ? ` with ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}` : ""}. I can now generate dedicated tracking links for it.`
+                            ? `Done. I saved this promotion asset to your library${uploadedCount ? ` with ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}` : ""}. I am generating the dedicated tracking links now.`
                             : uploadedCount
                               ? `Done. I added it to your listing library with ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}.`
                               : "Done. I added it to your listing library.",
                         listingSaved: {
                           listingId,
-                          title: message.draft?.title ?? null,
+                          title: savedDraft.title ?? null,
                           location: location || null,
                           uploadedCount,
                           libraryHref: `/listings#listing-${listingId}`,
@@ -8303,6 +8348,13 @@ export function AgentWorkspace({
                         listingSavedMedia: mediaPreview,
                         sourceMessage: message.sourceMessage
                       });
+                      if (isPromotionAssetDraft && !failedCount) {
+                        void generatePromotionForListing(
+                          savedListing,
+                          String(savedDraft.ai_extracted_payload?.instruction ?? message.sourceMessage ?? savedDraft.description ?? ""),
+                          promotionChannels
+                        );
+                      }
                     }}
                   />
                 ) : null}
