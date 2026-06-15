@@ -88,6 +88,7 @@ type AgentWorkspaceProps = {
   conversationId?: string;
   firstName: string;
   hasOlderMessages: boolean;
+  initialAuthOpen?: boolean;
   initialWhatsAppImportOpen?: boolean;
   initialMessages: AgentChatMessageRecord[];
   initialContextAttachments?: ChatContextAttachment[];
@@ -98,6 +99,9 @@ type AgentWorkspaceProps = {
 
 const FOLLOW_UP_NUDGE_DISMISS_PREFIX = "pislaka_followup_nudge_dismissed";
 const AUTH_REQUIRED_STATUS = "Sign in to save this to your workspace.";
+const GUEST_CHAT_STORAGE_KEY = "pislaka_guest_chat_v1";
+const GUEST_CHAT_RESTORE_FLAG = "pislaka_restore_guest_chat";
+const GUEST_CHAT_TTL_MS = 24 * 60 * 60 * 1000;
 
 type AuthRequiredReason =
   | "chat_history"
@@ -178,6 +182,18 @@ type ChatMessage = {
   promotionTarget?: RecentListingSummary;
   promotionInstruction?: string;
   promotionChannels?: PromotionChannel[];
+};
+
+type GuestStoredMessage = {
+  role: "user" | "assistant";
+  content: string;
+  message_type?: string;
+  structured_payload?: Record<string, unknown>;
+};
+
+type GuestStoredTranscript = {
+  createdAt: number;
+  messages: GuestStoredMessage[];
 };
 
 type PendingPromotionAction = {
@@ -568,6 +584,86 @@ function structuredPayloadForMessage(message: ChatMessage): Record<string, unkno
   return Object.keys(ui).length ? { ui } : {};
 }
 
+function isGuestTranscriptExpired(transcript: GuestStoredTranscript) {
+  return Date.now() - transcript.createdAt > GUEST_CHAT_TTL_MS;
+}
+
+function readGuestTranscript() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(GUEST_CHAT_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as GuestStoredTranscript;
+    if (!parsed?.createdAt || !Array.isArray(parsed.messages) || isGuestTranscriptExpired(parsed)) {
+      window.localStorage.removeItem(GUEST_CHAT_STORAGE_KEY);
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    window.localStorage.removeItem(GUEST_CHAT_STORAGE_KEY);
+    return null;
+  }
+}
+
+function writeGuestTranscript(messages: ChatMessage[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const transcriptMessages = messages
+    .filter((message) => !message.isProgress && message.content.trim())
+    .filter((message, index) => !(index === 0 && message.role === "assistant" && !hasStructuredOutput(message)))
+    .map((message) => {
+      const structuredPayload = structuredPayloadForMessage(message);
+      return {
+        role: message.role,
+        content: message.content,
+        message_type: "text",
+        structured_payload: Object.keys(structuredPayload).length ? structuredPayload : undefined
+      } satisfies GuestStoredMessage;
+    });
+
+  if (!transcriptMessages.length) {
+    window.localStorage.removeItem(GUEST_CHAT_STORAGE_KEY);
+    return;
+  }
+
+  const existing = readGuestTranscript();
+  window.localStorage.setItem(
+    GUEST_CHAT_STORAGE_KEY,
+    JSON.stringify({
+      createdAt: existing?.createdAt ?? Date.now(),
+      messages: transcriptMessages.slice(-100)
+    } satisfies GuestStoredTranscript)
+  );
+}
+
+function clearGuestTranscript() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.removeItem(GUEST_CHAT_STORAGE_KEY);
+  window.localStorage.removeItem(GUEST_CHAT_RESTORE_FLAG);
+}
+
+function markGuestTranscriptForRestore() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (readGuestTranscript()?.messages.length) {
+    window.localStorage.setItem(GUEST_CHAT_RESTORE_FLAG, "true");
+  }
+}
+
 const promotionChannels: Array<{ channel: PromotionChannel; label: string }> = [
   { channel: "whatsapp", label: "WhatsApp" },
   { channel: "facebook", label: "Facebook" },
@@ -727,7 +823,21 @@ type EventFormState = {
 };
 
 function createId() {
-  return crypto.randomUUID();
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+    return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex
+      .slice(8, 10)
+      .join("")}-${hex.slice(10).join("")}`;
+  }
+
+  return `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function draftToFormState(draft: ListingDraftInput): DraftFormState {
@@ -4743,6 +4853,7 @@ export function AgentWorkspace({
   conversationId: initialConversationId,
   firstName,
   hasOlderMessages,
+  initialAuthOpen = false,
   initialWhatsAppImportOpen = false,
   initialContextAttachments = [],
   initialMessages,
@@ -4750,6 +4861,7 @@ export function AgentWorkspace({
   recentLeads: initialRecentLeads,
   recentListings
 }: AgentWorkspaceProps) {
+  const router = useRouter();
   const welcomeMessageContent = `Good morning, ${firstName}. Tell me the property details in English, Urdu, or Roman Urdu. I will draft a listing preview for you to edit and confirm.`;
   const shouldHandleHomeBackNavigation = initialMessages.length === 0;
   const [userTimeZone, setUserTimeZone] = useState(() => getResolvedTimeZone());
@@ -4802,7 +4914,7 @@ export function AgentWorkspace({
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isFollowUpNudgeVisible, setIsFollowUpNudgeVisible] = useState(false);
   const [isFollowUpNudgeLoading, setIsFollowUpNudgeLoading] = useState(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(initialAuthOpen);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [voiceLevels, setVoiceLevels] = useState(idleVoiceLevels);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -4828,6 +4940,55 @@ export function AgentWorkspace({
   useEffect(() => {
     setUserTimeZone(getResolvedTimeZone());
   }, []);
+
+  useEffect(() => {
+    if (isGuest) {
+      writeGuestTranscript(messages);
+    }
+  }, [isGuest, messages]);
+
+  useEffect(() => {
+    if (isGuest) {
+      return;
+    }
+
+    const transcript = readGuestTranscript();
+    if (!transcript?.messages.length || window.localStorage.getItem(GUEST_CHAT_RESTORE_FLAG) !== "true") {
+      return;
+    }
+
+    let cancelled = false;
+    const messagesToImport = transcript.messages;
+
+    async function importGuestTranscript() {
+      try {
+        const response = await fetch("/api/agent/messages/import-guest", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            messages: messagesToImport
+          })
+        });
+
+        if (!response.ok || cancelled) {
+          return;
+        }
+
+        clearGuestTranscript();
+        router.refresh();
+      } catch {
+        // Keep the local transcript so the user can retry after a transient failure.
+      }
+    }
+
+    void importGuestTranscript();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isGuest, router]);
 
   useEffect(() => {
     if (isGuest) {
@@ -8240,7 +8401,7 @@ export function AgentWorkspace({
                 Close
               </button>
             </div>
-            <AuthForm />
+            <AuthForm onAuthStarted={markGuestTranscriptForRestore} />
           </section>
         </div>
       ) : null}

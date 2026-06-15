@@ -1,5 +1,5 @@
-import { AuthLanding } from "@/components/auth/AuthLanding";
+import { redirect } from "next/navigation";
 
 export default function SignInPage() {
-  return <AuthLanding />;
+  redirect("/?auth=1");
 }

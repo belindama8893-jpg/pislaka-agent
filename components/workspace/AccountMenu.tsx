@@ -6,6 +6,9 @@ import { useEffect, useRef, useState } from "react";
 import { AuthForm } from "@/components/auth/AuthForm";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
+const GUEST_CHAT_STORAGE_KEY = "pislaka_guest_chat_v1";
+const GUEST_CHAT_RESTORE_FLAG = "pislaka_restore_guest_chat";
+
 type AccountMenuProps = {
   initials: string;
   name: string;
@@ -61,6 +64,12 @@ export function AccountMenu({ initials, name, email, agency, city, isGuest = fal
     window.location.href = "/auth/sign-in";
   }
 
+  function markGuestTranscriptForRestore() {
+    if (window.localStorage.getItem(GUEST_CHAT_STORAGE_KEY)) {
+      window.localStorage.setItem(GUEST_CHAT_RESTORE_FLAG, "true");
+    }
+  }
+
   if (isGuest) {
     return (
       <>
@@ -81,7 +90,7 @@ export function AccountMenu({ initials, name, email, agency, city, isGuest = fal
                   Close
                 </button>
               </div>
-              <AuthForm />
+              <AuthForm onAuthStarted={markGuestTranscriptForRestore} />
             </section>
           </div>
         ) : null}

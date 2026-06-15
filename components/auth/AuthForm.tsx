@@ -5,6 +5,9 @@ import { Lock, Mail } from "lucide-react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type AuthMode = "sign-in" | "sign-up";
+type AuthFormProps = {
+  onAuthStarted?: () => void;
+};
 
 function GoogleIcon() {
   return (
@@ -29,7 +32,7 @@ function GoogleIcon() {
   );
 }
 
-export function AuthForm() {
+export function AuthForm({ onAuthStarted }: AuthFormProps = {}) {
   const [mode, setMode] = useState<AuthMode>("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -40,6 +43,7 @@ export function AuthForm() {
   async function handleGoogleSignIn() {
     setStatus(null);
     setIsSubmitting(true);
+    onAuthStarted?.();
     window.location.href = new URL("/api/auth/google", window.location.origin).toString();
   }
 
@@ -53,6 +57,7 @@ export function AuthForm() {
     }
 
     setIsSubmitting(true);
+    onAuthStarted?.();
     const supabase = createSupabaseBrowserClient();
 
     const authCall =

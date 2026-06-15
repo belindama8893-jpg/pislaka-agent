@@ -178,6 +178,7 @@ export default async function Home({ searchParams }: HomeProps) {
             conversationId={undefined}
             firstName="there"
             hasOlderMessages={false}
+            initialAuthOpen={getSearchParamValue(resolvedSearchParams, "auth") === "1"}
             initialWhatsAppImportOpen={getSearchParamValue(resolvedSearchParams, "import") === "whatsapp"}
             initialContextAttachments={[]}
             initialMessages={[]}

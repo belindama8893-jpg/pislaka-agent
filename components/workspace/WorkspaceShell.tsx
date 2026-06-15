@@ -56,7 +56,7 @@ export function WorkspaceShell({
   title
 }: WorkspaceShellProps) {
   return (
-    <main className={`workspace-shell ${active === "agent" ? "is-agent-home" : ""}`}>
+    <main className={`workspace-shell ${active === "agent" ? "is-agent-home" : ""} ${isGuest ? "is-guest" : ""}`}>
       <aside className="workspace-sidebar" aria-label="Pislaka workspace navigation">
         <Link className="workspace-sidebar-brand" href="/">
           <Image src="/logo.png" alt="Pislaka" width={324} height={120} priority />

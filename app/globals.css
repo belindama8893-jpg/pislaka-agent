@@ -617,8 +617,28 @@ a {
   display: none;
 }
 
+.workspace-shell.is-agent-home.is-guest .workspace-main-topbar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 260px;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 76px;
+  margin: 0;
+  padding: 22px clamp(18px, 4vw, 42px);
+  pointer-events: none;
+}
+
 .workspace-top-account {
   display: none;
+}
+
+.workspace-shell.is-agent-home.is-guest .workspace-top-account {
+  display: block;
+  pointer-events: auto;
 }
 
 .workspace-mobile-brand {
@@ -934,6 +954,13 @@ a {
   align-content: center;
   padding: 0;
   overflow: visible;
+}
+
+@media (min-width: 821px) {
+  .workspace-shell.is-agent-home.is-guest .chat-panel.is-empty .messages,
+  .workspace-shell.is-agent-home.is-guest .chat-panel.is-empty .workspace-agent-composer {
+    transform: translateY(-50px);
+  }
 }
 
 .load-earlier-messages {
@@ -6883,6 +6910,7 @@ a {
 
   .agent-start {
     padding: 0 10px;
+    transform: translateY(25px);
   }
 
   .agent-start span {
@@ -7478,6 +7506,10 @@ a {
     grid-template-columns: 232px minmax(0, 1fr);
   }
 
+  .workspace-shell.is-agent-home.is-guest .workspace-main-topbar {
+    left: 232px;
+  }
+
   .workspace-agent-grid .focus-rail {
     grid-template-columns: 1fr;
   }
@@ -7525,6 +7557,14 @@ a {
 
   .workspace-shell.is-agent-home .workspace-main-topbar {
     display: grid;
+  }
+
+  .workspace-shell.is-agent-home.is-guest .workspace-main-topbar {
+    position: static;
+    display: grid;
+    min-height: 54px;
+    padding: 0;
+    pointer-events: auto;
   }
 
   .workspace-top-account {
@@ -7639,7 +7679,7 @@ a {
     gap: 14px;
     width: min(300px, 100%);
     margin: 0 auto;
-    transform: translateX(70px);
+    transform: translateX(65px);
   }
 
   .chat-panel.is-empty .workspace-agent-composer .agent-composer-actions button {

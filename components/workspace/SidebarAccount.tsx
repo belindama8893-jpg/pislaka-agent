@@ -1,7 +1,6 @@
 "use client";
 
-import { LogIn, LogOut } from "lucide-react";
-import Link from "next/link";
+import { LogOut } from "lucide-react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type SidebarAccountProps = {
@@ -20,13 +19,7 @@ export function SidebarAccount({ agency, city, initials, isGuest = false, name }
   }
 
   if (isGuest) {
-    return (
-      <div className="workspace-sidebar-account">
-        <Link className="account-signin-link sidebar" href="/auth/sign-in">
-          <LogIn size={16} /> Sign in
-        </Link>
-      </div>
-    );
+    return null;
   }
 
   return (
