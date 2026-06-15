@@ -73,7 +73,14 @@ export function AccountMenu({ initials, name, email, agency, city, isGuest = fal
   if (isGuest) {
     return (
       <>
-        <button className="account-signin-link" type="button" onClick={() => setIsAuthModalOpen(true)}>
+        <button
+          className="account-signin-link"
+          type="button"
+          onClick={() => {
+            markGuestTranscriptForRestore();
+            setIsAuthModalOpen(true);
+          }}
+        >
           Sign in
         </button>
         {isAuthModalOpen ? (

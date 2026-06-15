@@ -2,7 +2,7 @@
 
 import { ArrowUp, LoaderCircle, Mic, Plus, Square, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { DragEvent, FormEvent, KeyboardEvent, ReactNode } from "react";
+import type { ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, ReactNode } from "react";
 
 export type AgentComposerAction = {
   icon: LucideIcon;
@@ -45,6 +45,7 @@ type AgentComposerProps = {
   onAttach: () => void;
   onChange: (value: string) => void;
   onFilesDropped?: (files: File[]) => void;
+  onFilesPasted?: (files: File[]) => void;
   onRemoveContext?: (contextId: string) => void;
   onRemoveFile?: (fileId: string) => void;
   onRemoveMedia?: (mediaId: string) => void;
@@ -70,6 +71,7 @@ export function AgentComposer({
   onAttach,
   onChange,
   onFilesDropped,
+  onFilesPasted,
   onRemoveContext,
   onRemoveFile,
   onRemoveMedia,
@@ -143,6 +145,22 @@ export function AgentComposer({
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
     }
+  }
+
+  function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const clipboardFiles = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
+    const itemFiles = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === "file")
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file && file.type.startsWith("image/")));
+    const files = clipboardFiles.length ? clipboardFiles : itemFiles;
+
+    if (!files.length) {
+      return;
+    }
+
+    event.preventDefault();
+    onFilesPasted?.(files);
   }
 
   function handleAttachClick() {
@@ -300,6 +318,7 @@ export function AgentComposer({
             onCompositionEnd={() => setIsComposing(false)}
             onCompositionStart={() => setIsComposing(true)}
             onKeyDown={handleTextareaKeyDown}
+            onPaste={handlePaste}
           />
         )}
         <button

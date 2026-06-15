@@ -14,7 +14,8 @@ describe("requiresConfirmationForAgentAction", () => {
     "show_basic_attribution",
     "general_reply",
     "create_listing_draft",
-    "draft_lead_reply"
+    "draft_lead_reply",
+    "generate_social_copy"
   ] satisfies AgentAction["intent"][])("%s does not require confirmation by default", (intent) => {
     expect(requiresConfirmationForAgentAction(action(intent))).toBe(false);
   });

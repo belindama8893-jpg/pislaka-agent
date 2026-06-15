@@ -94,6 +94,7 @@ export const agentActionSchema = z.object({
     "create_lead",
     "update_listing_draft",
     "publish_listing",
+    "generate_social_copy",
     "create_campaign_links",
     "list_today_followups",
     "record_lead_followup",

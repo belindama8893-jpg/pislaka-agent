@@ -101,6 +101,7 @@ const FOLLOW_UP_NUDGE_DISMISS_PREFIX = "pislaka_followup_nudge_dismissed";
 const AUTH_REQUIRED_STATUS = "Sign in to save this to your workspace.";
 const GUEST_CHAT_STORAGE_KEY = "pislaka_guest_chat_v1";
 const GUEST_CHAT_RESTORE_FLAG = "pislaka_restore_guest_chat";
+const GUEST_CHAT_IMPORT_SUCCESS_FLAG = "pislaka_guest_chat_import_success";
 const GUEST_CHAT_TTL_MS = 24 * 60 * 60 * 1000;
 
 type AuthRequiredReason =
@@ -151,6 +152,7 @@ type ChatMessage = {
   isProgress?: boolean;
   isStreaming?: boolean;
   attachments?: PendingMedia[];
+  draftMedia?: PendingMedia[];
   contextAttachments?: ChatContextAttachment[];
   fileAttachments?: PendingFileAttachment[];
   draft?: ListingDraftInput;
@@ -199,6 +201,13 @@ type GuestStoredTranscript = {
 type PendingPromotionAction = {
   messageId: string;
   listing: RecentListingSummary;
+  instruction: string;
+  channels: PromotionChannel[];
+};
+
+type PendingSocialCopyAction = {
+  messageId: string;
+  promotion: ListingPromotion;
   instruction: string;
   channels: PromotionChannel[];
 };
@@ -353,6 +362,8 @@ type ChatMessageUiPayload = Partial<
     ChatMessage,
     | "sourceMessage"
     | "uiLanguage"
+    | "attachments"
+    | "draftMedia"
     | "contextAttachments"
     | "fileAttachments"
     | "draft"
@@ -472,13 +483,70 @@ function serializeFileAttachments(fileAttachments: PendingFileAttachment[] | und
   }));
 }
 
+function dataUrlToFile(dataUrl: string, name: string, type: string) {
+  const [header, base64 = ""] = dataUrl.split(",");
+  const mime = header.match(/data:([^;]+)/)?.[1] ?? type;
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new File([bytes], name, { type: mime || type });
+}
+
+function deserializeMediaAttachments(value: unknown): PendingMedia[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const restored = value
+    .map((item): PendingMedia | null => {
+      if (!isRecord(item) || typeof item.dataUrl !== "string") {
+        return null;
+      }
+      const fileRecord = isRecord(item.file) ? item.file : {};
+      const name = typeof fileRecord.name === "string" ? fileRecord.name : "uploaded-image.jpg";
+      const type = typeof fileRecord.type === "string" ? fileRecord.type : "image/jpeg";
+      const size = typeof fileRecord.size === "number" ? fileRecord.size : 0;
+      const mediaType = item.mediaType === "video" ? "video" : "image";
+      return {
+        id: typeof item.id === "string" ? item.id : createId(),
+        file: { name, size, type } as File,
+        previewUrl: item.dataUrl,
+        mediaType,
+        dataUrl: item.dataUrl
+      };
+    })
+    .filter((item): item is PendingMedia => Boolean(item));
+
+  return restored.length ? restored : undefined;
+}
+
+function serializeMediaAttachments(media: PendingMedia[] | undefined) {
+  return media
+    ?.filter((item) => item.dataUrl)
+    .map((item) => ({
+      id: item.id,
+      mediaType: item.mediaType,
+      dataUrl: item.dataUrl,
+      file: {
+        name: item.file.name,
+        size: item.file.size,
+        type: item.file.type
+      }
+    }));
+}
+
 function chatMessageFromRecord(record: AgentChatMessageRecord): ChatMessage {
+  const uiPayload = getMessageUiPayload(record.structured_payload);
   return {
     id: record.id,
     createdAt: record.created_at,
     role: record.role,
     content: record.content,
-    ...getMessageUiPayload(record.structured_payload)
+    ...uiPayload,
+    attachments: deserializeMediaAttachments(uiPayload.attachments),
+    draftMedia: deserializeMediaAttachments(uiPayload.draftMedia)
   };
 }
 
@@ -580,6 +648,14 @@ function structuredPayloadForMessage(message: ChatMessage): Record<string, unkno
   if (fileAttachments?.length) {
     ui.fileAttachments = fileAttachments;
   }
+  const attachments = serializeMediaAttachments(message.attachments);
+  if (attachments?.length) {
+    ui.attachments = attachments;
+  }
+  const draftMedia = serializeMediaAttachments(message.draftMedia);
+  if (draftMedia?.length) {
+    ui.draftMedia = draftMedia;
+  }
 
   return Object.keys(ui).length ? { ui } : {};
 }
@@ -619,6 +695,7 @@ function writeGuestTranscript(messages: ChatMessage[]) {
 
   const transcriptMessages = messages
     .filter((message) => !message.isProgress && message.content.trim())
+    .filter((message) => !message.authRequiredReason)
     .filter((message, index) => !(index === 0 && message.role === "assistant" && !hasStructuredOutput(message)))
     .map((message) => {
       const structuredPayload = structuredPayloadForMessage(message);
@@ -652,16 +729,6 @@ function clearGuestTranscript() {
 
   window.localStorage.removeItem(GUEST_CHAT_STORAGE_KEY);
   window.localStorage.removeItem(GUEST_CHAT_RESTORE_FLAG);
-}
-
-function markGuestTranscriptForRestore() {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  if (readGuestTranscript()?.messages.length) {
-    window.localStorage.setItem(GUEST_CHAT_RESTORE_FLAG, "true");
-  }
 }
 
 const promotionChannels: Array<{ channel: PromotionChannel; label: string }> = [
@@ -717,6 +784,7 @@ type PendingMedia = {
   file: File;
   previewUrl: string;
   mediaType: "image" | "video";
+  dataUrl?: string;
 };
 
 type RemoteListingImage = {
@@ -735,6 +803,20 @@ type PendingMediaUploadStatus = "pending" | "uploading" | "uploaded" | "failed";
 type ListingMediaUploadResult = {
   uploadedMedia: ListingMediaRecord[];
   failedMedia: FailedMediaUpload[];
+};
+
+type AgentVisionAnalyzeResponse = {
+  analyses?: Array<{
+    image_type?: string;
+    summary?: string;
+    extracted_text?: string;
+    entities?: Record<string, unknown>;
+    suggested_intent?: string;
+    confidence?: number;
+    missing_information?: string[];
+  }>;
+  agent_context?: string;
+  error?: string;
 };
 
 type PendingFileAttachment = {
@@ -1374,6 +1456,104 @@ function summarizeFileAttachments(fileAttachments: PendingFileAttachment[]) {
     .join(", ")}.`;
 }
 
+async function prepareImageForVision(file: File) {
+  if (typeof window === "undefined" || typeof document === "undefined" || !file.type.startsWith("image/")) {
+    return file;
+  }
+
+  try {
+    const bitmap = await createImageBitmap(file);
+    const maxDimension = 1400;
+    const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+
+    if (scale === 1 && file.size < 1_500_000) {
+      bitmap.close();
+      return file;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      bitmap.close();
+      return file;
+    }
+
+    context.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close();
+
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", 0.72);
+    });
+
+    if (!blob || blob.size >= file.size) {
+      return file;
+    }
+
+    const baseName = file.name.replace(/\.[^.]+$/, "") || "uploaded-image";
+    return new File([blob], `${baseName}.jpg`, { type: "image/jpeg" });
+  } catch {
+    return file;
+  }
+}
+
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(reader.error ?? new Error("Unable to read file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function createPendingMedia(file: File): Promise<PendingMedia> {
+  const mediaType = file.type.startsWith("image/") ? ("image" as const) : ("video" as const);
+  const restorableFile = mediaType === "image" ? await prepareImageForVision(file) : file;
+  const dataUrl = mediaType === "image" ? await fileToDataUrl(restorableFile).catch(() => undefined) : undefined;
+
+  return {
+    id: createId(),
+    file: restorableFile,
+    previewUrl: dataUrl ?? URL.createObjectURL(restorableFile),
+    mediaType,
+    dataUrl
+  };
+}
+
+async function analyzeComposerImages(messageText: string, media: PendingMedia[]) {
+  const imageMedia = media.filter((item) => item.mediaType === "image").slice(0, 4);
+
+  if (!imageMedia.length) {
+    return { agentContext: "", payload: {} };
+  }
+
+  const formData = new FormData();
+  formData.append("message", messageText);
+  const preparedImages = await Promise.all(imageMedia.map((item) => prepareImageForVision(item.file)));
+  preparedImages.forEach((file) => {
+    formData.append("images", file);
+  });
+
+  const response = await fetch("/api/agent/vision/analyze", {
+    method: "POST",
+    body: formData
+  });
+  const payload = (await response.json().catch(() => null)) as AgentVisionAnalyzeResponse | null;
+
+  if (!response.ok) {
+    throw new Error(payload?.error ?? "Unable to analyze uploaded images.");
+  }
+
+  return {
+    agentContext: payload?.agent_context?.trim() ?? "",
+    payload: payload ?? {}
+  };
+}
+
 function getProgressCopy(
   messageText: string,
   options: {
@@ -1504,6 +1684,7 @@ async function uploadListingMedia(
 
   for (const item of media) {
     onStatusChange?.(item.id, "uploading");
+    const uploadFile = item.dataUrl ? dataUrlToFile(item.dataUrl, item.file.name, item.file.type) : item.file;
 
     try {
       const prepareResponse = await fetch("/api/listings/media", {
@@ -1513,9 +1694,9 @@ async function uploadListingMedia(
         },
         body: JSON.stringify({
           action: "prepare-upload",
-          content_type: item.file.type,
-          file_name: item.file.name,
-          file_size: item.file.size,
+          content_type: uploadFile.type,
+          file_name: uploadFile.name,
+          file_size: uploadFile.size,
           listing_id: listingId
         })
       });
@@ -1524,7 +1705,7 @@ async function uploadListingMedia(
         const payload = (await prepareResponse.json().catch(() => null)) as { error?: string } | null;
         failedMedia.push({
           id: item.id,
-          name: item.file.name,
+          name: uploadFile.name,
           error: payload?.error ?? "Unable to prepare media upload"
         });
         onStatusChange?.(item.id, "failed");
@@ -1541,7 +1722,7 @@ async function uploadListingMedia(
       if (!uploadPayload.storage_path || !uploadPayload.token || !uploadPayload.media_type) {
         failedMedia.push({
           id: item.id,
-          name: item.file.name,
+          name: uploadFile.name,
           error: "Upload response did not include a signed upload URL"
         });
         onStatusChange?.(item.id, "failed");
@@ -1550,14 +1731,14 @@ async function uploadListingMedia(
 
       const { error: uploadError } = await supabase.storage
         .from(uploadPayload.bucket ?? "listing-media")
-        .uploadToSignedUrl(uploadPayload.storage_path, uploadPayload.token, item.file, {
-          contentType: item.file.type
+        .uploadToSignedUrl(uploadPayload.storage_path, uploadPayload.token, uploadFile, {
+          contentType: uploadFile.type
         });
 
       if (uploadError) {
         failedMedia.push({
           id: item.id,
-          name: item.file.name,
+          name: uploadFile.name,
           error: uploadError.message
         });
         onStatusChange?.(item.id, "failed");
@@ -1571,8 +1752,8 @@ async function uploadListingMedia(
         },
         body: JSON.stringify({
           action: "complete-upload",
-          content_type: item.file.type,
-          file_size: item.file.size,
+          content_type: uploadFile.type,
+          file_size: uploadFile.size,
           listing_id: listingId,
           media_type: uploadPayload.media_type,
           storage_path: uploadPayload.storage_path
@@ -1583,7 +1764,7 @@ async function uploadListingMedia(
         const payload = (await completeResponse.json().catch(() => null)) as { error?: string } | null;
         failedMedia.push({
           id: item.id,
-          name: item.file.name,
+          name: uploadFile.name,
           error: payload?.error ?? "Unable to save uploaded media"
         });
         onStatusChange?.(item.id, "failed");
@@ -1597,7 +1778,7 @@ async function uploadListingMedia(
       } else {
         failedMedia.push({
           id: item.id,
-          name: item.file.name,
+          name: uploadFile.name,
           error: "Upload response did not include saved media"
         });
         onStatusChange?.(item.id, "failed");
@@ -1605,7 +1786,7 @@ async function uploadListingMedia(
     } catch (error) {
       failedMedia.push({
         id: item.id,
-        name: item.file.name,
+        name: uploadFile.name,
         error: error instanceof Error ? error.message : "Network error while uploading media"
       });
       onStatusChange?.(item.id, "failed");
@@ -4976,6 +5157,7 @@ export function AgentWorkspace({
           return;
         }
 
+        window.sessionStorage.setItem(GUEST_CHAT_IMPORT_SUCCESS_FLAG, "true");
         clearGuestTranscript();
         router.refresh();
       } catch {
@@ -4989,6 +5171,27 @@ export function AgentWorkspace({
       cancelled = true;
     };
   }, [isGuest, router]);
+
+  useEffect(() => {
+    if (isGuest || typeof window === "undefined") {
+      return;
+    }
+
+    if (window.sessionStorage.getItem(GUEST_CHAT_IMPORT_SUCCESS_FLAG) !== "true") {
+      return;
+    }
+
+    window.sessionStorage.removeItem(GUEST_CHAT_IMPORT_SUCCESS_FLAG);
+    setMessages((current) => [
+      ...current,
+      {
+        id: createId(),
+        role: "assistant",
+        content:
+          "You are signed in. Please confirm the promotion asset/listing draft to save it and generate dedicated tracking links. You can also edit the card before confirming."
+      }
+    ]);
+  }, [isGuest]);
 
   useEffect(() => {
     if (isGuest) {
@@ -5365,6 +5568,17 @@ export function AgentWorkspace({
       }));
   }
 
+  function prepareGuestTranscriptRestore() {
+    if (!isGuest) {
+      return;
+    }
+
+    writeGuestTranscript(messages);
+    if (typeof window !== "undefined" && readGuestTranscript()?.messages.length) {
+      window.localStorage.setItem(GUEST_CHAT_RESTORE_FLAG, "true");
+    }
+  }
+
   function latestPendingPromotionAction(): PendingPromotionAction | null {
     for (const message of [...messages].reverse()) {
       if (message.role !== "assistant") {
@@ -5390,6 +5604,120 @@ export function AgentWorkspace({
     }
 
     return null;
+  }
+
+  function latestPendingSocialCopyAction(): PendingSocialCopyAction | null {
+    for (const message of [...messages].reverse()) {
+      if (message.role !== "assistant") {
+        continue;
+      }
+
+      if (message.draft || message.promotionTarget || message.listingSaved) {
+        return null;
+      }
+
+      if (
+        message.promotion &&
+        !consumedPendingActionIds.includes(message.id) &&
+        message.promotion.cards.every((card) => !card.landing_url)
+      ) {
+        return {
+          messageId: message.id,
+          promotion: message.promotion,
+          instruction: message.sourceMessage ?? message.content,
+          channels: message.promotion.cards.map((card) => card.channel)
+        };
+      }
+
+      if (!message.isProgress) {
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  function uniquePendingMedia(media: PendingMedia[]) {
+    const seen = new Set<string>();
+    return media.filter((item) => {
+      const key = item.dataUrl ?? `${item.file.name}:${item.file.size}:${item.file.type}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function latestUploadedMediaFromThread() {
+    const media: PendingMedia[] = [];
+
+    for (const message of [...messages].reverse()) {
+      if (message.role === "user" && message.attachments?.length) {
+        media.push(...message.attachments);
+        break;
+      }
+
+      if (message.draftMedia?.length) {
+        media.push(...message.draftMedia);
+        break;
+      }
+    }
+
+    return uniquePendingMedia(media);
+  }
+
+  function socialCopyToDraft(action: PendingSocialCopyAction): ListingDraftInput {
+    const primaryCard = action.promotion.cards[0];
+    const body = primaryCard?.body ?? action.promotion.summary;
+    const firstLine = body
+      .split("\n")
+      .map((line) => line.trim())
+      .find(Boolean);
+    const sizeMatch = body.match(/\b(\d+(?:\.\d+)?)\s*(sqft|sq\.?\s*ft|square feet|marla|kanal)\b/i);
+    const bedMatch = body.match(/\b(\d+)[-\s]*(?:bed|beds|bedroom|bedrooms)\b/i);
+    const bathMatch = body.match(/\b(\d+)[-\s]*(?:bath|baths|bathroom|bathrooms)\b/i);
+    const locationMatch = body.match(/\bin\s+([^.\n]+(?:Lahore|Karachi|Islamabad)[^.\n]*)/i);
+    const rawAreaUnit = sizeMatch?.[2]?.toLowerCase().replace(/\s+/g, " ");
+    const areaUnit =
+      rawAreaUnit === "sqft" || rawAreaUnit === "sq. ft" || rawAreaUnit === "square feet"
+        ? "sqft"
+        : rawAreaUnit === "marla" || rawAreaUnit === "kanal"
+          ? rawAreaUnit
+          : undefined;
+    const propertyType = /\b(apartment|flat)\b/i.test(body)
+      ? "apartment"
+      : /\b(villa|house)\b/i.test(body)
+        ? "house"
+        : /\b(plot)\b/i.test(body)
+          ? "plot"
+          : undefined;
+    const listingType = /\bfor rent\b/i.test(body) ? "rent" : /\bfor sale\b/i.test(body) ? "sale" : undefined;
+    const features = ["balcony", "TV lounge", "dining area", "kitchen", "laundry"].filter((feature) =>
+      new RegExp(feature.replace(/\s+/g, "\\s+"), "i").test(body)
+    );
+
+    return {
+      title: firstLine || primaryCard?.title || "Promotion asset draft",
+      description: body,
+      city: /karachi/i.test(body) ? "Karachi" : /islamabad/i.test(body) ? "Islamabad" : "Lahore",
+      location_area: locationMatch?.[1]?.trim(),
+      property_type: propertyType,
+      listing_type: listingType,
+      price_currency: "PKR",
+      area_value: sizeMatch ? Number(sizeMatch[1]) : undefined,
+      area_unit: areaUnit,
+      bedrooms: bedMatch ? Number(bedMatch[1]) : undefined,
+      bathrooms: bathMatch ? Number(bathMatch[1]) : undefined,
+      features,
+      ai_extracted_payload: {
+        source: "social_copy_promotion_asset",
+        channels: action.channels,
+        social_copy: action.promotion,
+        instruction: action.instruction
+      },
+      ai_confidence: 0.75
+    };
   }
 
   function addContextAttachment(attachment: ChatContextAttachment) {
@@ -5760,10 +6088,14 @@ export function AgentWorkspace({
 
   function handleAuthRequired(reason: AuthRequiredReason) {
     if (lastAuthPromptRef.current === reason) {
+      prepareGuestTranscriptRestore();
+      setIsAuthModalOpen(true);
       return;
     }
 
     lastAuthPromptRef.current = reason;
+    prepareGuestTranscriptRestore();
+    setIsAuthModalOpen(true);
     appendAssistantMessage({
       authRequiredReason: reason,
       content: getAuthRequiredMessage(reason)
@@ -6329,6 +6661,11 @@ export function AgentWorkspace({
 
     const response = await fetch(`/api/events?${params.toString()}`);
     if (!response.ok) {
+      if (isUnauthorizedResponse(response)) {
+        handleAuthRequired("read_workspace");
+        return;
+      }
+
       const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null;
       appendAssistantMessage({
         content: errorPayload?.error ?? "I could not read your schedule yet. Please try again in a moment."
@@ -7124,7 +7461,7 @@ export function AgentWorkspace({
     const fileSummary = summarizeFileAttachments(outgoingFiles);
     const userMessageContent = trimmed || mediaSummary;
     const visibleUserMessageContent = [userMessageContent, fileSummary].filter(Boolean).join("\n\n");
-    const agentMessageContent = [trimmed, mediaSummary, fileSummary].filter(Boolean).join("\n\n");
+    let agentMessageContent = [trimmed, mediaSummary, fileSummary].filter(Boolean).join("\n\n");
     const currentListingId = selectedContextEntityId("listing") ?? activeListingId ?? undefined;
     const currentLeadId = selectedContextEntityId("lead") ?? activeLeadId ?? undefined;
     const outgoingLeadId = outgoingContext.find((item) => item.type === "lead")?.entity_id ?? activeLeadId ?? null;
@@ -7177,6 +7514,30 @@ export function AgentWorkspace({
     setActiveOutputId(null);
     window.requestAnimationFrame(() => positionTurnAnchor(userMessage.id));
 
+    let visionAnalysisContext = "";
+    let visionAnalysisError = "";
+    let mediaProgressMessageId: string | null = null;
+    if (hasOutgoingMedia) {
+      mediaProgressMessageId = appendProgressMessage(
+        outgoingMedia.some((item) => item.mediaType === "image")
+          ? "I am reading the uploaded image and checking the property or chat details."
+          : "I attached the media and I am preparing the next step."
+      );
+      try {
+        const visionAnalysis = await analyzeComposerImages(trimmed, outgoingMedia);
+        visionAnalysisContext = visionAnalysis.agentContext;
+        if (visionAnalysisContext) {
+          agentMessageContent = [agentMessageContent, visionAnalysisContext].filter(Boolean).join("\n\n");
+          updateProgressMessage(mediaProgressMessageId, "I read the image. I am preparing the next step.");
+        }
+      } catch (error) {
+        visionAnalysisError = error instanceof Error ? error.message : "I could not analyze the uploaded images.";
+        if (mediaProgressMessageId) {
+          updateProgressMessage(mediaProgressMessageId, "I could not read the image automatically, but I can still use it as attached media.");
+        }
+      }
+    }
+
     if (shouldImportWhatsAppChat && (trimmed || hasWhatsAppChatFile)) {
       const progressCopy = getWhatsAppImportProgressCopy(turnUiLanguage);
       const progressMessageId = appendProgressMessage(progressCopy[0]);
@@ -7209,13 +7570,17 @@ export function AgentWorkspace({
       return;
     }
 
-    if (!trimmed) {
+    if (!trimmed && !visionAnalysisContext) {
       appendAssistantMessage({
         uiLanguage: turnUiLanguage,
         content: hasOutgoingMedia
           ? activeDraftId
-            ? "I added these media files to the current listing preview. They will upload when you confirm the listing."
-            : "I can use these as listing media. Please add the property details, and I will draft the listing with these files attached."
+            ? `I added these media files to the current listing preview. They will upload when you confirm the listing.${
+                visionAnalysisError ? ` I could not analyze the images yet: ${visionAnalysisError}` : ""
+              }`
+            : `I can use these as listing media. Please add the property details, and I will draft the listing with these files attached.${
+                visionAnalysisError ? ` I could not analyze the images yet: ${visionAnalysisError}` : ""
+              }`
           : "I attached that context. Tell me what you want to do with it, for example edit it, draft a reply, promote it, or schedule a follow-up."
       });
       setIsSubmitting(false);
@@ -7247,6 +7612,39 @@ export function AgentWorkspace({
       return;
     }
 
+    const pendingSocialCopyAction = latestPendingSocialCopyAction();
+    if (
+      pendingSocialCopyAction &&
+      isConfirmationMessage(trimmed) &&
+      !hasOutgoingMedia &&
+      !hasOutgoingFiles &&
+      !hasOutgoingContext
+    ) {
+      setConsumedPendingActionIds((current) => [...current, pendingSocialCopyAction.messageId]);
+      const assistantMessageId = createId();
+      const draft = socialCopyToDraft(pendingSocialCopyAction);
+      const carriedMedia = uniquePendingMedia([...pendingMediaRef.current, ...latestUploadedMediaFromThread()]);
+      setActiveDraftId(assistantMessageId);
+      if (carriedMedia.length) {
+        setDraftMediaByMessageId((current) => ({
+          ...current,
+          [assistantMessageId]: carriedMedia
+        }));
+        setPendingMedia([]);
+      }
+      appendAssistantMessage({
+        id: assistantMessageId,
+        uiLanguage: turnUiLanguage,
+        content:
+          "I prepared this as a saveable promotion asset/listing draft. Confirm it to save the asset; after it is saved, I can generate the dedicated tracking links.",
+        draft,
+        draftMedia: carriedMedia,
+        sourceMessage: pendingSocialCopyAction.instruction
+      });
+      setIsSubmitting(false);
+      return;
+    }
+
     const selectedLeadContexts = outgoingContext.filter((item) => item.type === "lead");
     if (selectedLeadContexts.length > 1 && looksLikeBulkLeadWrite(trimmed)) {
       if (looksLikeBulkLeadStatusUpdate(trimmed)) {
@@ -7272,7 +7670,10 @@ export function AgentWorkspace({
       hasListingContext: outgoingContext.some((item) => item.type === "listing") || Boolean(currentListingId),
       hasMedia: hasOutgoingMedia
     });
-    const progressMessageId = appendProgressMessage(progressCopy[0]);
+    const progressMessageId = mediaProgressMessageId ?? appendProgressMessage(progressCopy[0]);
+    if (mediaProgressMessageId) {
+      updateProgressMessage(progressMessageId, progressCopy[0]);
+    }
     const progressTimers = [
       window.setTimeout(() => updateProgressMessage(progressMessageId, progressCopy[1]), 900),
       window.setTimeout(() => updateProgressMessage(progressMessageId, progressCopy[2]), 2600),
@@ -7386,6 +7787,15 @@ export function AgentWorkspace({
 
       if (payload.action.intent === "draft_lead_reply" && leadPayload) {
         await draftReplyForLead(payload.action.response, leadPayload, payload.action.resolution);
+        return;
+      }
+
+      if (payload.action.intent === "generate_social_copy") {
+        const socialCopyPayload = payload.action.payload as { promotion?: ListingPromotion };
+        appendAssistantMessage({
+          content: payload.action.response,
+          promotion: socialCopyPayload.promotion
+        });
         return;
       }
 
@@ -7593,19 +8003,16 @@ export function AgentWorkspace({
     void startVoiceRecording();
   }
 
-  function handleMediaSelected(files: FileList | null) {
+  async function handleMediaSelected(files: FileList | null) {
     if (!files?.length) {
       return;
     }
 
-    const accepted = Array.from(files)
-      .filter((file) => file.type.startsWith("image/") || file.type.startsWith("video/"))
-      .map((file) => ({
-        id: createId(),
-        file,
-        previewUrl: URL.createObjectURL(file),
-        mediaType: file.type.startsWith("image/") ? ("image" as const) : ("video" as const)
-      }));
+    const accepted = await Promise.all(
+      Array.from(files)
+        .filter((file) => file.type.startsWith("image/") || file.type.startsWith("video/"))
+        .map((file) => createPendingMedia(file))
+    );
 
     if (!accepted.length) {
       appendAssistantMessage({
@@ -7665,7 +8072,7 @@ export function AgentWorkspace({
     return true;
   }
 
-  function handleComposerFilesDropped(files: File[]) {
+  async function handleComposerFilesDropped(files: File[]) {
     if (!files.length) {
       return;
     }
@@ -7675,12 +8082,7 @@ export function AgentWorkspace({
     const otherFiles = files.filter((file) => !mediaFiles.includes(file) && !chatFiles.includes(file));
 
     if (mediaFiles.length) {
-      const accepted = mediaFiles.map((file) => ({
-        id: createId(),
-        file,
-        previewUrl: URL.createObjectURL(file),
-        mediaType: file.type.startsWith("image/") ? ("image" as const) : ("video" as const)
-      }));
+      const accepted = await Promise.all(mediaFiles.map((file) => createPendingMedia(file)));
       setComposerMedia((current) => [...current, ...accepted]);
     }
 
@@ -7756,7 +8158,7 @@ export function AgentWorkspace({
     setDraftMediaByMessageId((current) => {
       const currentMedia = current[draftMessageId] ?? [];
       const item = currentMedia.find((media) => media.id === mediaId);
-      if (item) {
+      if (item && item.previewUrl.startsWith("blob:")) {
         URL.revokeObjectURL(item.previewUrl);
       }
 
@@ -7765,6 +8167,16 @@ export function AgentWorkspace({
         [draftMessageId]: currentMedia.filter((media) => media.id !== mediaId)
       };
     });
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === draftMessageId
+          ? {
+              ...message,
+              draftMedia: message.draftMedia?.filter((media) => media.id !== mediaId)
+            }
+          : message
+      )
+    );
   }
 
   return (
@@ -7814,7 +8226,14 @@ export function AgentWorkspace({
               </p>
             ) : null}
             {message.authRequiredReason ? (
-              <button className="message-auth-link" type="button" onClick={() => setIsAuthModalOpen(true)}>
+              <button
+                className="message-auth-link"
+                type="button"
+                onClick={() => {
+                  prepareGuestTranscriptRestore();
+                  setIsAuthModalOpen(true);
+                }}
+              >
                 Sign in to continue
               </button>
             ) : null}
@@ -7858,18 +8277,21 @@ export function AgentWorkspace({
                     sourceMessage={message.uiLanguage ?? message.sourceMessage}
                     onAttachMedia={() => openDraftMediaPicker(message.id)}
                     onRemoveMedia={(mediaId) => removeDraftMedia(message.id, mediaId)}
-                    pendingMedia={draftMediaByMessageId[message.id] ?? []}
+                    pendingMedia={draftMediaByMessageId[message.id] ?? message.draftMedia ?? []}
                     onSaved={(uploadedCount, listingId, mediaPreview, failedMedia) => {
                       const location = [message.draft?.location_area, message.draft?.city].filter(Boolean).join(", ");
                       const failedCount = failedMedia.length;
                       const failedNames = failedMedia.slice(0, 3).map((item) => item.name).join(", ");
+                      const isPromotionAssetDraft = message.draft?.ai_extracted_payload?.source === "social_copy_promotion_asset";
                       setActiveListingId(listingId);
                       appendAssistantMessage({
                         content: failedCount
                           ? `Done. I saved the listing and uploaded ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}. ${failedCount} media file${failedCount === 1 ? "" : "s"} failed${failedNames ? `: ${failedNames}` : ""}.`
-                          : uploadedCount
-                            ? `Done. I added it to your listing library with ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}.`
-                            : "Done. I added it to your listing library.",
+                          : isPromotionAssetDraft
+                            ? `Done. I saved this promotion asset to your library${uploadedCount ? ` with ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}` : ""}. I can now generate dedicated tracking links for it.`
+                            : uploadedCount
+                              ? `Done. I added it to your listing library with ${uploadedCount} media file${uploadedCount === 1 ? "" : "s"}.`
+                              : "Done. I added it to your listing library.",
                         listingSaved: {
                           listingId,
                           title: message.draft?.title ?? null,
@@ -8301,7 +8723,9 @@ export function AgentWorkspace({
         type="file"
         accept="image/*,video/*"
         multiple
-        onChange={(event) => handleMediaSelected(event.target.files)}
+        onChange={(event) => {
+          void handleMediaSelected(event.target.files);
+        }}
       />
       <input
         ref={documentFileInputRef}
@@ -8340,6 +8764,7 @@ export function AgentWorkspace({
         onAttach={openComposerMediaPicker}
         onChange={setInput}
         onFilesDropped={handleComposerFilesDropped}
+        onFilesPasted={handleComposerFilesDropped}
         onRemoveContext={removeContextAttachment}
         onRemoveFile={removeComposerFile}
         onRemoveMedia={removeComposerMedia}
@@ -8401,7 +8826,7 @@ export function AgentWorkspace({
                 Close
               </button>
             </div>
-            <AuthForm onAuthStarted={markGuestTranscriptForRestore} />
+            <AuthForm onAuthStarted={prepareGuestTranscriptRestore} />
           </section>
         </div>
       ) : null}

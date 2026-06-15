@@ -54,11 +54,13 @@ Your job:
 - Normalize area units to kanal, marla, sqft, or sqm.
 - Use the same language/script as the broker's latest message in response text. If the broker uses Urdu script, reply in Urdu script. If the broker uses Roman Urdu, reply in Roman Urdu. If the broker uses English, reply in English.
 - If a required listing detail is missing, still return a draft with known fields and mention what is missing in response.
+- If the broker message is unclear or does not contain enough evidence for a workflow, return general_reply with a short understanding of the input and one concise follow-up question. Do not force a schedule, listing, lead, or campaign card from weak evidence.
 
 Supported intents:
 - create_listing_draft
 - create_lead
 - update_listing_draft
+- generate_social_copy
 - create_campaign_links
 - list_today_followups
 - record_lead_followup
@@ -74,6 +76,8 @@ Supported intents:
 - general_reply
 
 Routing rules:
+- If the broker asks only to write social media copy, captions, post text, or channel-specific wording, return generate_social_copy. This can use broker text, uploaded image evidence, or recent context and does not require a saved listing.
+- If the broker asks for trackable links, lead pages, campaign links, sharing links, attribution, or to promote a saved/current listing with links, return create_campaign_links. Trackable links require a confirmed saved asset/listing.
 - If the broker asks to share, post, publish, or send a listing to WhatsApp, Facebook, Instagram, portals, Zameen, OLX, or another external channel, return create_campaign_links. Pislaka generates channel copy and trackable lead-page links; it does not silently publish externally.
 - Do not use publish_listing for external channels.
 
@@ -414,7 +418,219 @@ function parseLocalLeadQuery(message: string): AgentAction {
   };
 }
 
-function parseLocalPromotionRequest(message: string): AgentAction {
+function extractPromotionChannelsFromMessage(message: string) {
+  const normalized = message.toLowerCase();
+  const channels: Array<"whatsapp" | "facebook" | "instagram" | "portal"> = [];
+
+  if (/\bwhats\s*app\b|\bwhatsapp\b|\bwa\b/.test(normalized)) {
+    channels.push("whatsapp");
+  }
+  if (/\bfacebook\b|\bfb\b/.test(normalized)) {
+    channels.push("facebook");
+  }
+  if (/\binstagram\b|\binsta\b|\big\b/.test(normalized)) {
+    channels.push("instagram");
+  }
+  if (/\bportal\b|\bzameen\b|\bolx\b|\bwebsite\b/.test(normalized)) {
+    channels.push("portal");
+  }
+
+  return channels.length ? channels : (["whatsapp"] as const);
+}
+
+function isTrackableCampaignLinkRequest(message: string) {
+  return /\b(?:trackable|tracking|campaign\s*link|lead\s*page|landing\s*page|link|links|url|generate\s+link|专属链接|推广链接|追踪|落地页|线索页)\b/i.test(
+    message
+  );
+}
+
+function isSocialCopyRequest(message: string) {
+  return (
+    /\b(?:write|draft|create|generate|prepare|make)\b[\s\S]{0,60}\b(?:copy|caption|post|text|content|message)\b/i.test(
+      message
+    ) ||
+    /\b(?:facebook|fb|instagram|insta|ig|whats\s*app|whatsapp|wa|portal)\b[\s\S]{0,50}\b(?:copy|caption|post|text|content|message|文案|帖子)\b/i.test(
+      message
+    ) ||
+    /(?:写|生成|起草|准备)[\s\S]{0,20}(?:推广)?(?:文案|帖子|内容)/u.test(message)
+  );
+}
+
+function readableChannelName(channel: string) {
+  if (channel === "whatsapp") {
+    return "WhatsApp";
+  }
+  if (channel === "facebook") {
+    return "Facebook";
+  }
+  if (channel === "instagram") {
+    return "Instagram";
+  }
+  return "portal";
+}
+
+function getLatestSocialCopyEvidenceContext(context?: AgentRoutingContext) {
+  const recentMessages = context?.recentMessages?.filter((item) => item.content.trim()).slice().reverse() ?? [];
+  const evidence = recentMessages.find(
+    (item) =>
+      item.role === "assistant" &&
+      /(?:I can see:|Property details:|Location:|Floor plan|Map showing|房源信息|位置)/i.test(item.content)
+  );
+
+  return evidence?.content;
+}
+
+function extractPromotionFacts(message: string, context?: AgentRoutingContext) {
+  const visibleMessage = stripUploadedImageEvidence(message).replace(/^Attached \d+ listing media file[s]?\.\s*/i, "").trim();
+  const contextText = getLatestSocialCopyEvidenceContext(context) ?? "";
+  const combined = `${message}\n${contextText}`;
+  const summaries = uniqueTextValues([
+    ...getInternalVisionLines(message, "summary"),
+    extractBetween(contextText, /I can see:\s*/i, /(?:\s+This looks|\s+This may|\s+Should I|$)/i)
+  ]);
+  const location =
+    cleanLocationText(getInternalVisionLine(message, "location")) ??
+    cleanLocationText(extractBetween(contextText, /Location:\s*/i, /(?:\.\s+Property details:|\.\s+This|\.\s+Should|$)/i));
+  const propertyText =
+    extractBetween(contextText, /Property details:\s*/i, /(?:\.\s+This|\.\s+Should|$)/i) ??
+    "";
+  const propertyType = getInternalVisionLine(message, "property type") ?? combined.match(/\b(apartment|flat|house|villa|plot|commercial|shop)\b/i)?.[1];
+  const rawListingType =
+    getInternalVisionLine(message, "listing type") ??
+    (/\bfor[_\s-]?sale|sale|sell\b/i.test(combined) ? "sale" : /\brent|rental|lease\b/i.test(combined) ? "rent" : undefined);
+  const listingType = rawListingType?.replace(/^for[_\s-]?/i, "").toLowerCase();
+  const price = getInternalVisionLine(message, "price");
+  const size = getInternalVisionLine(message, "size") ?? (combined.match(/\b(\d+(?:\.\d+)?)\s*(?:sqft|sq\.?\s*ft|square\s*feet|marla|kanal)\b/i)?.[0]);
+  const bedrooms = getInternalVisionLine(message, "bedrooms") ?? combined.match(/\b(\d+)\s*(?:bed|beds|bedroom|bedrooms)\b/i)?.[1];
+  const bathrooms = getInternalVisionLine(message, "bathrooms") ?? combined.match(/\b(\d+)\s*(?:bath|baths|bathroom|bathrooms)\b/i)?.[1];
+  const featureCandidates = ["balcony", "TV lounge", "dining area", "dining", "kitchen", "laundry", "near Wafaqi Colony", "near PIA Housing Society"];
+  const features = uniqueTextValues(
+    featureCandidates
+      .filter((feature) => new RegExp(feature.replace(/\s+/g, "\\s+"), "i").test(combined))
+      .map((feature) => (feature === "dining" ? "dining area" : feature))
+  );
+  const nearbyAreas = uniqueTextValues(
+    ["Wafaqi Colony", "PIA Housing Society"].filter((area) => new RegExp(area.replace(/\s+/g, "\\s+"), "i").test(combined))
+  );
+  const facts = uniqueTextValues([
+    location ? `Location: ${location}` : "",
+    size,
+    propertyType,
+    listingType,
+    bedrooms ? `${bedrooms} bedrooms` : "",
+    bathrooms ? `${bathrooms} bathrooms` : "",
+    price ? `Price: ${price}` : "",
+    features.length ? `Features: ${features.join(", ")}` : ""
+  ]);
+  const sourceNotes = uniqueTextValues([
+    ...summaries,
+    propertyText,
+    visibleMessage && !isSocialCopyRequest(visibleMessage) ? visibleMessage : ""
+  ]);
+
+  return {
+    text: facts.length ? facts.join(" | ") : "Property details from the broker's message.",
+    sourceNotes,
+    location,
+    propertyType,
+    listingType,
+    size,
+    bedrooms,
+    bathrooms,
+    features,
+    nearbyAreas
+  };
+}
+
+type PromotionFacts = ReturnType<typeof extractPromotionFacts>;
+
+function buildSocialCopyCard(channel: "whatsapp" | "facebook" | "instagram" | "portal", facts: PromotionFacts) {
+  const title = `${readableChannelName(channel)} promotion draft`;
+  const shortFacts = facts.text.replace(/\s+/g, " ").slice(0, 360);
+  const propertyLabel = [
+    facts.size,
+    facts.bedrooms ? `${facts.bedrooms}-bed` : "",
+    facts.propertyType ? facts.propertyType[0].toUpperCase() + facts.propertyType.slice(1) : "Property"
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const locationLine = facts.location ? `in ${facts.location}` : "in a convenient Lahore location";
+  const detailsLine = [
+    facts.bedrooms ? `${facts.bedrooms} bedrooms` : "",
+    facts.bathrooms ? `${facts.bathrooms} bathrooms` : "",
+    facts.features.length ? facts.features.join(", ") : ""
+  ]
+    .filter(Boolean)
+    .join(" | ");
+  const accessLine = facts.nearbyAreas.length
+    ? `with convenient access to ${facts.nearbyAreas.join(" and ")}`
+    : "with convenient access to the surrounding neighborhood";
+  const listingPhrase = facts.listingType === "rent" ? "for rent" : facts.listingType === "sale" ? "for sale" : "available";
+
+  if (channel === "facebook") {
+    return {
+      channel,
+      title,
+      body: `${propertyLabel} ${listingPhrase} ${locationLine}.\n\n${detailsLine ? `${detailsLine}\n\n` : ""}A compact, practical layout ${accessLine}. Ideal for buyers looking for a clear floor plan and a well-connected Johar Town address.\n\nPrice and final availability to be confirmed.`,
+      cta: "Message for details or a viewing.",
+      image_brief: "Use the clearest uploaded image or floor plan as the post visual."
+    };
+  }
+
+  if (channel === "instagram") {
+    return {
+      channel,
+      title,
+      body: `${shortFacts}\n\nDM for details and viewing.\n#PakistanRealEstate #PropertyForSale #Pislaka`,
+      cta: "DM for details.",
+      image_brief: "Use the most visual uploaded image; keep text overlay minimal."
+    };
+  }
+
+  if (channel === "portal") {
+    return {
+      channel,
+      title,
+      body: `${propertyLabel} ${listingPhrase} ${locationLine}.\n\n${shortFacts}\n\nContact for verified price, location, and viewing schedule.`,
+      cta: "Contact for viewing.",
+      image_brief: "Use straightforward property media: floor plan or strongest listing image first."
+    };
+  }
+
+  return {
+    channel,
+    title,
+    body: `${shortFacts}\n\nInterested? Reply for details or a viewing slot.`,
+    cta: "Reply for details.",
+    image_brief: "Use the strongest uploaded property image or floor plan."
+  };
+}
+
+function parseLocalSocialCopyRequest(message: string, context?: AgentRoutingContext): AgentAction {
+  const channels = extractPromotionChannelsFromMessage(message);
+  const facts = extractPromotionFacts(message, context);
+
+  return {
+    intent: "generate_social_copy",
+    requires_confirmation: false,
+    response:
+      "I drafted social media copy from the available details. This draft is not trackable yet. Do you want to save this as a promotion asset/listing and continue to generate dedicated tracking links?",
+    payload: {
+      query: stripUploadedImageEvidence(message),
+      channels,
+      promotion: {
+        summary: "Channel-specific copy draft. No tracking links have been generated.",
+        cards: channels.map((channel) => buildSocialCopyCard(channel, facts))
+      }
+    }
+  };
+}
+
+function parseLocalPromotionRequest(message: string, context?: AgentRoutingContext): AgentAction {
+  if (isSocialCopyRequest(message) && !isTrackableCampaignLinkRequest(message)) {
+    return parseLocalSocialCopyRequest(message, context);
+  }
+
   return {
     intent: "create_campaign_links",
     requires_confirmation: true,
@@ -486,11 +702,15 @@ function parseLocalListingUpdate(message: string): AgentAction {
 }
 
 function parseLocalGeneralReply(message: string): AgentAction {
+  const visibleMessage = stripUploadedImageEvidence(message).replace(/^Attached \d+ listing media file[s]?\.\s*/i, "").trim();
+  const response = visibleMessage
+    ? `I understand this as a general request, but I need one more detail before choosing a workflow. Do you want me to draft a listing, find leads, prepare a reply, schedule a viewing, or just analyze it?`
+    : "I reviewed what you shared, but I need one more clue before choosing a workflow. Do you want me to draft a listing, find leads, prepare a reply, schedule a viewing, or just analyze it?";
+
   return {
     intent: "general_reply",
     requires_confirmation: false,
-    response:
-      "I can help with listing drafts, lead follow-ups, promotion copy, and viewing schedules. Tell me the property, buyer, or task you want to handle.",
+    response,
     payload: {
       query: message
     }
@@ -512,7 +732,10 @@ function extractScheduleTime(message: string, timeZone?: string | null) {
     }
   }
 
-  const timeMatch = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?/);
+  const timeMatch =
+    lower.match(/\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)\b/) ??
+    lower.match(/\b(?:at|around|by)\s+(\d{1,2})(?::(\d{2}))?\b/) ??
+    message.match(/(\d{1,2})(?::(\d{2}))?\s*(点|時|时)/u);
   let hour = 10;
 
   if (timeMatch) {
@@ -545,12 +768,259 @@ function extractScheduleTime(message: string, timeZone?: string | null) {
   return undefined;
 }
 
+function stripUploadedImageEvidence(message: string) {
+  const markers = [
+    "Uploaded image evidence (internal).",
+    "Image analysis from uploaded media.",
+    "\n\nUploaded image evidence (internal).",
+    "\n\nImage analysis from uploaded media."
+  ];
+
+  for (const marker of markers) {
+    const index = message.indexOf(marker);
+    if (index !== -1) {
+      return message.slice(0, index).trim();
+    }
+  }
+
+  return message.trim();
+}
+
+function getInternalVisionLine(message: string, label: string) {
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = message.match(new RegExp(`- ${escapedLabel}:\\s*([^\\n]+)`, "i"));
+  return match?.[1]?.trim();
+}
+
+function getInternalVisionLines(message: string, label: string) {
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return Array.from(message.matchAll(new RegExp(`- ${escapedLabel}:\\s*([^\\n]+)`, "gi")))
+    .map((match) => match[1]?.trim())
+    .filter(Boolean);
+}
+
+function uniqueTextValues(values: Array<string | undefined>) {
+  return values.filter(
+    (value, index): value is string =>
+      typeof value === "string" &&
+      value.length > 0 &&
+      values.findIndex((candidate) => candidate?.toLowerCase() === value.toLowerCase()) === index
+  );
+}
+
+function hasUploadedImageEvidence(message: string) {
+  return /Uploaded image evidence \(internal\)\./i.test(message);
+}
+
+function getVisibleImagePrompt(message: string) {
+  return stripUploadedImageEvidence(message).replace(/^Attached \d+ listing media file[s]?\.\s*/i, "").trim();
+}
+
+function isReadOnlyImagePrompt(prompt: string) {
+  if (!prompt) {
+    return false;
+  }
+
+  return /^(?:where|where\?|where is this|what is this|which area|location|address|map|what does this say|summarize|analyze|explain|这是哪|这是哪里|哪里|哪儿|位置|地址|这是什么地方|这是什么|总结|分析|解释|看一下)\??$/i.test(
+    prompt
+  );
+}
+
+function hasExplicitWorkflowPrompt(prompt: string) {
+  return /schedule|appointment|viewing|visit|showing|book|remind|create|add|save|draft|listing|lead|reply|promote|campaign|publish|post|share|安排|预约|看房|提醒|创建|新增|保存|草稿|房源|线索|回复|推广|发布/i.test(
+    prompt
+  );
+}
+
+function getLikelyImageNextStepQuestion(input: {
+  imageType: string;
+  visiblePrompt: string;
+  request?: string;
+  location?: string;
+  hasPropertyDetails: boolean;
+  hasVisiblePrompt: boolean;
+}) {
+  const { imageType, visiblePrompt, request, location, hasPropertyDetails, hasVisiblePrompt } = input;
+  const promptOrRequest = [visiblePrompt, request].filter(Boolean).join(" ");
+
+  if (isReadOnlyImagePrompt(visiblePrompt)) {
+    if (/map_or_location/i.test(imageType) || /where|location|address|这是哪|哪里|哪儿|位置|地址/i.test(promptOrRequest)) {
+      return {
+        possibleIntent: "You likely want to identify the place in the image.",
+        question: location
+          ? "Do you want me to use this location to search listings/leads, or only keep it as a location note?"
+          : "Should I help narrow down the location further, or use it for a property workflow?"
+      };
+    }
+
+    return {
+      possibleIntent: "You likely want a read-only explanation of the image.",
+      question: "Do you want me to turn this into a listing, lead follow-up, schedule item, or just keep analyzing it?"
+    };
+  }
+
+  if (/map_or_location/i.test(imageType)) {
+    return {
+      possibleIntent: "This looks like a location check.",
+      question: "Do you want me to search around this area, attach it to a listing, or just identify the address?"
+    };
+  }
+
+  if (/customer_chat/i.test(imageType)) {
+    return {
+      possibleIntent: "This may be a customer conversation to summarize or act on.",
+      question: "Should I draft a reply, create/update a lead, or set a follow-up from this chat?"
+    };
+  }
+
+  if (/property_listing_screenshot|property_photo/i.test(imageType)) {
+    return {
+      possibleIntent: hasPropertyDetails
+        ? "This may be material for a listing draft or listing media."
+        : "This may be listing media, but the business intent is not clear yet.",
+      question: "Should I draft a listing from it, attach it as media, or check what details are missing?"
+    };
+  }
+
+  if (/document_or_form/i.test(imageType)) {
+    return {
+      possibleIntent: "This may be a document or form that needs extraction or review.",
+      question: "Do you want me to extract the key fields, draft a document, or just summarize it?"
+    };
+  }
+
+  if (!hasVisiblePrompt) {
+    return {
+      possibleIntent: "You may want me to analyze this image and decide the next workflow.",
+      question: "Should I turn it into a listing task, lead task, schedule task, or just summarize what is visible?"
+    };
+  }
+
+  return {
+    possibleIntent: "The next action is not clear enough to run a workflow yet.",
+    question: "What would you like me to do with this image next?"
+  };
+}
+
+function parseImageObservationReply(message: string): AgentAction | null {
+  if (!hasUploadedImageEvidence(message)) {
+    return null;
+  }
+
+  const visiblePrompt = getVisibleImagePrompt(message);
+  const imageType = getInternalVisionLine(message, "type") ?? "";
+  const summaries = uniqueTextValues(getInternalVisionLines(message, "summary"));
+  const summary = summaries.join(" ");
+  const request = getInternalVisionLine(message, "customer request");
+  const appointment = getInternalVisionLine(message, "appointment");
+  const location = cleanLocationText(getInternalVisionLine(message, "location"));
+  const propertyType = getInternalVisionLine(message, "property type");
+  const listingType = getInternalVisionLine(message, "listing type");
+  const price = getInternalVisionLine(message, "price");
+  const size = getInternalVisionLine(message, "size");
+  const propertyDetails = [size, propertyType, listingType, price ? `price ${price}` : ""].filter(Boolean);
+  const hasVisiblePrompt = Boolean(visiblePrompt);
+  const hasWorkflowPrompt = hasExplicitWorkflowPrompt(visiblePrompt);
+  const hasEmbeddedAction =
+    hasVisionScheduleEvidence(message) ||
+    /- customer request:\s*[^\n]*(reply|respond|follow|contact|send|message|create|save|mark|update|预约|看房|回复|跟进|联系|保存|创建|标记|更新)/i.test(
+      message
+    );
+  const shouldAnswerOnly =
+    isReadOnlyImagePrompt(visiblePrompt) ||
+    (!hasVisiblePrompt && !hasEmbeddedAction) ||
+    (!hasWorkflowPrompt && !hasEmbeddedAction && /map_or_location|document_or_form|other/i.test(imageType)) ||
+    (!hasWorkflowPrompt && !hasEmbeddedAction && /suggested intent:\s*general_reply/i.test(message));
+
+  if (!shouldAnswerOnly) {
+    return null;
+  }
+
+  const details = [
+    summary ? `I can see: ${summary}` : "I reviewed the uploaded image.",
+    location ? `Location: ${location}.` : "",
+    request && !/where|location|address/i.test(request) ? `Visible request: ${request}.` : "",
+    propertyDetails.length ? `Property details: ${propertyDetails.join(", ")}.` : "",
+    appointment ? `Time mentioned: ${appointment}.` : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const nextStep = getLikelyImageNextStepQuestion({
+    imageType,
+    visiblePrompt,
+    request,
+    location,
+    hasPropertyDetails: propertyDetails.length > 0,
+    hasVisiblePrompt
+  });
+
+  return {
+    intent: "general_reply",
+    requires_confirmation: false,
+    response: `${details} ${nextStep.possibleIntent} ${nextStep.question}`,
+    payload: {
+      image_type: imageType,
+      summary,
+      location,
+      request,
+      possible_intent: nextStep.possibleIntent,
+      next_question: nextStep.question
+    }
+  };
+}
+
+function cleanLocationText(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+
+  const parts = value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const uniqueParts = parts.filter(
+    (part, index) => parts.findIndex((candidate) => candidate.toLowerCase() === part.toLowerCase()) === index
+  );
+
+  return uniqueParts.join(", ");
+}
+
+function getScheduleDescription(message: string) {
+  const visibleMessage = stripUploadedImageEvidence(message).replace(/^Attached \d+ listing media file[s]?\.\s*/i, "").trim();
+  if (visibleMessage) {
+    return visibleMessage;
+  }
+
+  const request = getInternalVisionLine(message, "customer request");
+  const appointment = getInternalVisionLine(message, "appointment");
+  const location = cleanLocationText(getInternalVisionLine(message, "location"));
+
+  if (request || appointment || location) {
+    return [request, appointment ? `Appointment: ${appointment}.` : "", location ? `Location: ${location}.` : ""]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  return "Viewing requested from the uploaded image.";
+}
+
+function hasVisionScheduleEvidence(message: string) {
+  return (
+    /suggested intent:\s*create_schedule_event/i.test(message) &&
+    (/- appointment:\s*[^\n]+/i.test(message) ||
+      /- customer request:\s*[^\n]*(appointment|viewing|visit|schedule|see|看房|预约)/i.test(message))
+  );
+}
+
 function parseLocalScheduleEvent(message: string, timeZone?: string | null): AgentAction {
+  const visibleMessage = stripUploadedImageEvidence(message);
+  const scheduleDescription = getScheduleDescription(message);
   const lower = message.toLowerCase();
   const startAt = extractScheduleTime(message, timeZone);
-  const leadName = extractLeadName(message);
+  const leadName = visibleMessage ? extractLeadName(visibleMessage) : undefined;
   const listingMatch = message.match(/DHA\s*Phase\s*\d+[^,.，。]*/i);
-  const listingReference = listingMatch?.[0]?.trim();
+  const locationLine = cleanLocationText(getInternalVisionLine(message, "location"));
+  const listingReference = listingMatch?.[0]?.trim() ?? locationLine;
   const isRecurring = /weekly|monthly|每周|每月/i.test(message);
   const isAppointment = /viewing|visit|showing|看房|appointment|contract|sign|handover|签约|合同|交房/i.test(message);
   const eventCategory = isRecurring ? "recurring" : isAppointment ? "appointment" : "reminder";
@@ -585,7 +1055,7 @@ function parseLocalScheduleEvent(message: string, timeZone?: string | null): Age
       event_category: eventCategory,
       event_type: eventType,
       title,
-      description: message,
+      description: scheduleDescription,
       start_at: eventCategory === "appointment" ? startAt : undefined,
       end_at: eventCategory === "appointment" && startAt ? addHours(startAt, 1) : undefined,
       reminder_at: eventCategory !== "appointment" ? startAt : startAt ? addHours(startAt, -1) : undefined,
@@ -597,10 +1067,15 @@ function parseLocalScheduleEvent(message: string, timeZone?: string | null): Age
             : undefined,
       lead_name: leadName,
       listing_reference: listingReference,
-      location_text: listingReference ? `${listingReference}, Lahore` : undefined,
+      location_text: listingReference
+        ? listingReference.toLowerCase().includes("lahore")
+          ? listingReference
+          : `${listingReference}, Lahore`
+        : undefined,
       source_payload: {
         source: "local_schedule_parser",
-        original_message: message
+        original_message: visibleMessage || scheduleDescription,
+        used_uploaded_image_evidence: message !== visibleMessage
       }
     }
   };
@@ -685,6 +1160,119 @@ function parseLocalListingDraft(message: string): AgentAction {
       bedrooms: bedMatch ? Number(bedMatch[1]) : undefined,
       bathrooms: bathMatch ? Number(bathMatch[1]) : undefined,
       features: []
+    }
+  };
+}
+
+function isContextualListingDraftRequest(message: string) {
+  return (
+    /\b(?:draft|create|write|make|prepare)\b[\s\S]{0,80}\blisting\b[\s\S]{0,80}\b(?:it|this|that|image|photo|floor\s*plan)\b/i.test(
+      message
+    ) ||
+    /\blisting\b[\s\S]{0,80}\bfrom\b[\s\S]{0,30}\b(?:it|this|that|image|photo|floor\s*plan)\b/i.test(message) ||
+    /(?:草拟|起草|生成|创建|写)[\s\S]{0,20}房源[\s\S]{0,30}(?:这个|这张|图片|户型图)/u.test(message)
+  );
+}
+
+function getLatestImageObservationContext(context?: AgentRoutingContext) {
+  const recentAssistantMessages =
+    context?.recentMessages?.filter((item) => item.role === "assistant" && item.content.trim()).slice().reverse() ?? [];
+
+  return recentAssistantMessages.find(
+    (item) =>
+      /(?:I can see:|I reviewed the uploaded image|我.*(?:看到|识别|读).*(?:图片|图)|Floor plan|Property details:)/i.test(
+        item.content
+      ) && /(?:Should I draft a listing|listing draft|listing media|房源|户型|floor plan|property details)/i.test(item.content)
+  )?.content;
+}
+
+function extractBetween(value: string, start: RegExp, end: RegExp) {
+  const startMatch = value.match(start);
+  if (!startMatch?.index) {
+    if (!startMatch) {
+      return "";
+    }
+  }
+
+  const from = (startMatch.index ?? 0) + startMatch[0].length;
+  const rest = value.slice(from);
+  const endMatch = rest.match(end);
+  return (endMatch ? rest.slice(0, endMatch.index) : rest).trim();
+}
+
+function parseListingDraftFromImageObservation(message: string, context?: AgentRoutingContext): AgentAction | null {
+  if (!isContextualListingDraftRequest(message)) {
+    return null;
+  }
+
+  const observation = getLatestImageObservationContext(context);
+  if (!observation) {
+    return null;
+  }
+
+  const summary =
+    extractBetween(observation, /I can see:\s*/i, /(?:\s+Property details:|\s+This may|\s+Should I|$)/i) ||
+    observation.split("\n")[0]?.trim() ||
+    "Uploaded property image.";
+  const detailText = extractBetween(observation, /Property details:\s*/i, /(?:\.\s+This may|\.\s+Should I|$)/i);
+  const combined = `${summary} ${detailText} ${message}`;
+  const lower = combined.toLowerCase();
+  const sqftMatch = lower.match(/(\d+(?:\.\d+)?)\s*(?:sqft|sq\.?\s*ft|square\s*feet)/);
+  const kanalMatch = lower.match(/(\d+(?:\.\d+)?)\s*kanal/);
+  const marlaMatch = lower.match(/(\d+(?:\.\d+)?)\s*marla/);
+  const bedMatch = lower.match(/(\d+)\s*(?:bed|beds|bedroom|bedrooms)/);
+  const bathMatch = lower.match(/(\d+)\s*(?:bath|baths|bathroom|bathrooms)/);
+  const propertyType = /\b(apartment|flat)\b/i.test(combined)
+    ? "apartment"
+    : /\b(plot|plots)\b/i.test(combined)
+      ? "plot"
+      : /\b(shop|commercial)\b/i.test(combined)
+        ? "commercial"
+        : "house";
+  const listingType = /\b(rent|rental|lease|for_rent)\b/i.test(combined) ? "rent" : "sale";
+  const areaValue = sqftMatch ? Number(sqftMatch[1]) : kanalMatch ? Number(kanalMatch[1]) : marlaMatch ? Number(marlaMatch[1]) : undefined;
+  const areaUnit = sqftMatch ? "sqft" : kanalMatch ? "kanal" : marlaMatch ? "marla" : undefined;
+  const featureCandidates = ["balcony", "TV lounge", "dining area", "dining", "kitchen", "laundry"];
+  const features = featureCandidates
+    .filter((feature) => new RegExp(feature.replace(/\s+/g, "\\s+"), "i").test(combined))
+    .map((feature) => (feature === "dining" ? "dining area" : feature));
+  const uniqueFeatures = Array.from(new Set(features));
+  const titleParts = [
+    areaValue && areaUnit ? `${areaValue} ${areaUnit}` : undefined,
+    bedMatch ? `${Number(bedMatch[1])}-bed` : undefined,
+    propertyType === "house" ? "House" : propertyType[0].toUpperCase() + propertyType.slice(1)
+  ].filter(Boolean);
+  const wantsFacebook = /\b(?:facebook|fb)\b/i.test(message);
+  const missing = [
+    "location",
+    "price",
+    propertyType ? "" : "property type",
+    listingType ? "" : "sale or rent"
+  ].filter(Boolean);
+
+  return {
+    intent: "create_listing_draft",
+    requires_confirmation: true,
+    response: `I drafted a listing preview from the previous image. ${missing.length ? `I still need ${missing.join(", ")} before it is complete. ` : ""}${
+      wantsFacebook ? "After you confirm the listing, I can prepare the Facebook promotion pack. " : ""
+    }Please review and confirm before adding it to your library.`,
+    payload: {
+      title: titleParts.join(" ") || "Property Listing From Floor Plan",
+      description: [
+        `A ${areaValue && areaUnit ? `${areaValue} ${areaUnit} ` : ""}${bedMatch ? `${Number(bedMatch[1])}-bedroom ` : ""}${bathMatch ? `${Number(bathMatch[1])}-bathroom ` : ""}${propertyType} for ${listingType}.`,
+        uniqueFeatures.length ? `Features include ${uniqueFeatures.join(", ")}.` : "",
+        "Location and price should be confirmed before publishing or promoting."
+      ]
+        .filter(Boolean)
+        .join(" "),
+      property_type: propertyType,
+      listing_type: listingType,
+      price_currency: "PKR",
+      area_value: areaValue,
+      area_unit: areaUnit,
+      bedrooms: bedMatch ? Number(bedMatch[1]) : undefined,
+      bathrooms: bathMatch ? Number(bathMatch[1]) : undefined,
+      features: uniqueFeatures
     }
   };
 }
@@ -929,7 +1517,9 @@ function stripInternalLocationContextFromAction(action: AgentAction): AgentActio
 }
 
 function parseLocalAgentAction(message: string, context?: AgentRoutingContext): AgentAction {
-  const intent = classifyLocalIntent(message);
+  const intent = hasVisionScheduleEvidence(message)
+    ? "schedule_event"
+    : classifyLocalIntent(message);
 
   switch (intent) {
     case "today_followups":
@@ -953,7 +1543,7 @@ function parseLocalAgentAction(message: string, context?: AgentRoutingContext): 
     case "lead_query":
       return parseLocalLeadQuery(message);
     case "promotion":
-      return parseLocalPromotionRequest(message);
+      return parseLocalPromotionRequest(message, context);
     case "listing_update":
       return parseLocalListingUpdate(message);
     case "listing_draft":
@@ -1011,8 +1601,25 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
     }
   }
 
+  const imageObservationReply = parseImageObservationReply(message);
+  if (imageObservationReply) {
+    return stripInternalLocationContextFromAction(localizeAgentActionResponse(imageObservationReply, message));
+  }
+
+  const contextualImageDraft = parseListingDraftFromImageObservation(message, context);
+  if (contextualImageDraft) {
+    return stripInternalLocationContextFromAction(localizeAgentActionResponse(contextualImageDraft, message));
+  }
+
+  if (isSocialCopyRequest(message) && !isTrackableCampaignLinkRequest(message)) {
+    return stripInternalLocationContextFromAction(
+      localizeAgentActionResponse(parseLocalSocialCopyRequest(message, context), message)
+    );
+  }
+
   const routingMessage = buildLocationEnhancedRoutingMessage(message, context?.locationContext);
-  const localIntent = classifyLocalIntent(message);
+  const visionSuggestedSchedule = hasVisionScheduleEvidence(message);
+  const localIntent = visionSuggestedSchedule ? "schedule_event" : classifyLocalIntent(message);
 
   if (localIntent === "today_followups") {
     return stripInternalLocationContextFromAction(
@@ -1020,9 +1627,21 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
     );
   }
 
+  if (localIntent === "schedule_event" || localIntent === "schedule_query") {
+    return stripInternalLocationContextFromAction(
+      localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
+    );
+  }
+
   if (localIntent === "listing_draft" || localIntent === "listing_update" || localIntent === "lead_details_update") {
     return stripInternalLocationContextFromAction(
       localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
+    );
+  }
+
+  if (localIntent === "promotion" && isSocialCopyRequest(message) && !isTrackableCampaignLinkRequest(message)) {
+    return stripInternalLocationContextFromAction(
+      localizeAgentActionResponse(parseLocalSocialCopyRequest(message, context), message)
     );
   }
 
