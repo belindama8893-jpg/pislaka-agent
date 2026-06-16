@@ -35,4 +35,26 @@ describe("agentIntentRegistry", () => {
       audit: "trace_confirm_and_write"
     });
   });
+
+  it("keeps every intent ready for configurable routing and guidance", () => {
+    Object.values(agentIntentRegistry).forEach((definition) => {
+      expect(definition.availability).toBeDefined();
+      expect(definition.input.examples.length).toBeGreaterThan(0);
+      expect(definition.routing.priority).toEqual(expect.any(Number));
+      expect(definition.routing.channelBehavior).toMatch(/parameter|not_supported/);
+      expect(definition.policy.risk).toMatch(/read|draft|write|external/);
+      expect(definition.resolution).toEqual(
+        expect.objectContaining({
+          allowCurrentContext: expect.any(Boolean),
+          allowLatestOnlyWhenExplicit: expect.any(Boolean)
+        })
+      );
+      expect(definition.guidance).toEqual(
+        expect.objectContaining({
+          proactiveTriggers: expect.any(Array),
+          nextSteps: expect.any(Array)
+        })
+      );
+    });
+  });
 });

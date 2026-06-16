@@ -20,8 +20,8 @@ import {
   X,
   UserPlus
 } from "lucide-react";
-import { AgentComposer, type AgentComposerContextPreview } from "@/components/agent/AgentComposer";
 import { AnalyticsSummaryCard } from "@/components/analytics/AnalyticsDashboard";
+import { AgentComposer, type AgentComposerAction, type AgentComposerContextPreview } from "@/components/agent/AgentComposer";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
 import { AuthForm } from "@/components/auth/AuthForm";
 import Link from "next/link";
@@ -49,6 +49,11 @@ import type {
   ScheduleEventListPayload
 } from "@/lib/agent/types";
 import { isScheduleRequest } from "@/lib/agent/intent-router";
+import {
+  getAgentComposerPlaceholder,
+  getAgentGuidanceSuggestions,
+  type AgentGuidanceContext
+} from "@/lib/agent/guidance";
 import {
   detectAgentResponseLanguage,
   formatScheduleQueryResponse,
@@ -105,6 +110,18 @@ const GUEST_CHAT_STORAGE_KEY = "pislaka_guest_chat_v1";
 const GUEST_CHAT_RESTORE_FLAG = "pislaka_restore_guest_chat";
 const GUEST_CHAT_IMPORT_SUCCESS_FLAG = "pislaka_guest_chat_import_success";
 const GUEST_CHAT_TTL_MS = 24 * 60 * 60 * 1000;
+
+const guidanceActionIcons: Partial<Record<AgentAction["intent"], AgentComposerAction["icon"]>> = {
+  create_listing_draft: House,
+  create_lead: MessageCircle,
+  create_campaign_links: Megaphone,
+  list_today_followups: CalendarClock,
+  draft_lead_reply: MessageCircle,
+  create_schedule_event: CalendarClock,
+  list_schedule_events: CalendarClock,
+  show_basic_attribution: Globe2,
+  update_lead_status: UserPlus
+};
 
 type AuthRequiredReason =
   | "chat_history"
@@ -5354,44 +5371,74 @@ export function AgentWorkspace({
     return () => window.removeEventListener("popstate", handlePopState);
   }, [shouldHandleHomeBackNavigation, welcomeMessageContent]);
 
-  const quickActions = [
-    {
-      icon: House,
-      label: "List from Link",
+  const guidanceContext = useMemo<AgentGuidanceContext>(() => {
+    const todayKey = new Date().toLocaleDateString("en-CA", { timeZone: userTimeZone });
+    const now = Date.now();
+    const followupCounts = workspaceLeads.reduce(
+      (counts, lead) => {
+        if (!lead.next_follow_up_at) {
+          return counts;
+        }
+
+        const followupTime = new Date(lead.next_follow_up_at).getTime();
+        if (Number.isNaN(followupTime)) {
+          return counts;
+        }
+
+        if (followupTime <= now) {
+          counts.overdue += 1;
+        }
+
+        const followupDayKey = new Date(lead.next_follow_up_at).toLocaleDateString("en-CA", {
+          timeZone: userTimeZone
+        });
+        if (followupDayKey === todayKey) {
+          counts.today += 1;
+        }
+
+        return counts;
+      },
+      { overdue: 0, today: 0 }
+    );
+    const listingCount = recentListings.length + sessionSavedListings.length;
+
+    return {
+      brokerState: {
+        hasListings: listingCount > 0,
+        hasLeads: workspaceLeads.length > 0,
+        recentListingCount: listingCount,
+        recentLeadCount: workspaceLeads.length,
+        todayFollowupCount: followupCounts.today,
+        overdueFollowupCount: followupCounts.overdue
+      },
+      conversationState: {
+        hasStarted,
+        isWhatsAppImportMode,
+        activeLeadId,
+        activeListingId
+      }
+    };
+  }, [
+    activeLeadId,
+    activeListingId,
+    hasStarted,
+    isWhatsAppImportMode,
+    recentListings.length,
+    sessionSavedListings.length,
+    userTimeZone,
+    workspaceLeads
+  ]);
+  const quickActions = getAgentGuidanceSuggestions(guidanceContext, { surface: "home", limit: 4 }).map(
+    (suggestion) => ({
+      icon: guidanceActionIcons[suggestion.intent] ?? Sparkles,
+      label: suggestion.label,
       onClick: () =>
         appendAssistantMessage({
-          content:
-            "I can help you create a property listing in seconds. Send me a property link, photos, details — or just tell me what you want to list."
+          content: suggestion.prompt
         })
-    },
-    {
-      icon: Megaphone,
-      label: "Create Promo Post",
-      onClick: () =>
-        appendAssistantMessage({
-          content:
-            "I can help you promote a property on WhatsApp or Facebook. Send me a listing link, photos, details — or just tell me what kind of buyers you want to attract."
-        })
-    },
-    {
-      icon: MessageCircle,
-      label: "Import WhatsApp Leads",
-      onClick: () =>
-        appendAssistantMessage({
-          content:
-            "I can turn chats or messy customer lists into organized leads. Paste a WhatsApp chat, upload a screenshot/list — or just tell me about your customers."
-        })
-    },
-    {
-      icon: CalendarClock,
-      label: "Today's Follow-ups",
-      onClick: () =>
-        appendAssistantMessage({
-          content:
-            "I can help you decide who to follow up with today. Send recent chats, a lead list, screenshots — or just tell me who you’ve been talking to."
-        })
-    }
-  ];
+    })
+  );
+  const composerPlaceholder = getAgentComposerPlaceholder(guidanceContext);
   const attachActions = [
     {
       icon: MessageCircle,
@@ -8886,11 +8933,7 @@ export function AgentWorkspace({
         onRemoveMedia={removeComposerMedia}
         onSubmit={handleSubmit}
         onVoice={handleVoiceInput}
-        placeholder={
-          isWhatsAppImportMode
-            ? "Paste WhatsApp chat or drop a .txt/.zip export..."
-            : "Paste a listing link, WhatsApp chat, or ask anything..."
-        }
+        placeholder={composerPlaceholder}
         sendDisabled={isSubmitting || isListening || isTranscribing}
         topSlot={
           isFollowUpNudgeVisible ? (
