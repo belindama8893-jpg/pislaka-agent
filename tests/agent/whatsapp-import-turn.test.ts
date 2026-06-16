@@ -76,6 +76,22 @@ describe("agent WhatsApp import turn", () => {
     ).toBe(true);
   });
 
+  it("treats WhatsApp channel commands as normal agent intents, not chat import", () => {
+    for (const message of ["Promote this listing on WhatsApp", "Reply to Ahmed on WhatsApp"]) {
+      expect(
+        getWhatsAppImportTurn({
+          message,
+          files: [],
+          hasOutgoingMedia: false,
+          isScheduleRequest: false,
+          isWhatsAppImportMode: false
+        }).shouldHandle
+      ).toBe(false);
+    }
+
+    expect(looksLikeWhatsAppChatText("WhatsApp chat with Ahmed: Is this still available?")).toBe(true);
+  });
+
   it("does not let chat text heuristics intercept schedule requests", () => {
     expect(
       getWhatsAppImportTurn({
