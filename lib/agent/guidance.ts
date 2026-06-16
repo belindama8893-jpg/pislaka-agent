@@ -1,3 +1,4 @@
+import { requiresConfirmationForAgentAction } from "@/lib/agent/confirmation-policy";
 import { getAgentIntentDefinition, type AgentIntentUiCard } from "@/lib/agent/registry/intents";
 import type { AgentAction } from "@/lib/agent/types";
 
@@ -94,7 +95,10 @@ function buildSuggestion(
     prompt,
     reason: rankedIntent.reason,
     uiCard: definition.uiCard,
-    confirmationRequired: definition.confirmation !== "never"
+    confirmationRequired: requiresConfirmationForAgentAction({
+      intent: rankedIntent.intent,
+      payload: {}
+    })
   };
 }
 

@@ -1,5 +1,5 @@
 import { env, requireServerEnv } from "@/lib/env";
-import { requiresConfirmationForAgentAction } from "@/lib/agent/confirmation-policy";
+import { applyAgentActionPolicy, requiresConfirmationForAgentAction } from "@/lib/agent/confirmation-policy";
 import {
   agentActionSchema,
   leadCreatePayloadSchema,
@@ -1537,6 +1537,12 @@ function stripInternalLocationContextFromAction(action: AgentAction): AgentActio
   };
 }
 
+function finalizeAgentActionResponse(action: AgentAction, sourceMessage: string): AgentAction {
+  return stripInternalLocationContextFromAction(
+    applyAgentActionPolicy(localizeAgentActionResponse(action, sourceMessage))
+  );
+}
+
 function parseLocalAgentAction(message: string, context?: AgentRoutingContext): AgentAction {
   const intent = hasVisionScheduleEvidence(message)
     ? "schedule_event"
@@ -1605,14 +1611,14 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
       const draft = await importListingDraftFromUrl(listingImportUrl);
       const imageCount = draft.ai_extracted_payload.remote_images.length;
 
-      return {
+      return finalizeAgentActionResponse({
         intent: "create_listing_draft",
-        requires_confirmation: true,
+        requires_confirmation: false,
         response: `I imported the listing details from that link and found ${imageCount} image${imageCount === 1 ? "" : "s"}. Please review before adding it to your library.`,
         payload: draft
-      };
+      }, message);
     } catch {
-      return {
+      return finalizeAgentActionResponse({
         intent: "general_reply",
         requires_confirmation: false,
         response:
@@ -1620,24 +1626,22 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
         payload: {
           source_url: listingImportUrl
         }
-      };
+      }, message);
     }
   }
 
   const imageObservationReply = parseImageObservationReply(message);
   if (imageObservationReply) {
-    return stripInternalLocationContextFromAction(localizeAgentActionResponse(imageObservationReply, message));
+    return finalizeAgentActionResponse(imageObservationReply, message);
   }
 
   const contextualImageDraft = parseListingDraftFromImageObservation(message, context);
   if (contextualImageDraft) {
-    return stripInternalLocationContextFromAction(localizeAgentActionResponse(contextualImageDraft, message));
+    return finalizeAgentActionResponse(contextualImageDraft, message);
   }
 
   if (isSocialCopyRequest(message) && !isTrackableCampaignLinkRequest(message)) {
-    return stripInternalLocationContextFromAction(
-      localizeAgentActionResponse(parseLocalSocialCopyRequest(message, context), message)
-    );
+    return finalizeAgentActionResponse(parseLocalSocialCopyRequest(message, context), message);
   }
 
   const routingMessage = buildLocationEnhancedRoutingMessage(message, context?.locationContext);
@@ -1645,39 +1649,27 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
   const localIntent = visionSuggestedSchedule ? "schedule_event" : classifyLocalIntent(message);
 
   if (localIntent === "today_followups") {
-    return stripInternalLocationContextFromAction(
-      localizeAgentActionResponse(parseLocalAgentAction(message, context), message)
-    );
+    return finalizeAgentActionResponse(parseLocalAgentAction(message, context), message);
   }
 
   if (localIntent === "analytics") {
-    return stripInternalLocationContextFromAction(
-      localizeAgentActionResponse(parseLocalAgentAction(message, context), message)
-    );
+    return finalizeAgentActionResponse(parseLocalAgentAction(message, context), message);
   }
 
   if (localIntent === "schedule_event" || localIntent === "schedule_query") {
-    return stripInternalLocationContextFromAction(
-      localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
-    );
+    return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);
   }
 
   if (localIntent === "listing_draft" || localIntent === "listing_update" || localIntent === "lead_details_update") {
-    return stripInternalLocationContextFromAction(
-      localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
-    );
+    return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);
   }
 
   if (localIntent === "promotion" && isSocialCopyRequest(message) && !isTrackableCampaignLinkRequest(message)) {
-    return stripInternalLocationContextFromAction(
-      localizeAgentActionResponse(parseLocalSocialCopyRequest(message, context), message)
-    );
+    return finalizeAgentActionResponse(parseLocalSocialCopyRequest(message, context), message);
   }
 
   if (!env.deepseekApiKey) {
-    return stripInternalLocationContextFromAction(
-      localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
-    );
+    return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);
   }
 
   const apiKey = requireServerEnv("deepseekApiKey");
@@ -1715,40 +1707,30 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
     clearTimeout(timeout);
 
     if (!response.ok) {
-      return stripInternalLocationContextFromAction(
-        localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
-      );
+      return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);
     }
 
     const json = await response.json();
     const content = json?.choices?.[0]?.message?.content;
 
     if (typeof content !== "string") {
-      return stripInternalLocationContextFromAction(
-        localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
-      );
+      return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);
     }
 
     const action = agentActionSchema.parse(JSON.parse(extractJsonObject(content)));
     const normalizedAction = normalizeAgentAction(action, routingMessage, context);
 
     if (normalizedAction.intent === "general_reply" && localIntent !== "general_reply") {
-      return stripInternalLocationContextFromAction(
-        localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
-      );
+      return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);
     }
 
     if (localIntent === "promotion" && normalizedAction.intent !== "create_campaign_links") {
-      return stripInternalLocationContextFromAction(
-        localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
-      );
+      return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);
     }
 
-    return stripInternalLocationContextFromAction(localizeAgentActionResponse(normalizedAction, message));
+    return finalizeAgentActionResponse(normalizedAction, message);
   } catch {
-    return stripInternalLocationContextFromAction(
-      localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
-    );
+    return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);
   } finally {
     clearTimeout(timeout);
   }

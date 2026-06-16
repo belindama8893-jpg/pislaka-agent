@@ -62,7 +62,7 @@ describe("image observation routing", () => {
     });
 
     expect(action.intent).toBe("create_listing_draft");
-    expect(action.requires_confirmation).toBe(true);
+    expect(action.requires_confirmation).toBe(false);
     expect(action.response).toContain("previous image");
     expect(action.response).toContain("Facebook promotion");
     expect(action.payload).toMatchObject({

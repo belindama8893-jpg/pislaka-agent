@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { requiresConfirmationForAgentAction } from "../../lib/agent/confirmation-policy";
+import {
+  applyAgentActionPolicy,
+  getAgentActionPolicy,
+  requiresConfirmationForAgentAction
+} from "../../lib/agent/confirmation-policy";
 import type { AgentAction } from "../../lib/agent/types";
 
 function action(intent: AgentAction["intent"], payload: AgentAction["payload"] = {}) {
@@ -56,5 +60,27 @@ describe("requiresConfirmationForAgentAction", () => {
 
   it("requires confirmation for follow-up records unless they are explicitly message_sent", () => {
     expect(requiresConfirmationForAgentAction(action("record_lead_followup"))).toBe(true);
+  });
+
+  it("exposes the registry-backed policy snapshot for an action", () => {
+    expect(getAgentActionPolicy(action("create_campaign_links"))).toMatchObject({
+      audit: "trace_confirm_and_write",
+      confirmation: "always",
+      requiresAuthForWrite: true,
+      requiresConfirmation: true,
+      risk: "external",
+      uiCard: "promotion_pack"
+    });
+  });
+
+  it("applies registry policy over stale action confirmation flags", () => {
+    expect(
+      applyAgentActionPolicy({
+        ...action("create_listing_draft"),
+        requires_confirmation: true,
+        response: "Draft",
+        payload: {}
+      }).requires_confirmation
+    ).toBe(false);
   });
 });
