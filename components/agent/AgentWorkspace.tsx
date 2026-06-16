@@ -134,6 +134,13 @@ type AuthRequiredReason =
 
 type AuthRequiredHandler = (reason: AuthRequiredReason) => void;
 
+type AgentActionResponseHandler = (
+  action: AgentAction,
+  sourceMessage: string
+) => boolean | Promise<boolean>;
+
+type AgentActionResponseHandlers = Partial<Record<AgentAction["intent"], AgentActionResponseHandler>>;
+
 function isUnauthorizedResponse(response: Response) {
   return response.status === 401;
 }
@@ -6798,116 +6805,119 @@ export function AgentWorkspace({
     });
   }
 
+  const agentActionResponseHandlers: AgentActionResponseHandlers = {
+    create_lead: (action) => {
+      proposeLeadCreate(action.payload as LeadCreatePayload);
+      return true;
+    },
+    list_leads: (action, sourceMessage) => {
+      const leadPayload = action.payload as LeadOperationPayload | undefined;
+      if (!leadPayload) {
+        return false;
+      }
+
+      showLeadResults(action.response, leadPayload, sourceMessage);
+      return true;
+    },
+    list_today_followups: async (action) => {
+      await showTodayFollowUps(action.response);
+      return true;
+    },
+    list_schedule_events: async (action, sourceMessage) => {
+      await showScheduleResults(
+        action.response,
+        action.payload as ScheduleEventListPayload,
+        sourceMessage
+      );
+      return true;
+    },
+    show_basic_attribution: async (action, sourceMessage) => {
+      await showAnalyticsSummary(action.response, action.payload, sourceMessage);
+      return true;
+    },
+    update_lead_status: (action) => {
+      const leadPayload = action.payload as LeadOperationPayload | undefined;
+      if (!leadPayload) {
+        return false;
+      }
+
+      proposeLeadStatusUpdate(action.response, leadPayload, action.resolution);
+      return true;
+    },
+    record_lead_followup: (action) => {
+      const leadPayload = action.payload as LeadOperationPayload | undefined;
+      if (!leadPayload) {
+        return false;
+      }
+
+      proposeLeadFollowUpRecord(action.response, leadPayload, action.resolution);
+      return true;
+    },
+    update_lead_details: (action) => {
+      proposeLeadDetailsUpdate(
+        action.response,
+        action.payload as LeadDetailsUpdatePayload,
+        action.resolution
+      );
+      return true;
+    },
+    update_lead_listing: (action) => {
+      proposeLeadListingUpdate(
+        action.response,
+        action.payload as LeadListingUpdatePayload,
+        action.resolution
+      );
+      return true;
+    },
+    draft_lead_reply: async (action) => {
+      const leadPayload = action.payload as LeadOperationPayload | undefined;
+      if (!leadPayload) {
+        return false;
+      }
+
+      await draftReplyForLead(action.response, leadPayload, action.resolution);
+      return true;
+    },
+    generate_social_copy: (action) => {
+      const socialCopyPayload = action.payload as { promotion?: ListingPromotion };
+      appendAssistantMessage({
+        content: action.response,
+        promotion: socialCopyPayload.promotion
+      });
+      return true;
+    },
+    create_campaign_links: (action, sourceMessage) => {
+      proposePromotionFromMessage(sourceMessage, action.resolution);
+      return true;
+    },
+    publish_listing: (action, sourceMessage) => {
+      if (!looksLikeExternalChannelPromotion(sourceMessage)) {
+        return false;
+      }
+
+      proposePromotionFromMessage(sourceMessage, action.resolution);
+      return true;
+    },
+    update_listing_draft: (action, sourceMessage) => {
+      proposeListingUpdateFromMessage(
+        action.response,
+        sourceMessage,
+        action.payload as ListingUpdatePayload,
+        action.resolution
+      );
+      return true;
+    },
+    create_schedule_event: (action) =>
+      showScheduleResolutionMessage(
+        action.response,
+        action.payload as BrokerEventDraftInput,
+        action.resolution
+      )
+  };
+
   async function handleAgentActionResponse(action: AgentAction, sourceMessage: string) {
-    const leadPayload = action.payload as LeadOperationPayload | undefined;
-    const handlers: Partial<Record<AgentAction["intent"], () => boolean | Promise<boolean>>> = {
-      create_lead: () => {
-        proposeLeadCreate(action.payload as LeadCreatePayload);
-        return true;
-      },
-      list_leads: () => {
-        if (!leadPayload) {
-          return false;
-        }
-
-        showLeadResults(action.response, leadPayload, sourceMessage);
-        return true;
-      },
-      list_today_followups: async () => {
-        await showTodayFollowUps(action.response);
-        return true;
-      },
-      list_schedule_events: async () => {
-        await showScheduleResults(
-          action.response,
-          action.payload as ScheduleEventListPayload,
-          sourceMessage
-        );
-        return true;
-      },
-      show_basic_attribution: async () => {
-        await showAnalyticsSummary(action.response, action.payload, sourceMessage);
-        return true;
-      },
-      update_lead_status: () => {
-        if (!leadPayload) {
-          return false;
-        }
-
-        proposeLeadStatusUpdate(action.response, leadPayload, action.resolution);
-        return true;
-      },
-      record_lead_followup: () => {
-        if (!leadPayload) {
-          return false;
-        }
-
-        proposeLeadFollowUpRecord(action.response, leadPayload, action.resolution);
-        return true;
-      },
-      update_lead_details: () => {
-        proposeLeadDetailsUpdate(
-          action.response,
-          action.payload as LeadDetailsUpdatePayload,
-          action.resolution
-        );
-        return true;
-      },
-      update_lead_listing: () => {
-        proposeLeadListingUpdate(
-          action.response,
-          action.payload as LeadListingUpdatePayload,
-          action.resolution
-        );
-        return true;
-      },
-      draft_lead_reply: async () => {
-        if (!leadPayload) {
-          return false;
-        }
-
-        await draftReplyForLead(action.response, leadPayload, action.resolution);
-        return true;
-      },
-      generate_social_copy: () => {
-        const socialCopyPayload = action.payload as { promotion?: ListingPromotion };
-        appendAssistantMessage({
-          content: action.response,
-          promotion: socialCopyPayload.promotion
-        });
-        return true;
-      },
-      create_campaign_links: () => {
-        proposePromotionFromMessage(sourceMessage, action.resolution);
-        return true;
-      },
-      publish_listing: () => {
-        if (!looksLikeExternalChannelPromotion(sourceMessage)) {
-          return false;
-        }
-
-        proposePromotionFromMessage(sourceMessage, action.resolution);
-        return true;
-      },
-      update_listing_draft: () => {
-        proposeListingUpdateFromMessage(
-          action.response,
-          sourceMessage,
-          action.payload as ListingUpdatePayload,
-          action.resolution
-        );
-        return true;
-      },
-      create_schedule_event: () =>
-        showScheduleResolutionMessage(
-          action.response,
-          action.payload as BrokerEventDraftInput,
-          action.resolution
-        )
-    };
-
-    const handler = handlers[action.intent];
-    return handler ? await handler() : false;
+    const handler = agentActionResponseHandlers[action.intent];
+    return handler ? await handler(action, sourceMessage) : false;
   }
 
   function formatResolutionCandidates(candidates: AgentResolutionCandidate[]) {
