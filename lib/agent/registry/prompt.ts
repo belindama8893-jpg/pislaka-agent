@@ -31,6 +31,19 @@ export function formatRoutingRulesForPrompt(definitions: AgentIntentDefinition[]
   return definitions.map(formatIntentRule).join("\n");
 }
 
+export function formatSemanticRoutingRulesForPrompt() {
+  return [
+    "- Choose exactly one supported intent. Do not invent new intent names.",
+    "- Treat words such as WhatsApp, Facebook, Instagram, Zameen, portal, phone, email, price, and schedule time as evidence or parameters; never route from one keyword alone.",
+    "- Use confidence from 0 to 1 to show how strongly the full sentence, memory context, and workflow state support the chosen intent.",
+    "- Include alternative_intents when another supported intent is plausible. Keep each alternative inside the supported intent list.",
+    "- Include missing_slots when the selected workflow is plausible but key information is still missing.",
+    "- Include is_follow_up_to_workflow when the broker is answering or continuing the active workflow state; set it false when they interrupt with a new task.",
+    "- Include route_reason as a short explanation of the semantic evidence, not a hidden chain of thought.",
+    "- Produce the final action, payload, and routing metadata in this same JSON response. Do not require a separate classification call."
+  ].join("\n");
+}
+
 export function formatResolutionRulesForPrompt(definitions: AgentIntentDefinition[] = getPromptVisibleIntentDefinitions()) {
   const currentContextIntents = definitions
     .filter((definition) => definition.resolution.allowCurrentContext)

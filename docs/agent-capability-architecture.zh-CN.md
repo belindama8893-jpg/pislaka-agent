@@ -68,7 +68,7 @@ flowchart TD
 | --- | --- | --- |
 | Capability Registry | `lib/agent/registry/intents.ts` | 每个 intent 的业务域、输入、路由、确认、风险、实体解析、UI、引导和 prompt metadata |
 | Memory Runtime | `lib/agent/memory.ts` | 把短期聊天、workflow state、当前选中实体、附件和运行时上下文编译成带可信度/生命周期/使用边界的 memory context |
-| Prompt Compiler | `lib/agent/registry/prompt.ts` | 从 registry 编译 supported intents、routing rules、workflow rules、resolution rules |
+| Prompt Compiler | `lib/agent/registry/prompt.ts` | 从 registry 编译 supported intents、routing rules、semantic routing rules、workflow rules、resolution rules |
 | Guidance Runtime | `lib/agent/guidance.ts` | 根据 broker/workspace 状态生成首页快捷动作、placeholder、下一步建议 |
 | Policy Runtime | `lib/agent/confirmation-policy.ts` | 从 registry 计算 `requires_confirmation`、risk、audit、uiCard、requiresAuthForWrite |
 | Resolution Runtime | `lib/agent/entity-resolution.ts` | 按 registry 的 `allowCurrentContext` 和 `allowLatestOnlyWhenExplicit` 解析 lead/listing/schedule |
@@ -76,6 +76,18 @@ flowchart TD
 | Router | `lib/agent/deepseek.ts` | LLM/local fallback 输出 `AgentAction`，最终统一应用 policy |
 | Handler Manifest | `components/agent/agent-action-response-handlers.ts` | intent 到前端 handler 的映射，同时暴露 policy manifest |
 | Workspace Shell | `components/agent/AgentWorkspace.tsx` | 负责 UI state、消息流、卡片渲染；不应继续承载业务规则 |
+
+## Semantic Router 2.0
+
+意图判断不再把关键词直接等同于 intent。关键词只作为 evidence，最终由 LLM 在 registry 暴露的封闭 intent 集合里做语义分类。
+
+关键原则：
+
+- 能选的 intent 是封闭的，只能来自 `agentIntentSchema` 和 `routing.exposeToLlm !== false` 的能力。
+- `WhatsApp`、`Facebook`、`phone`、`price`、`schedule time` 等词只作为参数或证据，不能单独决定能力。
+- DeepSeek 的同一次 JSON 输出必须同时包含 `intent`、`payload` 和路由元数据，不新增第二次 classifier 调用。
+- 路由元数据包括 `confidence`、`alternative_intents`、`missing_slots`、`is_follow_up_to_workflow` 和 `route_reason`。
+- 路由元数据只能帮助 routing/guidance/prompt/observability，不能跳过 confirmation、entity resolution 或数据库校验。
 
 ## Capability Registry 字段
 

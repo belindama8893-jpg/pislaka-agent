@@ -132,12 +132,23 @@ export const agentResolutionSchema = z.object({
   candidates: z.array(agentResolutionCandidateSchema).optional()
 });
 
+export const agentAlternativeIntentSchema = z.object({
+  intent: agentIntentSchema,
+  confidence: z.number().min(0).max(1).optional(),
+  reason: z.string().max(300).optional()
+});
+
 export const agentActionSchema = z.object({
   intent: agentIntentSchema,
   requires_confirmation: z.boolean().default(true),
   response: z.string(),
   payload: z.record(z.unknown()).default({}),
-  resolution: agentResolutionSchema.optional()
+  resolution: agentResolutionSchema.optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  alternative_intents: z.array(agentAlternativeIntentSchema).max(5).optional(),
+  missing_slots: z.array(z.string().min(1)).max(10).optional(),
+  is_follow_up_to_workflow: z.boolean().optional(),
+  route_reason: z.string().max(500).optional()
 });
 
 export type AgentAction = z.infer<typeof agentActionSchema>;

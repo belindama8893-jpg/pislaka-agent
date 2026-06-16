@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatResolutionRulesForPrompt,
   formatRoutingRulesForPrompt,
+  formatSemanticRoutingRulesForPrompt,
   formatSupportedIntentsForPrompt,
   formatWorkflowRulesForPrompt,
   getPromptVisibleIntentDefinitions
@@ -54,5 +55,17 @@ describe("agent registry prompt compiler", () => {
     expect(prompt).toContain("general_reply");
     expect(prompt).toContain("must not use current context automatically");
     expect(prompt).toContain("WhatsApp or Facebook are parameters");
+  });
+
+  it("compiles semantic routing metadata rules without requiring a second LLM call", () => {
+    const prompt = formatSemanticRoutingRulesForPrompt();
+
+    expect(prompt).toContain("Choose exactly one supported intent");
+    expect(prompt).toContain("never route from one keyword alone");
+    expect(prompt).toContain("confidence from 0 to 1");
+    expect(prompt).toContain("alternative_intents");
+    expect(prompt).toContain("missing_slots");
+    expect(prompt).toContain("is_follow_up_to_workflow");
+    expect(prompt).toContain("Do not require a separate classification call");
   });
 });

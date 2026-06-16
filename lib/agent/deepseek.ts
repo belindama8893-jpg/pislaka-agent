@@ -36,6 +36,7 @@ import { getListingImportUrl, importListingDraftFromUrl } from "@/lib/listings/i
 import { formatScheduleQueryResponse, localizeAgentActionResponse } from "@/lib/agent/response-language";
 import {
   formatRoutingRulesForPrompt,
+  formatSemanticRoutingRulesForPrompt,
   formatSupportedIntentsForPrompt,
   formatWorkflowRulesForPrompt
 } from "@/lib/agent/registry/prompt";
@@ -48,6 +49,7 @@ import {
 const deepseekRequestTimeoutMs = 8000;
 const supportedIntentsPrompt = formatSupportedIntentsForPrompt();
 const routingRulesPrompt = formatRoutingRulesForPrompt();
+const semanticRoutingRulesPrompt = formatSemanticRoutingRulesForPrompt();
 const workflowRulesPrompt = formatWorkflowRulesForPrompt();
 
 const systemPrompt = `
@@ -75,6 +77,24 @@ ${supportedIntentsPrompt}
 Routing rules:
 ${routingRulesPrompt}
 - Do not use publish_listing for external channels.
+
+Semantic routing output:
+${semanticRoutingRulesPrompt}
+
+Every output shape may include these routing metadata fields:
+{
+  "confidence": 0.92,
+  "alternative_intents": [
+    {
+      "intent": "generate_social_copy",
+      "confidence": 0.46,
+      "reason": "The broker mentioned a channel, but asked for promotion links rather than copy."
+    }
+  ],
+  "missing_slots": ["listing target"],
+  "is_follow_up_to_workflow": true,
+  "route_reason": "The broker said this listing and WhatsApp while the active workflow is awaiting listing promotion confirmation."
+}
 
 Listing output shape:
 {
