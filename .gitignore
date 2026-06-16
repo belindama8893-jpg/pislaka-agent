@@ -14,3 +14,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .vercel
+
+# Local agent/test artifacts
+.playwright-cli/
+merge-backups/
+output/
+scratch/

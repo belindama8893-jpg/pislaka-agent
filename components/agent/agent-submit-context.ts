@@ -17,6 +17,8 @@ type ChatWorkflowMessageRef = ChatMessageRef &
     sourceMessage?: string;
   };
 
+type WorkflowRelatedEntity = NonNullable<AgentWorkflowStateInput["related_entities"]>[number];
+
 type BuildAgentTurnContentOptions<FileAttachment> = {
   fileAttachments: FileAttachment[];
   mediaCount: number;
@@ -83,6 +85,68 @@ const completedFields: Array<[string, AgentAction["intent"], string]> = [
   ["analyticsSummary", "show_basic_attribution", "Attribution summary was shown."]
 ];
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function relatedEntityFromValue(type: WorkflowRelatedEntity["type"], value: unknown): WorkflowRelatedEntity | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const id = typeof value.id === "string" ? value.id : undefined;
+  const label =
+    typeof value.full_name === "string"
+      ? value.full_name
+      : typeof value.title === "string"
+        ? value.title
+        : typeof value.label === "string"
+          ? value.label
+          : undefined;
+
+  if (!id && !label) {
+    return null;
+  }
+
+  return {
+    type,
+    entity_id: id,
+    label
+  };
+}
+
+function getWorkflowRelatedEntities(message: ChatWorkflowMessageRef): WorkflowRelatedEntity[] {
+  const entities: WorkflowRelatedEntity[] = [];
+  const push = (entity: WorkflowRelatedEntity | null) => {
+    if (!entity) {
+      return;
+    }
+
+    if (entities.some((item) => item.type === entity.type && item.entity_id === entity.entity_id && item.label === entity.label)) {
+      return;
+    }
+
+    entities.push(entity);
+  };
+
+  const leadDetailsUpdate = isRecord(message.leadDetailsUpdate) ? message.leadDetailsUpdate : null;
+  push(relatedEntityFromValue("lead", leadDetailsUpdate?.lead));
+
+  const leadListingUpdate = isRecord(message.leadListingUpdate) ? message.leadListingUpdate : null;
+  push(relatedEntityFromValue("lead", leadListingUpdate?.lead));
+  push(relatedEntityFromValue("listing", leadListingUpdate?.listing));
+
+  const leadStatusUpdate = isRecord(message.leadStatusUpdate) ? message.leadStatusUpdate : null;
+  push(relatedEntityFromValue("lead", leadStatusUpdate?.lead));
+
+  const listingUpdate = isRecord(message.listingUpdate) ? message.listingUpdate : null;
+  push(relatedEntityFromValue("listing", listingUpdate?.listing));
+
+  push(relatedEntityFromValue("listing", message.promotionTarget));
+
+  return entities;
+}
+
 export function inferAgentWorkflowState(messages: ChatWorkflowMessageRef[]): AgentWorkflowStateInput | undefined {
   const latestAssistantMessage = [...messages]
     .reverse()
@@ -92,11 +156,14 @@ export function inferAgentWorkflowState(messages: ChatWorkflowMessageRef[]): Age
     return undefined;
   }
 
+  const relatedEntities = getWorkflowRelatedEntities(latestAssistantMessage);
+
   if (latestAssistantMessage.entitySelection) {
     return {
       stage: "needs_selection",
       awaiting: "selection",
       pending_slots: ["target_entity"],
+      related_entities: relatedEntities,
       source_message: latestAssistantMessage.sourceMessage,
       summary: "Waiting for the broker to choose the correct entity before continuing."
     };
@@ -109,6 +176,7 @@ export function inferAgentWorkflowState(messages: ChatWorkflowMessageRef[]): Age
         active_intent: intent,
         awaiting: "confirmation",
         pending_slots: [],
+        related_entities: relatedEntities,
         source_message: latestAssistantMessage.sourceMessage,
         summary: `Waiting for broker confirmation: ${summary}.`
       };
@@ -122,6 +190,7 @@ export function inferAgentWorkflowState(messages: ChatWorkflowMessageRef[]): Age
         active_intent: intent,
         awaiting: "none",
         pending_slots: [],
+        related_entities: relatedEntities,
         source_message: latestAssistantMessage.sourceMessage,
         summary
       };
@@ -133,6 +202,7 @@ export function inferAgentWorkflowState(messages: ChatWorkflowMessageRef[]): Age
       stage: "collecting_info",
       awaiting: "details",
       pending_slots: ["next_detail"],
+      related_entities: relatedEntities,
       source_message: latestAssistantMessage.sourceMessage,
       summary: "Waiting for one more detail from the broker."
     };

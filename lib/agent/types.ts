@@ -38,6 +38,16 @@ export const agentWorkflowStateSchema = z.object({
   active_intent: agentIntentSchema.optional(),
   awaiting: z.enum(["details", "confirmation", "selection", "none"]).optional(),
   pending_slots: z.array(z.string().min(1)).max(20).optional(),
+  related_entities: z
+    .array(
+      z.object({
+        type: z.enum(["lead", "listing", "schedule_event"]),
+        entity_id: z.string().uuid().optional(),
+        label: z.string().min(1).optional()
+      })
+    )
+    .max(10)
+    .optional(),
   source_message: z.string().max(1000).optional(),
   summary: z.string().max(500).optional()
 });

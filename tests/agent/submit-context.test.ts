@@ -74,17 +74,29 @@ describe("agent submit context", () => {
         {
           role: "assistant",
           content: "Please confirm before I save this lead.",
-          leadCreate: { payload: {} },
+          leadDetailsUpdate: {
+            lead: {
+              id: "11111111-1111-1111-1111-111111111111",
+              full_name: "Ahmed Raza"
+            }
+          },
           sourceMessage: "Add Ahmed"
         }
       ])
     ).toEqual({
       stage: "awaiting_confirmation",
-      active_intent: "create_lead",
+      active_intent: "update_lead_details",
       awaiting: "confirmation",
       pending_slots: [],
+      related_entities: [
+        {
+          type: "lead",
+          entity_id: "11111111-1111-1111-1111-111111111111",
+          label: "Ahmed Raza"
+        }
+      ],
       source_message: "Add Ahmed",
-      summary: "Waiting for broker confirmation: lead creation confirmation."
+      summary: "Waiting for broker confirmation: lead details confirmation."
     });
   });
 
@@ -100,7 +112,8 @@ describe("agent submit context", () => {
     ).toMatchObject({
       stage: "needs_selection",
       awaiting: "selection",
-      pending_slots: ["target_entity"]
+      pending_slots: ["target_entity"],
+      related_entities: []
     });
 
     expect(
@@ -113,7 +126,8 @@ describe("agent submit context", () => {
     ).toMatchObject({
       stage: "collecting_info",
       awaiting: "details",
-      pending_slots: ["next_detail"]
+      pending_slots: ["next_detail"],
+      related_entities: []
     });
   });
 });

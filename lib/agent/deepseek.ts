@@ -339,8 +339,11 @@ function parseLocalLeadListingUpdate(message: string): AgentAction {
 }
 
 function extractLeadDetailsUpdate(message: string) {
+  const leadTargetMatch = message.match(
+    /\b(?:lead|customer|client|buyer)\s+([\p{L}][\p{L} .'’-]{1,50}?)(?=\s+(?:phone|mobile|number|contact|email|mail|name|message|note)\b|$)/iu
+  );
   const payload: Record<string, unknown> = {
-    lead_name: extractLeadName(message),
+    lead_name: leadTargetMatch?.[1]?.trim() ?? extractLeadName(message),
     query: message
   };
   const emailMatch = extractEmail(message);

@@ -187,6 +187,12 @@ flowchart TD
     activeIntent: "create_campaign_links",
     awaiting: "confirmation",
     pendingSlots: [],
+    relatedEntities: [
+      {
+        type: "listing",
+        entity_id: "..."
+      }
+    ],
     source: "runtime",
     trustLevel: "confirmed",
     allowedUse: ["routing", "guidance", "prompt"],
@@ -215,6 +221,8 @@ flowchart TD
 - 聊天记忆可以帮助判断“那套房”“刚才那个客户”“继续发一下”这类多轮意图，但不能当作已保存的业务事实。
 - Workflow state 是过程记忆，用来描述当前任务处于 `collecting_info`、`awaiting_confirmation`、`needs_selection`、`completed` 哪一步。
 - Workflow state 可以帮助 Agent 解释短句，例如“确认”“继续”“那就发一下”，也可以帮助生成下一步问题；但不能跳过 confirmation、entity resolution 或数据库事实校验。
+- Workflow state 可以携带 `relatedEntities`，说明当前确认/选择/补信息关联哪个 lead/listing；这些引用仍需遵守 entity resolution 和 confirmation policy。
+- 用户明确发起新的业务意图时，应允许打断当前 workflow，例如正在等待推广确认时，`Update lead Ahmed phone...` 应进入 `update_lead_details`，而不是被强行解释成推广确认。
 - Workflow state 优先来自前端当前消息列表推导的 `workflow_state`；如果没有，后端可从最近 assistant 消息的 `structured_payload.ui` 保守推导。
 - 当前选中实体和附件可以帮助 routing/guidance/entity resolution，但具体能否使用仍要服从 registry 的 `resolution.allowCurrentContext`。
 - `workspace.currentLead/currentListing` 是 turn-level context：每一轮都必须由当前 UI/URL/明确附件重新提供；如果下一轮没有 active selection，Memory Runtime 不会保留上一轮的 lead/listing。

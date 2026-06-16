@@ -40,6 +40,7 @@ export type AgentMemoryWorkflowState = AgentMemoryMetadata & {
   activeIntent?: AgentAction["intent"];
   awaiting?: AgentWorkflowStateInput["awaiting"];
   pendingSlots: string[];
+  relatedEntities: NonNullable<AgentWorkflowStateInput["related_entities"]>;
   sourceMessage?: string;
   stage: AgentWorkflowStage;
   summary?: string;
@@ -122,18 +123,24 @@ function workflowStateFromInput(state: AgentWorkflowStateInput): AgentMemoryWork
     activeIntent: state.active_intent,
     awaiting: state.awaiting,
     pendingSlots: state.pending_slots ?? [],
+    relatedEntities: state.related_entities ?? [],
     sourceMessage: state.source_message,
     stage: state.stage,
     summary: state.summary
   };
 }
 
-function workflowStateFromUiPayload(ui: Record<string, unknown>, content: string): AgentMemoryWorkflowState | null {
+function workflowStateFromUiPayload(
+  ui: Record<string, unknown>,
+  content: string,
+  relatedEntities: AgentMemoryWorkflowState["relatedEntities"]
+): AgentMemoryWorkflowState | null {
   if (ui.entitySelection) {
     return {
       ...workflowMemory,
       awaiting: "selection",
       pendingSlots: ["target_entity"],
+      relatedEntities,
       sourceMessage: typeof ui.sourceMessage === "string" ? ui.sourceMessage : undefined,
       stage: "needs_selection",
       summary: "Waiting for the broker to choose the correct entity before continuing."
@@ -159,6 +166,7 @@ function workflowStateFromUiPayload(ui: Record<string, unknown>, content: string
         activeIntent: intent,
         awaiting: "confirmation",
         pendingSlots: [],
+        relatedEntities,
         sourceMessage: typeof ui.sourceMessage === "string" ? ui.sourceMessage : undefined,
         stage: "awaiting_confirmation",
         summary: `Waiting for broker confirmation: ${summary}.`
@@ -182,6 +190,7 @@ function workflowStateFromUiPayload(ui: Record<string, unknown>, content: string
         activeIntent: intent,
         awaiting: "none",
         pendingSlots: [],
+        relatedEntities,
         sourceMessage: typeof ui.sourceMessage === "string" ? ui.sourceMessage : undefined,
         stage: "completed",
         summary
@@ -194,6 +203,7 @@ function workflowStateFromUiPayload(ui: Record<string, unknown>, content: string
       ...workflowMemory,
       awaiting: "details",
       pendingSlots: ["next_detail"],
+      relatedEntities,
       stage: "collecting_info",
       summary: "Waiting for one more detail from the broker."
     };
@@ -203,8 +213,16 @@ function workflowStateFromUiPayload(ui: Record<string, unknown>, content: string
 }
 
 function inferWorkflowState(input: CompileAgentMemoryContextInput): AgentMemoryWorkflowState | undefined {
+  const relatedEntities = getWorkspaceRelatedEntities(input);
+
   if (input.workflowState) {
-    return workflowStateFromInput(input.workflowState);
+    const explicitState = workflowStateFromInput(input.workflowState);
+    return explicitState.relatedEntities.length
+      ? explicitState
+      : {
+          ...explicitState,
+          relatedEntities
+        };
   }
 
   const messages = [...(input.recentMessages ?? [])].reverse();
@@ -214,13 +232,41 @@ function inferWorkflowState(input: CompileAgentMemoryContextInput): AgentMemoryW
     }
 
     const ui = getPayloadUi(message.structured_payload ?? message.structuredPayload);
-    const workflow = ui ? workflowStateFromUiPayload(ui, message.content) : workflowStateFromUiPayload({}, message.content);
+    const workflow = ui
+      ? workflowStateFromUiPayload(ui, message.content, relatedEntities)
+      : workflowStateFromUiPayload({}, message.content, relatedEntities);
     if (workflow) {
       return workflow;
     }
   }
 
   return undefined;
+}
+
+function getWorkspaceRelatedEntities(input: CompileAgentMemoryContextInput): AgentMemoryWorkflowState["relatedEntities"] {
+  const entities: AgentMemoryWorkflowState["relatedEntities"] = [];
+
+  if (input.currentLeadId) {
+    entities.push({ type: "lead", entity_id: input.currentLeadId });
+  }
+
+  if (input.currentListingId) {
+    entities.push({ type: "listing", entity_id: input.currentListingId });
+  }
+
+  for (const attachment of input.contextAttachments ?? []) {
+    if (entities.some((entity) => entity.type === attachment.type && entity.entity_id === attachment.entity_id)) {
+      continue;
+    }
+
+    entities.push({
+      type: attachment.type,
+      entity_id: attachment.entity_id,
+      label: attachment.label
+    });
+  }
+
+  return entities.slice(0, 10);
 }
 
 export function compileAgentMemoryContext(input: CompileAgentMemoryContextInput): AgentMemoryRuntimeContext {
@@ -317,6 +363,11 @@ function formatWorkflowMemory(memory: AgentMemoryRuntimeContext) {
     memory.workflow.activeIntent ? `Active intent: ${memory.workflow.activeIntent}` : null,
     memory.workflow.awaiting ? `Awaiting: ${memory.workflow.awaiting}` : null,
     memory.workflow.pendingSlots.length ? `Pending slots: ${memory.workflow.pendingSlots.join(", ")}` : null,
+    memory.workflow.relatedEntities.length
+      ? `Related entities: ${memory.workflow.relatedEntities
+          .map((entity) => [entity.type, entity.label ?? entity.entity_id].filter(Boolean).join(":"))
+          .join(", ")}`
+      : null,
     memory.workflow.summary ? `Summary: ${memory.workflow.summary}` : null
   ].filter(Boolean);
 

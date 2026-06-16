@@ -84,6 +84,7 @@ describe("agent memory runtime", () => {
 
   it("uses explicit workflow state as confirmed workflow memory", () => {
     const memory = compileAgentMemoryContext({
+      currentListingId: "22222222-2222-2222-2222-222222222222",
       workflowState: {
         stage: "awaiting_confirmation",
         active_intent: "create_campaign_links",
@@ -102,10 +103,12 @@ describe("agent memory runtime", () => {
       activeIntent: "create_campaign_links",
       awaiting: "confirmation",
       pendingSlots: [],
+      relatedEntities: [{ type: "listing", entity_id: "22222222-2222-2222-2222-222222222222" }],
       summary: "Waiting for channel confirmation."
     });
     expect(formatAgentMemoryForPrompt(memory)).toContain("Stage: awaiting_confirmation");
     expect(formatAgentMemoryForPrompt(memory)).toContain("Active intent: create_campaign_links");
+    expect(formatAgentMemoryForPrompt(memory)).toContain("Related entities: listing:22222222-2222-2222-2222-222222222222");
   });
 
   it("infers workflow state from persisted assistant structured payload", () => {
