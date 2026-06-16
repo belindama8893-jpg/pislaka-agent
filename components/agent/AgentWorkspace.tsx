@@ -49,6 +49,11 @@ import {
   type AgentPendingPromotionAction,
   type AgentPendingSocialCopyAction
 } from "@/components/agent/agent-submit-workflow";
+import {
+  getWhatsAppImportTurn,
+  isWhatsAppChatFile,
+  type ChatImportRequestedAction
+} from "@/components/agent/agent-whatsapp-import-turn";
 import { AuthForm } from "@/components/auth/AuthForm";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -374,7 +379,6 @@ type ChatLeadChoicePreview = {
 };
 
 type ChatFollowupNextAction = "note" | "reminder" | "status";
-type ChatImportRequestedAction = "reply" | "save_followup" | "set_reminder" | "update_status" | "analyze_only" | "unknown";
 
 type AgentResolution = NonNullable<AgentAction["resolution"]>;
 type AgentResolutionCandidate = NonNullable<AgentResolution["matched"]>;
@@ -1278,48 +1282,6 @@ function buildLeadCreateFollowUpFromChat(summary: ChatFollowupSummary): LeadCrea
     sourceType: summary.source_type,
     messageDraft: summary.reply_draft?.reply_text
   };
-}
-
-function looksLikeWhatsAppChatText(message: string) {
-  const trimmed = message.trim();
-
-  if (/\bSelected context:\s+(?:Lead|Listing)\b/i.test(trimmed)) {
-    return false;
-  }
-
-  return (
-    /whats\s*app|whatsapp|chat export|messages and calls are end-to-end encrypted/i.test(trimmed) ||
-    /^\[?\d{1,2}[/.:-]\d{1,2}[/.:-]\d{2,4},?\s+\d{1,2}:\d{2}/m.test(trimmed) ||
-    /^[\p{L}\p{N} ._+\-()]+:\s+.+$/mu.test(trimmed)
-  );
-}
-
-function detectChatImportRequestedAction(message: string): ChatImportRequestedAction {
-  const normalized = message.toLowerCase();
-
-  if (/回复|回他|回她|reply|respond|draft/i.test(message)) {
-    return "reply";
-  }
-  if (/提醒|remind|reminder|follow up later|跟进时间/i.test(message)) {
-    return "set_reminder";
-  }
-  if (/状态|更新.*客户|更新.*线索|qualified|interested|not interested|lost|status/i.test(message)) {
-    return "update_status";
-  }
-  if (/保存|记录|加入.*跟进|保存.*跟进|save|record|note/i.test(message)) {
-    return "save_followup";
-  }
-  if (/分析|总结|看看|summari[sz]e|analy[sz]e/i.test(message)) {
-    return "analyze_only";
-  }
-
-  return normalized.trim() ? "unknown" : "unknown";
-}
-
-function isWhatsAppChatFile(file: File) {
-  const name = file.name.toLowerCase();
-
-  return name.endsWith(".txt") || name.endsWith(".zip");
 }
 
 function listingToContextAttachment(listing: RecentListingSummary): ChatContextAttachment {
@@ -7451,11 +7413,13 @@ export function AgentWorkspace({
     const currentListingId = getSelectedAgentContextEntityId(outgoingContext, "listing") ?? activeListingId ?? undefined;
     const currentLeadId = getSelectedAgentContextEntityId(outgoingContext, "lead") ?? activeLeadId ?? undefined;
     const outgoingLeadId = outgoingContext.find((item) => item.type === "lead")?.entity_id ?? activeLeadId ?? null;
-    const hasWhatsAppChatFile = outgoingFiles.some((item) => item.kind === "whatsapp_chat" || isWhatsAppChatFile(item.file));
-    const shouldImportWhatsAppChat =
-      isWhatsAppImportMode ||
-      hasWhatsAppChatFile ||
-      (!hasOutgoingMedia && !hasOutgoingFiles && !isScheduleRequest(trimmed) && looksLikeWhatsAppChatText(trimmed));
+    const whatsAppImportTurn = getWhatsAppImportTurn({
+      message: trimmed,
+      files: outgoingFiles,
+      hasOutgoingMedia,
+      isScheduleRequest: isScheduleRequest(trimmed),
+      isWhatsAppImportMode
+    });
     const explicitUiLanguage = detectExplicitResponseLanguage(trimmed);
     const turnUiLanguage = await detectTurnUiLanguage(trimmed, outgoingFiles, explicitUiLanguage ?? preferredUiLanguage);
     if (explicitUiLanguage) {
@@ -7524,7 +7488,7 @@ export function AgentWorkspace({
       }
     }
 
-    if (shouldImportWhatsAppChat && (trimmed || hasWhatsAppChatFile)) {
+    if (whatsAppImportTurn.shouldHandle) {
       const progressCopy = getWhatsAppImportProgressCopy(turnUiLanguage);
       const progressMessageId = appendProgressMessage(progressCopy[0]);
       const progressTimers = [
@@ -7538,7 +7502,7 @@ export function AgentWorkspace({
           trimmed,
           outgoingFiles,
           outgoingLeadId,
-          detectChatImportRequestedAction(trimmed),
+          whatsAppImportTurn.requestedAction,
           turnUiLanguage
         );
       } catch (error) {
