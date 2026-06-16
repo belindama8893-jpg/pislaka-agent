@@ -2383,52 +2383,54 @@ function PromotionPack({ promotion, sourceMessage }: { promotion: ListingPromoti
       tone="promotion"
     >
       <div className="promotion-list">
-        {promotion.cards.map((card) => (
-          <article className="promotion-row" key={card.channel}>
-            <div className="promotion-card-header">
-              <div className="promotion-channel-title">
-                <ChannelLogo channel={card.channel} />
-                <span>{card.channel}</span>
+        {promotion.cards.map((card, index) => {
+          const copyKey = `${card.channel}:${index}:${card.title}`;
+          return (
+            <article className="promotion-row" key={copyKey}>
+              <div className="promotion-card-header">
+                <div className="promotion-channel-title">
+                  <ChannelLogo channel={card.channel} />
+                  <span>{card.channel}</span>
+                </div>
+                <button
+                  className="icon-button compact"
+                  type="button"
+                  aria-label={`${copy.buttons.copy} ${card.channel}`}
+                  onClick={() => {
+                    const parts = [card.title, card.body];
+                    if (card.landing_url) parts.push(`Link: ${card.landing_url}`);
+                    if (card.cta) parts.push(card.cta);
+                    void handleCopy(copyKey, parts.join("\n\n"));
+                  }}
+                >
+                  <Copy size={14} />
+                </button>
               </div>
-              <button
-                className="icon-button compact"
-                type="button"
-                aria-label={`${copy.buttons.copy} ${card.channel}`}
-                onClick={() => {
-                  const parts = [card.title, card.body];
-                  if (card.landing_url) parts.push(`Link: ${card.landing_url}`);
-                  if (card.cta) parts.push(card.cta);
-                  void handleCopy(card.channel, parts.join("\n\n"));
-                }}
-              >
-                <Copy size={14} />
-              </button>
-            </div>
-            <strong>{card.title}</strong>
-            <div className="promotion-bubble-content">
-              <p>{card.body}</p>
-              {card.cta ? (
-                <span className="promotion-cta-text">{card.cta}</span>
-              ) : null}
-              {card.landing_url ? (
-                <a className="promotion-inline-link" href={card.landing_url} target="_blank" rel="noreferrer">
-                  <Globe2 size={13} />
-                  <span>{card.landing_url}</span>
-                </a>
-              ) : null}
-            </div>
-            {copiedChannel === card.channel ? <small className="copied-hint">{copy.generic.copiedToClipboard}</small> : null}
-            {card.whatsapp_share_url ? (
-              <div className="promotion-actions">
-                <a className="promotion-action-button secondary" href={card.whatsapp_share_url} target="_blank" rel="noreferrer">
-                  <MessageCircle size={15} />
-                  <span>{copy.buttons.shareToWhatsApp}</span>
-                </a>
+              <strong>{card.title}</strong>
+              <div className="promotion-bubble-content">
+                <p>{card.body}</p>
+                {card.cta ? <span className="promotion-cta-text">{card.cta}</span> : null}
+                {card.landing_url ? (
+                  <a className="promotion-inline-link" href={card.landing_url} target="_blank" rel="noreferrer">
+                    <Globe2 size={13} />
+                    <span>{card.landing_url}</span>
+                  </a>
+                ) : null}
               </div>
-            ) : null}
-          </article>
-        ))}
+              {copiedChannel === copyKey ? <small className="copied-hint">{copy.generic.copiedToClipboard}</small> : null}
+              {card.whatsapp_share_url ? (
+                <div className="promotion-actions">
+                  <a className="promotion-action-button secondary" href={card.whatsapp_share_url} target="_blank" rel="noreferrer">
+                    <MessageCircle size={15} />
+                    <span>{copy.buttons.shareToWhatsApp}</span>
+                  </a>
+                </div>
+              ) : null}
+            </article>
+          );
+        })}
       </div>
+      {promotion.summary ? <div className="promotion-next-step">{promotion.summary}</div> : null}
     </AgentOutputCard>
   );
 }

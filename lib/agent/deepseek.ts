@@ -559,7 +559,7 @@ function extractPromotionFacts(message: string, context?: AgentRoutingContext) {
     getInternalVisionLine(message, "listing type") ??
     (/\bfor[_\s-]?sale|sale|sell\b/i.test(combined) ? "sale" : /\brent|rental|lease\b/i.test(combined) ? "rent" : undefined);
   const listingType = rawListingType?.replace(/^for[_\s-]?/i, "").toLowerCase();
-  const price = getInternalVisionLine(message, "price");
+  const price = getInternalVisionLine(message, "price") ?? combined.match(/\bPKR\s*[\d,]+(?:\.\d+)?(?:\s*(?:crore|lakh))?\b/i)?.[0];
   const size = getInternalVisionLine(message, "size") ?? (combined.match(/\b(\d+(?:\.\d+)?)\s*(?:sqft|sq\.?\s*ft|square\s*feet|marla|kanal)\b/i)?.[0]);
   const bedrooms = getInternalVisionLine(message, "bedrooms") ?? combined.match(/\b(\d+)\s*(?:bed|beds|bedroom|bedrooms)\b/i)?.[1];
   const bathrooms = getInternalVisionLine(message, "bathrooms") ?? combined.match(/\b(\d+)\s*(?:bath|baths|bathroom|bathrooms)\b/i)?.[1];
@@ -603,6 +603,97 @@ function extractPromotionFacts(message: string, context?: AgentRoutingContext) {
 }
 
 type PromotionFacts = ReturnType<typeof extractPromotionFacts>;
+
+function formatPromotionPriceLabel(price: string | undefined) {
+  if (!price) {
+    return undefined;
+  }
+
+  const numericMatch = price.match(/PKR\s*([\d,]+(?:\.\d+)?)/i);
+  if (!numericMatch) {
+    return price;
+  }
+
+  const amount = Number(numericMatch[1].replace(/,/g, ""));
+  if (!Number.isFinite(amount)) {
+    return price;
+  }
+
+  const crore = amount / 10000000;
+  if (crore >= 1) {
+    return `PKR ${Number(crore.toFixed(2)).toString()} Crore`;
+  }
+
+  const lakh = amount / 100000;
+  if (lakh >= 1) {
+    return `PKR ${Number(lakh.toFixed(2)).toString()} Lakh`;
+  }
+
+  return `PKR ${amount.toLocaleString("en-US")}`;
+}
+
+function buildWhatsAppCopyCards(facts: PromotionFacts) {
+  const propertyLabel = [
+    facts.size,
+    facts.propertyType ? facts.propertyType[0].toUpperCase() + facts.propertyType.slice(1) : "Property"
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const locationLine = facts.location ? `in ${facts.location}` : "in a convenient Lahore location";
+  const priceLine = formatPromotionPriceLabel(facts.text.match(/Price:\s*([^|]+)/i)?.[1]?.trim());
+  const detailsLine = [
+    facts.bedrooms ? `${facts.bedrooms} bedrooms` : "",
+    facts.bathrooms ? `${facts.bathrooms} bathrooms` : "",
+    facts.features.length ? facts.features.join(", ") : ""
+  ]
+    .filter(Boolean)
+    .join(" | ");
+  const listingPhrase = facts.listingType === "rent" ? "for rent" : facts.listingType === "sale" ? "for sale" : "available";
+
+  return [
+    {
+      channel: "whatsapp" as const,
+      title: "Direct buyer WhatsApp draft",
+      body: [
+        `${propertyLabel} ${listingPhrase} ${locationLine}.`,
+        priceLine ? `Demand: ${priceLine}` : null,
+        detailsLine || null,
+        "Interested? Reply for details or a viewing slot."
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      cta: "Reply for details.",
+      image_brief: "Use the clearest front photo or listing preview image."
+    },
+    {
+      channel: "whatsapp" as const,
+      title: "Premium WhatsApp draft",
+      body: [
+        `Available now: ${propertyLabel} ${listingPhrase} ${locationLine}.`,
+        priceLine ? `Demand: ${priceLine}` : null,
+        detailsLine ? `Highlights: ${detailsLine}` : null,
+        "A strong option for serious buyers looking for a clean location and quick viewing."
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      cta: "Message to arrange a viewing.",
+      image_brief: "Use a polished exterior or best room photo first."
+    },
+    {
+      channel: "whatsapp" as const,
+      title: "Short broadcast WhatsApp draft",
+      body: [
+        `${propertyLabel} ${listingPhrase} - ${facts.location ?? "Lahore"}`,
+        priceLine ? `Demand: ${priceLine}` : null,
+        "Reply for details, pictures, or viewing time."
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      cta: "Reply for details.",
+      image_brief: "Use one clear property image with minimal text."
+    }
+  ];
+}
 
 function buildSocialCopyCard(channel: "whatsapp" | "facebook" | "instagram" | "portal", facts: PromotionFacts) {
   const title = `${readableChannelName(channel)} promotion draft`;
@@ -666,21 +757,27 @@ function buildSocialCopyCard(channel: "whatsapp" | "facebook" | "instagram" | "p
   };
 }
 
+function buildSocialCopyCards(channel: "whatsapp" | "facebook" | "instagram" | "portal", facts: PromotionFacts) {
+  return channel === "whatsapp" ? buildWhatsAppCopyCards(facts) : [buildSocialCopyCard(channel, facts)];
+}
+
 function parseLocalSocialCopyRequest(message: string, context?: AgentRoutingContext): AgentAction {
   const channels = extractPromotionChannelsFromMessage(message);
   const facts = extractPromotionFacts(message, context);
+  const cards = channels.flatMap((channel) => buildSocialCopyCards(channel, facts));
+  const optionCount = cards.length;
 
   return {
     intent: "generate_social_copy",
     requires_confirmation: false,
-    response:
-      "I drafted social media copy from the available details. This draft is not trackable yet. Do you want to save this as a promotion asset/listing and continue to generate dedicated tracking links?",
+    response: `I drafted ${optionCount > 1 ? `${optionCount} copy options` : "social media copy"} from the available details.`,
     payload: {
       query: stripUploadedImageEvidence(message),
       channels,
       promotion: {
-        summary: "Channel-specific copy draft. No tracking links have been generated.",
-        cards: channels.map((channel) => buildSocialCopyCard(channel, facts))
+        summary:
+          "Want dedicated tracking links and attribution? Save this as a promotion asset/listing first, then I can generate link tracking.",
+        cards
       }
     }
   };

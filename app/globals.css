@@ -3220,6 +3220,17 @@ a {
   line-height: 1.45;
 }
 
+.promotion-next-step {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(20, 184, 166, 0.2);
+  border-radius: 8px;
+  background: rgba(204, 251, 241, 0.34);
+  color: #0f766e;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
 .promotion-list {
   display: grid;
   gap: 10px;

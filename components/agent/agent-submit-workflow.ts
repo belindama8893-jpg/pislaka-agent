@@ -1,5 +1,5 @@
 import type { ListingDraftInput } from "@/lib/listings/types";
-import type { ListingPromotion, PromotionChannel } from "@/lib/promotions/types";
+import type { ListingPromotion, PromotionCard as ListingPromotionCard, PromotionChannel } from "@/lib/promotions/types";
 
 export type AgentPendingPromotionAction<Listing, Channel extends string> = {
   channels: Channel[];
@@ -175,19 +175,6 @@ function formatDraftSize(draft: ListingDraftInput) {
   return draft.area_value && draft.area_unit ? `${draft.area_value} ${draft.area_unit}` : null;
 }
 
-function channelTitle(channel: PromotionChannel) {
-  if (channel === "whatsapp") {
-    return "WhatsApp promotion draft";
-  }
-  if (channel === "facebook") {
-    return "Facebook promotion draft";
-  }
-  if (channel === "instagram") {
-    return "Instagram promotion draft";
-  }
-  return "Portal promotion draft";
-}
-
 export function buildDraftSocialCopyPromotion(
   draft: ListingDraftInput,
   channels: PromotionChannel[],
@@ -198,6 +185,7 @@ export function buildDraftSocialCopyPromotion(
   const size = formatDraftSize(draft);
   const price = formatDraftPrice(draft);
   const listingType = draft.listing_type === "rent" ? "for rent" : draft.listing_type === "sale" ? "for sale" : "available";
+  const listingPhrase = listingType;
   const propertyLabel = [size, draft.property_type].filter(Boolean).join(" ") || draft.property_type || "Property";
   const opening = [propertyLabel, listingType, location ? `in ${location}` : ""].filter(Boolean).join(" ");
   const roomLine = [
@@ -207,24 +195,76 @@ export function buildDraftSocialCopyPromotion(
     .filter(Boolean)
     .join(" | ");
   const featureLine = draft.features?.length ? `Features: ${draft.features.join(", ")}` : null;
+  const baseLines = [
+    opening || draft.title,
+    price ? `Demand: ${price}` : null,
+    roomLine || null,
+    featureLine
+  ].filter(Boolean);
+  const buildChannelCards = (channel: PromotionChannel): ListingPromotionCard[] => {
+    if (channel !== "whatsapp") {
+      return [
+        {
+          channel,
+          title:
+            channel === "facebook"
+              ? "Facebook promotion draft"
+              : channel === "instagram"
+                ? "Instagram promotion draft"
+                : "Portal promotion draft",
+          body: [
+            ...baseLines,
+            channel === "instagram" ? "DM for details and viewing." : "Interested? Reply for details or a viewing slot."
+          ].join("\n\n"),
+          cta: channel === "instagram" ? "DM for details." : "Reply for details.",
+          image_brief: "Use the strongest property photo or listing preview image."
+        }
+      ];
+    }
+
+    return [
+      {
+        channel,
+        title: "Direct buyer WhatsApp draft",
+        body: [...baseLines, "Interested? Reply for details or a viewing slot."].join("\n\n"),
+        cta: "Reply for details.",
+        image_brief: "Use the clearest property photo or listing preview image."
+      },
+      {
+        channel,
+        title: "Premium WhatsApp draft",
+        body: [
+          `Available now: ${opening || draft.title}.`,
+          price ? `Demand: ${price}` : null,
+          roomLine ? `Highlights: ${roomLine}` : null,
+          featureLine,
+          "A strong option for serious buyers looking for a clean location and quick viewing."
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+        cta: "Message to arrange a viewing.",
+        image_brief: "Use a polished exterior or best room photo first."
+      },
+      {
+        channel,
+        title: "Short broadcast WhatsApp draft",
+        body: [
+          `${propertyLabel} ${listingPhrase} - ${location || draft.city || "Lahore"}`,
+          price ? `Demand: ${price}` : null,
+          "Reply for details, pictures, or viewing time."
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        cta: "Reply for details.",
+        image_brief: "Use one clear property image with minimal text."
+      }
+    ];
+  };
 
   return {
-    summary: `Channel copy generated from the current listing draft for: ${instruction}. No tracking links have been generated.`,
-    cards: selectedChannels.map((channel) => ({
-      channel,
-      title: channelTitle(channel),
-      body: [
-        opening || draft.title,
-        price ? `Demand: ${price}` : null,
-        roomLine || null,
-        featureLine,
-        channel === "instagram" ? "DM for details and viewing." : "Interested? Reply for details or a viewing slot."
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
-      cta: channel === "instagram" ? "DM for details." : "Reply for details.",
-      image_brief: "Use the strongest property photo or listing preview image."
-    }))
+    summary:
+      "Want dedicated tracking links and attribution? Save this as a promotion asset/listing first, then I can generate link tracking.",
+    cards: selectedChannels.flatMap(buildChannelCards)
   };
 }
 

@@ -154,15 +154,21 @@ describe("agent submit workflow", () => {
       "Promote this listing on WhatsApp"
     );
 
-    expect(promotion.cards).toHaveLength(1);
+    expect(promotion.cards).toHaveLength(3);
     expect(promotion.cards[0]).toMatchObject({
       channel: "whatsapp",
-      title: "WhatsApp promotion draft",
+      title: "Direct buyer WhatsApp draft",
       cta: "Reply for details."
     });
     expect(promotion.cards[0].body).toContain("1 kanal house for sale in DHA Phase 6, Lahore");
     expect(promotion.cards[0].body).toContain("Demand: PKR 8.5 Crore");
+    expect(promotion.cards.map((card) => card.title)).toEqual([
+      "Direct buyer WhatsApp draft",
+      "Premium WhatsApp draft",
+      "Short broadcast WhatsApp draft"
+    ]);
     expect(promotion.cards[0].landing_url).toBeUndefined();
+    expect(promotion.summary).toContain("tracking links");
   });
 
   it("classifies multi-lead write guards", () => {
