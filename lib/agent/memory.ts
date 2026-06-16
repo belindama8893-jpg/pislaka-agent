@@ -1,5 +1,5 @@
 import type { PakistanLocationNormalizationResult } from "@/lib/agent/location-normalization";
-import type { AgentContextAttachment } from "@/lib/agent/types";
+import type { AgentAction, AgentContextAttachment, AgentWorkflowStateInput } from "@/lib/agent/types";
 
 export type AgentMemorySource =
   | "chat"
@@ -34,10 +34,22 @@ export type AgentMemorySelectedEntity = AgentMemoryMetadata & {
 
 export type AgentMemoryContextAttachment = AgentMemoryMetadata & AgentContextAttachment;
 
+export type AgentWorkflowStage = AgentWorkflowStateInput["stage"];
+
+export type AgentMemoryWorkflowState = AgentMemoryMetadata & {
+  activeIntent?: AgentAction["intent"];
+  awaiting?: AgentWorkflowStateInput["awaiting"];
+  pendingSlots: string[];
+  sourceMessage?: string;
+  stage: AgentWorkflowStage;
+  summary?: string;
+};
+
 export type AgentMemoryRuntimeContext = {
   shortTerm: {
     messages: AgentMemoryMessage[];
   };
+  workflow?: AgentMemoryWorkflowState;
   workspace: {
     currentLead?: AgentMemorySelectedEntity;
     currentListing?: AgentMemorySelectedEntity;
@@ -57,8 +69,11 @@ export type CompileAgentMemoryContextInput = {
   recentMessages?: Array<{
     role: "user" | "assistant";
     content: string;
+    structured_payload?: Record<string, unknown>;
+    structuredPayload?: Record<string, unknown> | null;
   }>;
   timeZone?: string;
+  workflowState?: AgentWorkflowStateInput;
 };
 
 const shortTermMessageMemory: AgentMemoryMetadata = {
@@ -82,6 +97,132 @@ const attachmentMemory: AgentMemoryMetadata = {
   expires: "turn"
 };
 
+const workflowMemory: AgentMemoryMetadata = {
+  source: "runtime",
+  trustLevel: "confirmed",
+  allowedUse: ["routing", "guidance", "prompt"],
+  expires: "conversation"
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function getPayloadUi(payload: unknown) {
+  if (!isRecord(payload) || !isRecord(payload.ui)) {
+    return null;
+  }
+
+  return payload.ui;
+}
+
+function workflowStateFromInput(state: AgentWorkflowStateInput): AgentMemoryWorkflowState {
+  return {
+    ...workflowMemory,
+    activeIntent: state.active_intent,
+    awaiting: state.awaiting,
+    pendingSlots: state.pending_slots ?? [],
+    sourceMessage: state.source_message,
+    stage: state.stage,
+    summary: state.summary
+  };
+}
+
+function workflowStateFromUiPayload(ui: Record<string, unknown>, content: string): AgentMemoryWorkflowState | null {
+  if (ui.entitySelection) {
+    return {
+      ...workflowMemory,
+      awaiting: "selection",
+      pendingSlots: ["target_entity"],
+      sourceMessage: typeof ui.sourceMessage === "string" ? ui.sourceMessage : undefined,
+      stage: "needs_selection",
+      summary: "Waiting for the broker to choose the correct entity before continuing."
+    };
+  }
+
+  const awaitingConfirmationMap: Array<[keyof typeof ui, AgentAction["intent"], string]> = [
+    ["draft", "create_listing_draft", "listing draft confirmation"],
+    ["scheduleEvent", "create_schedule_event", "schedule confirmation"],
+    ["leadCreate", "create_lead", "lead creation confirmation"],
+    ["leadDetailsUpdate", "update_lead_details", "lead details confirmation"],
+    ["leadListingUpdate", "update_lead_listing", "lead listing confirmation"],
+    ["leadStatusUpdate", "update_lead_status", "lead status confirmation"],
+    ["leadBatchStatusUpdate", "update_lead_status", "lead status confirmation"],
+    ["listingUpdate", "update_listing_draft", "listing update confirmation"],
+    ["promotionTarget", "create_campaign_links", "promotion confirmation"]
+  ];
+
+  for (const [key, intent, summary] of awaitingConfirmationMap) {
+    if (ui[key]) {
+      return {
+        ...workflowMemory,
+        activeIntent: intent,
+        awaiting: "confirmation",
+        pendingSlots: [],
+        sourceMessage: typeof ui.sourceMessage === "string" ? ui.sourceMessage : undefined,
+        stage: "awaiting_confirmation",
+        summary: `Waiting for broker confirmation: ${summary}.`
+      };
+    }
+  }
+
+  const completedMap: Array<[keyof typeof ui, AgentAction["intent"], string]> = [
+    ["listingSaved", "create_listing_draft", "Listing was saved."],
+    ["promotion", "create_campaign_links", "Promotion output was generated."],
+    ["leadResults", "list_leads", "Lead results were shown."],
+    ["leadReply", "draft_lead_reply", "Lead reply draft was prepared."],
+    ["scheduleEvents", "list_schedule_events", "Schedule results were shown."],
+    ["analyticsSummary", "show_basic_attribution", "Attribution summary was shown."]
+  ];
+
+  for (const [key, intent, summary] of completedMap) {
+    if (ui[key]) {
+      return {
+        ...workflowMemory,
+        activeIntent: intent,
+        awaiting: "none",
+        pendingSlots: [],
+        sourceMessage: typeof ui.sourceMessage === "string" ? ui.sourceMessage : undefined,
+        stage: "completed",
+        summary
+      };
+    }
+  }
+
+  if (content.trim().endsWith("?")) {
+    return {
+      ...workflowMemory,
+      awaiting: "details",
+      pendingSlots: ["next_detail"],
+      stage: "collecting_info",
+      summary: "Waiting for one more detail from the broker."
+    };
+  }
+
+  return null;
+}
+
+function inferWorkflowState(input: CompileAgentMemoryContextInput): AgentMemoryWorkflowState | undefined {
+  if (input.workflowState) {
+    return workflowStateFromInput(input.workflowState);
+  }
+
+  const messages = [...(input.recentMessages ?? [])].reverse();
+  for (const message of messages) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+
+    const ui = getPayloadUi(message.structured_payload ?? message.structuredPayload);
+    const workflow = ui ? workflowStateFromUiPayload(ui, message.content) : workflowStateFromUiPayload({}, message.content);
+    if (workflow) {
+      return workflow;
+    }
+  }
+
+  return undefined;
+}
+
 export function compileAgentMemoryContext(input: CompileAgentMemoryContextInput): AgentMemoryRuntimeContext {
   return {
     shortTerm: {
@@ -94,6 +235,7 @@ export function compileAgentMemoryContext(input: CompileAgentMemoryContextInput)
           content: message.content
         }))
     },
+    workflow: inferWorkflowState(input),
     workspace: {
       currentLead: input.currentLeadId
         ? {
@@ -165,6 +307,22 @@ function formatShortTermMemory(memory: AgentMemoryRuntimeContext) {
     .join("\n");
 }
 
+function formatWorkflowMemory(memory: AgentMemoryRuntimeContext) {
+  if (!memory.workflow) {
+    return "No active workflow state.";
+  }
+
+  const parts = [
+    `Stage: ${memory.workflow.stage}`,
+    memory.workflow.activeIntent ? `Active intent: ${memory.workflow.activeIntent}` : null,
+    memory.workflow.awaiting ? `Awaiting: ${memory.workflow.awaiting}` : null,
+    memory.workflow.pendingSlots.length ? `Pending slots: ${memory.workflow.pendingSlots.join(", ")}` : null,
+    memory.workflow.summary ? `Summary: ${memory.workflow.summary}` : null
+  ].filter(Boolean);
+
+  return parts.join("\n");
+}
+
 export function formatAgentMemoryForPrompt(memory?: AgentMemoryRuntimeContext) {
   if (!memory) {
     return [
@@ -175,6 +333,9 @@ export function formatAgentMemoryForPrompt(memory?: AgentMemoryRuntimeContext) {
       "Workspace memory:",
       "No selected lead/listing context.",
       "",
+      "Workflow memory:",
+      "No active workflow state.",
+      "",
       "Short-term chat memory:",
       "No prior chat context."
     ].join("\n");
@@ -183,11 +344,15 @@ export function formatAgentMemoryForPrompt(memory?: AgentMemoryRuntimeContext) {
   return [
     "Memory policy:",
     "- Chat memory is reference_only and may help routing or clarification, but it is not a saved business fact.",
+    "- Workflow memory may help continue multi-turn tasks, choose the next question, or interpret short follow-ups such as confirm/send/continue.",
     "- Selected entities and context attachments are confirmed context, but persistent writes still require database-backed resolution and confirmation.",
     "- Database records remain the source of truth for leads, listings, schedule items, campaigns, and follow-up history.",
     "",
     "Workspace memory:",
     formatWorkspaceMemory(memory),
+    "",
+    "Workflow memory:",
+    formatWorkflowMemory(memory),
     "",
     "Short-term chat memory:",
     formatShortTermMemory(memory)

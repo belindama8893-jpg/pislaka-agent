@@ -142,6 +142,7 @@ export async function getRecentAgentContextMessages(
     .filter((message) => message.content.trim())
     .map((message) => ({
       role: message.role,
-      content: message.content
+      content: message.content,
+      ...(message.structured_payload ? { structured_payload: message.structured_payload } : {})
     }));
 }

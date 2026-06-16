@@ -32,7 +32,8 @@ export async function POST(request: Request) {
       const memory = compileAgentMemoryContext({
         locationContext,
         recentMessages: parsed.data.context_messages,
-        timeZone: parsed.data.time_zone
+        timeZone: parsed.data.time_zone,
+        workflowState: parsed.data.workflow_state
       });
       const action = await routeAgentMessage(parsed.data.message, {
         timeZone: parsed.data.time_zone,
@@ -53,7 +54,8 @@ export async function POST(request: Request) {
       const memory = compileAgentMemoryContext({
         locationContext,
         recentMessages: parsed.data.context_messages,
-        timeZone: parsed.data.time_zone
+        timeZone: parsed.data.time_zone,
+        workflowState: parsed.data.workflow_state
       });
       const action = await routeAgentMessage(parsed.data.message, {
         timeZone: parsed.data.time_zone,
@@ -80,7 +82,8 @@ export async function POST(request: Request) {
       currentListingId: parsed.data.current_listing_id,
       locationContext,
       recentMessages,
-      timeZone: parsed.data.time_zone
+      timeZone: parsed.data.time_zone,
+      workflowState: parsed.data.workflow_state
     });
 
     const action = await routeAgentMessage(parsed.data.message, {

@@ -39,7 +39,8 @@ import { createAgentGuidanceComposerActions } from "@/components/agent/agent-gui
 import {
   buildAgentTurnContent,
   createRecentAgentContextMessages,
-  getSelectedAgentContextEntityId
+  getSelectedAgentContextEntityId,
+  inferAgentWorkflowState
 } from "@/components/agent/agent-submit-context";
 import {
   canHandlePendingActionConfirmation,
@@ -7647,7 +7648,8 @@ export function AgentWorkspace({
           current_lead_id: currentLeadId,
           time_zone: userTimeZone,
           context_attachments: outgoingContext,
-          context_messages: createRecentAgentContextMessages(messages)
+          context_messages: createRecentAgentContextMessages(messages),
+          workflow_state: inferAgentWorkflowState(messages)
         })
       });
       clearTimeout(timeout);

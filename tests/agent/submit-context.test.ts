@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildAgentTurnContent,
   createRecentAgentContextMessages,
-  getSelectedAgentContextEntityId
+  getSelectedAgentContextEntityId,
+  inferAgentWorkflowState
 } from "../../components/agent/agent-submit-context";
 
 describe("agent submit context", () => {
@@ -64,5 +65,55 @@ describe("agent submit context", () => {
       { role: "user", content: "message 20" },
       { role: "assistant", content: "message 21" }
     ]);
+  });
+
+  it("infers awaiting confirmation workflow state from the latest assistant card", () => {
+    expect(
+      inferAgentWorkflowState([
+        { role: "assistant", content: "Older result", promotion: { id: "promo-1" } },
+        {
+          role: "assistant",
+          content: "Please confirm before I save this lead.",
+          leadCreate: { payload: {} },
+          sourceMessage: "Add Ahmed"
+        }
+      ])
+    ).toEqual({
+      stage: "awaiting_confirmation",
+      active_intent: "create_lead",
+      awaiting: "confirmation",
+      pending_slots: [],
+      source_message: "Add Ahmed",
+      summary: "Waiting for broker confirmation: lead creation confirmation."
+    });
+  });
+
+  it("infers needs-selection and collecting-info workflow states", () => {
+    expect(
+      inferAgentWorkflowState([
+        {
+          role: "assistant",
+          content: "I found several Ahmed leads.",
+          entitySelection: { candidates: [] }
+        }
+      ])
+    ).toMatchObject({
+      stage: "needs_selection",
+      awaiting: "selection",
+      pending_slots: ["target_entity"]
+    });
+
+    expect(
+      inferAgentWorkflowState([
+        {
+          role: "assistant",
+          content: "Which property should I promote?"
+        }
+      ])
+    ).toMatchObject({
+      stage: "collecting_info",
+      awaiting: "details",
+      pending_slots: ["next_detail"]
+    });
   });
 });

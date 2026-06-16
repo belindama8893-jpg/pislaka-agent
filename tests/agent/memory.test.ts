@@ -82,6 +82,58 @@ describe("agent memory runtime", () => {
     expect(prompt).toContain("Broker: Promote the listing we just discussed");
   });
 
+  it("uses explicit workflow state as confirmed workflow memory", () => {
+    const memory = compileAgentMemoryContext({
+      workflowState: {
+        stage: "awaiting_confirmation",
+        active_intent: "create_campaign_links",
+        awaiting: "confirmation",
+        pending_slots: [],
+        summary: "Waiting for channel confirmation."
+      }
+    });
+
+    expect(memory.workflow).toMatchObject({
+      source: "runtime",
+      trustLevel: "confirmed",
+      allowedUse: ["routing", "guidance", "prompt"],
+      expires: "conversation",
+      stage: "awaiting_confirmation",
+      activeIntent: "create_campaign_links",
+      awaiting: "confirmation",
+      pendingSlots: [],
+      summary: "Waiting for channel confirmation."
+    });
+    expect(formatAgentMemoryForPrompt(memory)).toContain("Stage: awaiting_confirmation");
+    expect(formatAgentMemoryForPrompt(memory)).toContain("Active intent: create_campaign_links");
+  });
+
+  it("infers workflow state from persisted assistant structured payload", () => {
+    const memory = compileAgentMemoryContext({
+      recentMessages: [
+        {
+          role: "assistant",
+          content: "Please choose which Ahmed you mean.",
+          structured_payload: {
+            ui: {
+              entitySelection: {
+                candidates: []
+              },
+              sourceMessage: "Reply to Ahmed"
+            }
+          }
+        }
+      ]
+    });
+
+    expect(memory.workflow).toMatchObject({
+      stage: "needs_selection",
+      awaiting: "selection",
+      pendingSlots: ["target_entity"],
+      sourceMessage: "Reply to Ahmed"
+    });
+  });
+
   it("returns recent messages from compiled memory for local routing helpers", () => {
     const memory = compileAgentMemoryContext({
       recentMessages: [{ role: "assistant", content: "I can see: Location: DHA Phase 5." }]

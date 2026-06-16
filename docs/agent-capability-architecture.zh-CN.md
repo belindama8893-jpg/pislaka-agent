@@ -67,7 +67,7 @@ flowchart TD
 | 层 | 文件 | 作用 |
 | --- | --- | --- |
 | Capability Registry | `lib/agent/registry/intents.ts` | 每个 intent 的业务域、输入、路由、确认、风险、实体解析、UI、引导和 prompt metadata |
-| Memory Runtime | `lib/agent/memory.ts` | 把短期聊天、当前选中实体、附件和运行时上下文编译成带可信度/生命周期/使用边界的 memory context |
+| Memory Runtime | `lib/agent/memory.ts` | 把短期聊天、workflow state、当前选中实体、附件和运行时上下文编译成带可信度/生命周期/使用边界的 memory context |
 | Prompt Compiler | `lib/agent/registry/prompt.ts` | 从 registry 编译 supported intents、routing rules、workflow rules、resolution rules |
 | Guidance Runtime | `lib/agent/guidance.ts` | 根据 broker/workspace 状态生成首页快捷动作、placeholder、下一步建议 |
 | Policy Runtime | `lib/agent/confirmation-policy.ts` | 从 registry 计算 `requires_confirmation`、risk、audit、uiCard、requiresAuthForWrite |
@@ -182,6 +182,16 @@ flowchart TD
       }
     ]
   },
+  workflow: {
+    stage: "awaiting_confirmation",
+    activeIntent: "create_campaign_links",
+    awaiting: "confirmation",
+    pendingSlots: [],
+    source: "runtime",
+    trustLevel: "confirmed",
+    allowedUse: ["routing", "guidance", "prompt"],
+    expires: "conversation"
+  },
   workspace: {
     currentLead: {
       source: "explicit_selection",
@@ -203,6 +213,9 @@ flowchart TD
 使用原则：
 
 - 聊天记忆可以帮助判断“那套房”“刚才那个客户”“继续发一下”这类多轮意图，但不能当作已保存的业务事实。
+- Workflow state 是过程记忆，用来描述当前任务处于 `collecting_info`、`awaiting_confirmation`、`needs_selection`、`completed` 哪一步。
+- Workflow state 可以帮助 Agent 解释短句，例如“确认”“继续”“那就发一下”，也可以帮助生成下一步问题；但不能跳过 confirmation、entity resolution 或数据库事实校验。
+- Workflow state 优先来自前端当前消息列表推导的 `workflow_state`；如果没有，后端可从最近 assistant 消息的 `structured_payload.ui` 保守推导。
 - 当前选中实体和附件可以帮助 routing/guidance/entity resolution，但具体能否使用仍要服从 registry 的 `resolution.allowCurrentContext`。
 - `workspace.currentLead/currentListing` 是 turn-level context：每一轮都必须由当前 UI/URL/明确附件重新提供；如果下一轮没有 active selection，Memory Runtime 不会保留上一轮的 lead/listing。
 - 当前上下文必须跟随“最后一次明确选中”替换，不允许把很久以前选中的客户/房源当成默认目标。
