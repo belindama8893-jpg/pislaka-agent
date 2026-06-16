@@ -1,4 +1,6 @@
 import type { BrokerEventDraftInput } from "@/lib/events/types";
+import { getAgentActionPolicy } from "@/lib/agent/confirmation-policy";
+import { getAgentIntentDefinition } from "@/lib/agent/registry/intents";
 import type {
   AgentAction,
   LeadCreatePayload,
@@ -16,6 +18,21 @@ export type AgentActionResponseHandler = (
 ) => boolean | Promise<boolean>;
 
 export type AgentActionResponseHandlers = Partial<Record<AgentAction["intent"], AgentActionResponseHandler>>;
+
+type AgentActionResponseHandlerSpec = {
+  createHandler: (dependencies: AgentActionResponseHandlerDependencies) => AgentActionResponseHandler;
+  intent: AgentAction["intent"];
+};
+
+export type AgentActionResponseHandlerManifestItem = {
+  audit: ReturnType<typeof getAgentActionPolicy>["audit"];
+  confirmation: ReturnType<typeof getAgentActionPolicy>["confirmation"];
+  intent: AgentAction["intent"];
+  requiresAuthForWrite: boolean;
+  requiresConfirmation: boolean;
+  risk: ReturnType<typeof getAgentActionPolicy>["risk"];
+  uiCard: ReturnType<typeof getAgentActionPolicy>["uiCard"];
+};
 
 export type AgentActionResponseHandlerDependencies = {
   appendAssistantMessage: (message: { content: string; promotion?: ListingPromotion }) => void;
@@ -72,15 +89,17 @@ export type AgentActionResponseHandlerDependencies = {
   showTodayFollowUps: (response: string) => Promise<void>;
 };
 
-export function createAgentActionResponseHandlers(
-  dependencies: AgentActionResponseHandlerDependencies
-): AgentActionResponseHandlers {
-  return {
-    create_lead: (action) => {
+const agentActionResponseHandlerSpecs: AgentActionResponseHandlerSpec[] = [
+  {
+    intent: "create_lead",
+    createHandler: (dependencies) => (action) => {
       dependencies.proposeLeadCreate(action.payload as LeadCreatePayload);
       return true;
-    },
-    list_leads: (action, sourceMessage) => {
+    }
+  },
+  {
+    intent: "list_leads",
+    createHandler: (dependencies) => (action, sourceMessage) => {
       const leadPayload = action.payload as LeadOperationPayload | undefined;
       if (!leadPayload) {
         return false;
@@ -88,24 +107,36 @@ export function createAgentActionResponseHandlers(
 
       dependencies.showLeadResults(action.response, leadPayload, sourceMessage);
       return true;
-    },
-    list_today_followups: async (action) => {
+    }
+  },
+  {
+    intent: "list_today_followups",
+    createHandler: (dependencies) => async (action) => {
       await dependencies.showTodayFollowUps(action.response);
       return true;
-    },
-    list_schedule_events: async (action, sourceMessage) => {
+    }
+  },
+  {
+    intent: "list_schedule_events",
+    createHandler: (dependencies) => async (action, sourceMessage) => {
       await dependencies.showScheduleResults(
         action.response,
         action.payload as ScheduleEventListPayload,
         sourceMessage
       );
       return true;
-    },
-    show_basic_attribution: async (action, sourceMessage) => {
+    }
+  },
+  {
+    intent: "show_basic_attribution",
+    createHandler: (dependencies) => async (action, sourceMessage) => {
       await dependencies.showAnalyticsSummary(action.response, action.payload, sourceMessage);
       return true;
-    },
-    update_lead_status: (action) => {
+    }
+  },
+  {
+    intent: "update_lead_status",
+    createHandler: (dependencies) => (action) => {
       const leadPayload = action.payload as LeadOperationPayload | undefined;
       if (!leadPayload) {
         return false;
@@ -113,8 +144,11 @@ export function createAgentActionResponseHandlers(
 
       dependencies.proposeLeadStatusUpdate(action.response, leadPayload, action.resolution);
       return true;
-    },
-    record_lead_followup: (action) => {
+    }
+  },
+  {
+    intent: "record_lead_followup",
+    createHandler: (dependencies) => (action) => {
       const leadPayload = action.payload as LeadOperationPayload | undefined;
       if (!leadPayload) {
         return false;
@@ -122,24 +156,33 @@ export function createAgentActionResponseHandlers(
 
       dependencies.proposeLeadFollowUpRecord(action.response, leadPayload, action.resolution);
       return true;
-    },
-    update_lead_details: (action) => {
+    }
+  },
+  {
+    intent: "update_lead_details",
+    createHandler: (dependencies) => (action) => {
       dependencies.proposeLeadDetailsUpdate(
         action.response,
         action.payload as LeadDetailsUpdatePayload,
         action.resolution
       );
       return true;
-    },
-    update_lead_listing: (action) => {
+    }
+  },
+  {
+    intent: "update_lead_listing",
+    createHandler: (dependencies) => (action) => {
       dependencies.proposeLeadListingUpdate(
         action.response,
         action.payload as LeadListingUpdatePayload,
         action.resolution
       );
       return true;
-    },
-    draft_lead_reply: async (action) => {
+    }
+  },
+  {
+    intent: "draft_lead_reply",
+    createHandler: (dependencies) => async (action) => {
       const leadPayload = action.payload as LeadOperationPayload | undefined;
       if (!leadPayload) {
         return false;
@@ -147,28 +190,40 @@ export function createAgentActionResponseHandlers(
 
       await dependencies.draftReplyForLead(action.response, leadPayload, action.resolution);
       return true;
-    },
-    generate_social_copy: (action) => {
+    }
+  },
+  {
+    intent: "generate_social_copy",
+    createHandler: (dependencies) => (action) => {
       const socialCopyPayload = action.payload as { promotion?: ListingPromotion };
       dependencies.appendAssistantMessage({
         content: action.response,
         promotion: socialCopyPayload.promotion
       });
       return true;
-    },
-    create_campaign_links: (action, sourceMessage) => {
+    }
+  },
+  {
+    intent: "create_campaign_links",
+    createHandler: (dependencies) => (action, sourceMessage) => {
       dependencies.proposePromotionFromMessage(sourceMessage, action.resolution);
       return true;
-    },
-    publish_listing: (action, sourceMessage) => {
+    }
+  },
+  {
+    intent: "publish_listing",
+    createHandler: (dependencies) => (action, sourceMessage) => {
       if (!dependencies.looksLikeExternalChannelPromotion(sourceMessage)) {
         return false;
       }
 
       dependencies.proposePromotionFromMessage(sourceMessage, action.resolution);
       return true;
-    },
-    update_listing_draft: (action, sourceMessage) => {
+    }
+  },
+  {
+    intent: "update_listing_draft",
+    createHandler: (dependencies) => (action, sourceMessage) => {
       dependencies.proposeListingUpdateFromMessage(
         action.response,
         sourceMessage,
@@ -176,14 +231,42 @@ export function createAgentActionResponseHandlers(
         action.resolution
       );
       return true;
-    },
-    create_schedule_event: (action) =>
+    }
+  },
+  {
+    intent: "create_schedule_event",
+    createHandler: (dependencies) => (action) =>
       dependencies.showScheduleResolutionMessage(
         action.response,
         action.payload as BrokerEventDraftInput,
         action.resolution
       )
-  };
+  }
+];
+
+export function getAgentActionResponseHandlerManifest(): AgentActionResponseHandlerManifestItem[] {
+  return agentActionResponseHandlerSpecs.map(({ intent }) => {
+    const policy = getAgentActionPolicy({ intent, payload: {} });
+    const definition = getAgentIntentDefinition(intent);
+
+    return {
+      intent,
+      audit: policy.audit,
+      confirmation: policy.confirmation,
+      requiresAuthForWrite: policy.requiresAuthForWrite,
+      requiresConfirmation: policy.requiresConfirmation,
+      risk: policy.risk,
+      uiCard: definition.uiCard
+    };
+  });
+}
+
+export function createAgentActionResponseHandlers(
+  dependencies: AgentActionResponseHandlerDependencies
+): AgentActionResponseHandlers {
+  return Object.fromEntries(
+    agentActionResponseHandlerSpecs.map((spec) => [spec.intent, spec.createHandler(dependencies)])
+  ) as AgentActionResponseHandlers;
 }
 
 export async function handleAgentActionResponse(

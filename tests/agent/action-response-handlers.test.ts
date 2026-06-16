@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createAgentActionResponseHandlers,
+  getAgentActionResponseHandlerManifest,
   handleAgentActionResponse,
   type AgentActionResponseHandlerDependencies
 } from "../../components/agent/agent-action-response-handlers";
@@ -36,6 +37,28 @@ function dependencies(): AgentActionResponseHandlerDependencies {
 }
 
 describe("agent action response handlers", () => {
+  it("exposes registry policy metadata for handled actions", () => {
+    const manifest = getAgentActionResponseHandlerManifest();
+
+    expect(manifest).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          intent: "create_campaign_links",
+          risk: "external",
+          requiresConfirmation: true,
+          uiCard: "promotion_pack"
+        }),
+        expect.objectContaining({
+          intent: "draft_lead_reply",
+          risk: "draft",
+          requiresConfirmation: false,
+          uiCard: "lead_reply"
+        })
+      ])
+    );
+    expect(manifest.map((item) => item.intent)).not.toContain("general_reply");
+  });
+
   it("routes campaign links to the promotion preview handler", async () => {
     const deps = dependencies();
     const handlers = createAgentActionResponseHandlers(deps);
