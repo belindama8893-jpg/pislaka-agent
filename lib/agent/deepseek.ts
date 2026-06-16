@@ -45,6 +45,7 @@ import {
   getAgentMemoryRecentMessages,
   type AgentMemoryRuntimeContext
 } from "@/lib/agent/memory";
+import { applySemanticRouteConfidenceGate } from "@/lib/agent/semantic-routing";
 
 const deepseekRequestTimeoutMs = 8000;
 const supportedIntentsPrompt = formatSupportedIntentsForPrompt();
@@ -1752,6 +1753,11 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
 
     const action = agentActionSchema.parse(JSON.parse(extractJsonObject(content)));
     const normalizedAction = normalizeAgentAction(action, routingMessage, context);
+    const gatedAction = applySemanticRouteConfidenceGate(normalizedAction);
+
+    if (gatedAction !== normalizedAction) {
+      return finalizeAgentActionResponse(gatedAction, message);
+    }
 
     if (normalizedAction.intent === "general_reply" && localIntent !== "general_reply") {
       return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);

@@ -89,6 +89,14 @@ flowchart TD
 - 路由元数据包括 `confidence`、`alternative_intents`、`missing_slots`、`is_follow_up_to_workflow` 和 `route_reason`。
 - 路由元数据只能帮助 routing/guidance/prompt/observability，不能跳过 confirmation、entity resolution 或数据库校验。
 
+Confidence gate 位于 LLM JSON parse 和本地 normalization 之后：
+
+- 没有 `confidence` 的老路径保持兼容，不触发 gate。
+- `confidence < 0.45` 时转成 `general_reply` 澄清，避免弱证据误进业务 handler。
+- `confidence < 0.75` 且 alternative intent 分数接近时，询问经纪人要走哪个 workflow。
+- `confidence < 0.75` 且有 `missing_slots` 时，优先询问缺失信息。
+- gate 的结果会在 `payload.semantic_route` 中保留 `original_intent`、`alternative_intents`、`missing_slots`、`clarification_reason` 等可观测字段。
+
 ## Capability Registry 字段
 
 每个 intent 必须在 `agentIntentRegistry` 中声明：
