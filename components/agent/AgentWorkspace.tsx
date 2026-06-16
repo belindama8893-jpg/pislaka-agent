@@ -21,12 +21,17 @@ import {
   UserPlus
 } from "lucide-react";
 import { AnalyticsSummaryCard } from "@/components/analytics/AnalyticsDashboard";
-import { AgentComposer, type AgentComposerContextPreview } from "@/components/agent/AgentComposer";
+import { AgentComposer } from "@/components/agent/AgentComposer";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
 import {
   createAgentActionResponseHandlers,
   handleAgentActionResponse
 } from "@/components/agent/agent-action-response-handlers";
+import { createAgentAttachComposerActions } from "@/components/agent/agent-composer-attachments";
+import {
+  createAgentComposerContextPreviews,
+  type AgentComposerContextAttachment
+} from "@/components/agent/agent-composer-context";
 import { createAgentGuidanceComposerActions } from "@/components/agent/agent-guidance-actions";
 import { AuthForm } from "@/components/auth/AuthForm";
 import Link from "next/link";
@@ -411,15 +416,7 @@ type ChatMessageUiPayload = Partial<
   >
 >;
 
-type ChatContextAttachment = {
-  id: string;
-  type: "listing" | "lead";
-  entity_id: string;
-  label: string;
-  summary: string;
-  media?: ListingSavedMediaPreview[];
-  snapshot?: Record<string, unknown>;
-};
+type ChatContextAttachment = AgentComposerContextAttachment;
 
 function resolutionCandidateToListing(candidate: AgentResolutionCandidate): RecentListingSummary {
   return {
@@ -5392,36 +5389,16 @@ export function AgentWorkspace({
     appendAssistantMessage
   );
   const composerPlaceholder = getAgentComposerPlaceholder(guidanceContext);
-  const attachActions = [
-    {
-      icon: MessageCircle,
-      label: "Import WhatsApp chat",
-      onClick: () => {
-        setIsWhatsAppImportMode(true);
-        whatsAppChatFileInputRef.current?.click();
-      }
+  const attachActions = createAgentAttachComposerActions({
+    importWhatsAppChat: () => {
+      setIsWhatsAppImportMode(true);
+      whatsAppChatFileInputRef.current?.click();
     },
-    {
-      icon: ImageIcon,
-      label: "Upload photo/video",
-      onClick: openComposerMediaPicker
-    },
-    {
-      icon: FileText,
-      label: "Upload file",
-      onClick: openDocumentPicker
-    },
-    {
-      icon: House,
-      label: "Choose listing",
-      onClick: () => setContextPickerMode("listing" as const)
-    },
-    {
-      icon: MessageCircle,
-      label: "Choose lead",
-      onClick: () => setContextPickerMode("lead" as const)
-    }
-  ];
+    uploadMedia: openComposerMediaPicker,
+    uploadDocument: openDocumentPicker,
+    chooseListing: () => setContextPickerMode("listing" as const),
+    chooseLead: () => setContextPickerMode("lead" as const)
+  });
 
   useLayoutEffect(() => {
     const panelElement = chatPanelRef.current;
@@ -5897,16 +5874,6 @@ export function AgentWorkspace({
         ...updatedLead
       };
     });
-  }
-
-  function composerContextPreviews(): AgentComposerContextPreview[] {
-    return contextAttachments.map((item) => ({
-      id: item.id,
-      type: item.type,
-      label: item.label,
-      summary: item.summary,
-      media: item.media
-    }));
   }
 
   function addSavedListingContext(preview: ListingSavedPreview, mediaPreview: ListingSavedMediaPreview[] = []) {
@@ -8777,7 +8744,7 @@ export function AgentWorkspace({
         actions={!hasStarted ? quickActions : undefined}
         attachActions={attachActions}
         className="workspace-agent-composer"
-        contextAttachments={composerContextPreviews()}
+        contextAttachments={createAgentComposerContextPreviews(contextAttachments)}
         files={composerFiles.map((item) => ({
           id: item.id,
           label: item.kind === "whatsapp_chat" ? "WhatsApp chat" : "File",
