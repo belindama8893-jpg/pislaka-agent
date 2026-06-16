@@ -95,14 +95,15 @@ describe("image observation routing", () => {
 
     expect(action.intent).toBe("generate_social_copy");
     expect(action.requires_confirmation).toBe(false);
-    expect(action.response).toContain("I drafted social media copy");
+    expect(action.response).toContain("copy options");
     expect(action.payload).toMatchObject({
       channels: ["facebook"]
     });
     const promotion = action.payload.promotion as { cards: Array<Record<string, unknown>>; summary: string };
     expect(promotion.summary).toContain("tracking links");
     const cards = promotion.cards;
-    expect(cards[0]).toMatchObject({ channel: "facebook", title: "Facebook promotion draft" });
+    expect(cards).toHaveLength(3);
+    expect(cards[0]).toMatchObject({ channel: "facebook", title: "Direct buyer Facebook draft" });
     expect(cards[0]).not.toHaveProperty("landing_url");
   });
 

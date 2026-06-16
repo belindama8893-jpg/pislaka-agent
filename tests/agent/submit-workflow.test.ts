@@ -165,10 +165,38 @@ describe("agent submit workflow", () => {
     expect(promotion.cards.map((card) => card.title)).toEqual([
       "Direct buyer WhatsApp draft",
       "Premium WhatsApp draft",
-      "Short broadcast WhatsApp draft"
+      "Short WhatsApp draft"
     ]);
     expect(promotion.cards[0].landing_url).toBeUndefined();
     expect(promotion.summary).toContain("tracking links");
+  });
+
+  it("builds multiple style options for non-WhatsApp channels too", () => {
+    const promotion = buildDraftSocialCopyPromotion(
+      {
+        title: "1 kanal House in DHA Phase 6",
+        city: "Lahore",
+        location_area: "DHA Phase 6",
+        property_type: "house",
+        listing_type: "sale",
+        price_amount: 85000000,
+        price_currency: "PKR",
+        area_value: 1,
+        area_unit: "kanal",
+        features: []
+      },
+      ["facebook"],
+      "Promote this listing on Facebook"
+    );
+
+    expect(promotion.cards).toHaveLength(3);
+    expect(promotion.cards.map((card) => card.title)).toEqual([
+      "Direct buyer Facebook draft",
+      "Premium Facebook draft",
+      "Short Facebook draft"
+    ]);
+    expect(promotion.cards.every((card) => card.channel === "facebook")).toBe(true);
+    expect(promotion.cards.every((card) => !card.landing_url)).toBe(true);
   });
 
   it("classifies multi-lead write guards", () => {

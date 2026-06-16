@@ -2369,6 +2369,18 @@ function VoiceWaveform({
 function PromotionPack({ promotion, sourceMessage }: { promotion: ListingPromotion; sourceMessage?: string }) {
   const [copiedChannel, setCopiedChannel] = useState<string | null>(null);
   const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
+  const groupedCards = promotion.cards.reduce<Array<{ channel: PromotionChannel; cards: typeof promotion.cards }>>(
+    (groups, card) => {
+      const group = groups.find((item) => item.channel === card.channel);
+      if (group) {
+        group.cards.push(card);
+      } else {
+        groups.push({ channel: card.channel, cards: [card] });
+      }
+      return groups;
+    },
+    []
+  );
 
   async function handleCopy(channel: string, text: string) {
     await copyToClipboard(text);
@@ -2383,56 +2395,67 @@ function PromotionPack({ promotion, sourceMessage }: { promotion: ListingPromoti
       tone="promotion"
     >
       <div className="promotion-list">
-        {promotion.cards.map((card, index) => {
-          const copyKey = `${card.channel}:${index}:${card.title}`;
-          return (
-            <article className="promotion-row" key={copyKey}>
-              <div className="promotion-card-header">
-                <div className="promotion-channel-title">
-                  <ChannelLogo channel={card.channel} />
-                  <span>{card.channel}</span>
-                </div>
-                <button
-                  className="icon-button compact"
-                  type="button"
-                  aria-label={`${copy.buttons.copy} ${card.channel}`}
-                  onClick={() => {
-                    const parts = [card.title, card.body];
-                    if (card.landing_url) parts.push(`Link: ${card.landing_url}`);
-                    if (card.cta) parts.push(card.cta);
-                    void handleCopy(copyKey, parts.join("\n\n"));
-                  }}
-                >
-                  <Copy size={14} />
-                </button>
+        {groupedCards.map((group) => (
+          <article className="promotion-channel-group" key={group.channel}>
+            <div className="promotion-card-header">
+              <div className="promotion-channel-title">
+                <ChannelLogo channel={group.channel} />
+                <span>{group.channel}</span>
               </div>
-              <strong>{card.title}</strong>
-              <div className="promotion-bubble-content">
-                <p>{card.body}</p>
-                {card.cta ? <span className="promotion-cta-text">{card.cta}</span> : null}
-                {card.landing_url ? (
-                  <a className="promotion-inline-link" href={card.landing_url} target="_blank" rel="noreferrer">
-                    <Globe2 size={13} />
-                    <span>{card.landing_url}</span>
-                  </a>
-                ) : null}
-              </div>
-              {copiedChannel === copyKey ? <small className="copied-hint">{copy.generic.copiedToClipboard}</small> : null}
-              {card.whatsapp_share_url ? (
-                <div className="promotion-actions">
-                  <a className="promotion-action-button secondary" href={card.whatsapp_share_url} target="_blank" rel="noreferrer">
-                    <MessageCircle size={15} />
-                    <span>{copy.buttons.shareToWhatsApp}</span>
-                  </a>
-                </div>
-              ) : null}
-            </article>
-          );
-        })}
+            </div>
+            <div className="promotion-options">
+              {group.cards.map((card, index) => {
+                const copyKey = `${card.channel}:${index}:${card.title}`;
+                return (
+                  <div className="promotion-option" key={copyKey}>
+                    <div className="promotion-option-header">
+                      <strong>{card.title}</strong>
+                      <button
+                        className="icon-button compact"
+                        type="button"
+                        aria-label={`${copy.buttons.copy} ${card.title}`}
+                        onClick={() => {
+                          const parts = [card.title, card.body];
+                          if (card.landing_url) parts.push(`Link: ${card.landing_url}`);
+                          if (card.cta) parts.push(card.cta);
+                          void handleCopy(copyKey, parts.join("\n\n"));
+                        }}
+                      >
+                        <Copy size={14} />
+                      </button>
+                    </div>
+                    <div className="promotion-bubble-content">
+                      <p>{card.body}</p>
+                      {card.cta ? <span className="promotion-cta-text">{card.cta}</span> : null}
+                      {card.landing_url ? (
+                        <a className="promotion-inline-link" href={card.landing_url} target="_blank" rel="noreferrer">
+                          <Globe2 size={13} />
+                          <span>{card.landing_url}</span>
+                        </a>
+                      ) : null}
+                    </div>
+                    {copiedChannel === copyKey ? <small className="copied-hint">{copy.generic.copiedToClipboard}</small> : null}
+                    {card.whatsapp_share_url ? (
+                      <div className="promotion-actions">
+                        <a className="promotion-action-button secondary" href={card.whatsapp_share_url} target="_blank" rel="noreferrer">
+                          <MessageCircle size={15} />
+                          <span>{copy.buttons.shareToWhatsApp}</span>
+                        </a>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </article>
+        ))}
       </div>
-      {promotion.summary ? <div className="promotion-next-step">{promotion.summary}</div> : null}
     </AgentOutputCard>
   );
+}
+
+function PromotionFollowUp({ summary }: { summary: string }) {
+  return <div className="promotion-next-step">{summary}</div>;
 }
 
 function AnalyticsChatCard({ summary }: { summary: AnalyticsSummary }) {
@@ -8562,7 +8585,12 @@ export function AgentWorkspace({
                     }}
                   />
                 ) : null}
-                {message.promotion ? <PromotionPack promotion={message.promotion} sourceMessage={message.uiLanguage ?? message.sourceMessage} /> : null}
+                {message.promotion ? (
+                  <>
+                    <PromotionPack promotion={message.promotion} sourceMessage={message.uiLanguage ?? message.sourceMessage} />
+                    {message.promotion.summary ? <PromotionFollowUp summary={message.promotion.summary} /> : null}
+                  </>
+                ) : null}
                 {message.promotionTarget ? (
                   <PromotionConfirmCard
                     initialChannels={message.promotionChannels}

@@ -202,37 +202,28 @@ export function buildDraftSocialCopyPromotion(
     featureLine
   ].filter(Boolean);
   const buildChannelCards = (channel: PromotionChannel): ListingPromotionCard[] => {
-    if (channel !== "whatsapp") {
-      return [
-        {
-          channel,
-          title:
-            channel === "facebook"
-              ? "Facebook promotion draft"
-              : channel === "instagram"
-                ? "Instagram promotion draft"
-                : "Portal promotion draft",
-          body: [
-            ...baseLines,
-            channel === "instagram" ? "DM for details and viewing." : "Interested? Reply for details or a viewing slot."
-          ].join("\n\n"),
-          cta: channel === "instagram" ? "DM for details." : "Reply for details.",
-          image_brief: "Use the strongest property photo or listing preview image."
-        }
-      ];
-    }
+    const channelName =
+      channel === "whatsapp"
+        ? "WhatsApp"
+        : channel === "facebook"
+          ? "Facebook"
+          : channel === "instagram"
+            ? "Instagram"
+            : "Portal";
+    const channelCta =
+      channel === "instagram" ? "DM for details." : channel === "portal" ? "Contact for viewing." : "Reply for details.";
 
     return [
       {
         channel,
-        title: "Direct buyer WhatsApp draft",
+        title: `Direct buyer ${channelName} draft`,
         body: [...baseLines, "Interested? Reply for details or a viewing slot."].join("\n\n"),
-        cta: "Reply for details.",
+        cta: channelCta,
         image_brief: "Use the clearest property photo or listing preview image."
       },
       {
         channel,
-        title: "Premium WhatsApp draft",
+        title: `Premium ${channelName} draft`,
         body: [
           `Available now: ${opening || draft.title}.`,
           price ? `Demand: ${price}` : null,
@@ -242,20 +233,20 @@ export function buildDraftSocialCopyPromotion(
         ]
           .filter(Boolean)
           .join("\n\n"),
-        cta: "Message to arrange a viewing.",
+        cta: channel === "instagram" ? "DM to arrange a viewing." : "Message to arrange a viewing.",
         image_brief: "Use a polished exterior or best room photo first."
       },
       {
         channel,
-        title: "Short broadcast WhatsApp draft",
+        title: `Short ${channelName} draft`,
         body: [
           `${propertyLabel} ${listingPhrase} - ${location || draft.city || "Lahore"}`,
           price ? `Demand: ${price}` : null,
-          "Reply for details, pictures, or viewing time."
+          channel === "instagram" ? "DM for details, pictures, or viewing time." : "Reply for details, pictures, or viewing time."
         ]
           .filter(Boolean)
           .join("\n"),
-        cta: "Reply for details.",
+        cta: channelCta,
         image_brief: "Use one clear property image with minimal text."
       }
     ];

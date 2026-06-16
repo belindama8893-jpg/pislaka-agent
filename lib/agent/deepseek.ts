@@ -758,7 +758,56 @@ function buildSocialCopyCard(channel: "whatsapp" | "facebook" | "instagram" | "p
 }
 
 function buildSocialCopyCards(channel: "whatsapp" | "facebook" | "instagram" | "portal", facts: PromotionFacts) {
-  return channel === "whatsapp" ? buildWhatsAppCopyCards(facts) : [buildSocialCopyCard(channel, facts)];
+  if (channel === "whatsapp") {
+    return buildWhatsAppCopyCards(facts);
+  }
+
+  const baseCard = buildSocialCopyCard(channel, facts);
+  const channelName = readableChannelName(channel);
+  const shortFacts = facts.text.replace(/\s+/g, " ").slice(0, 260);
+  const locationLine = facts.location ? `in ${facts.location}` : "in a convenient Lahore location";
+  const propertyLabel = [
+    facts.size,
+    facts.propertyType ? facts.propertyType[0].toUpperCase() + facts.propertyType.slice(1) : "Property"
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const listingPhrase = facts.listingType === "rent" ? "for rent" : facts.listingType === "sale" ? "for sale" : "available";
+  const priceLine = formatPromotionPriceLabel(facts.text.match(/Price:\s*([^|]+)/i)?.[1]?.trim());
+  const channelCta = channel === "instagram" ? "DM for details." : channel === "portal" ? "Contact for viewing." : "Message for details.";
+
+  return [
+    {
+      ...baseCard,
+      title: `Direct buyer ${channelName} draft`,
+      cta: channelCta
+    },
+    {
+      ...baseCard,
+      title: `Premium ${channelName} draft`,
+      body: [
+        `${propertyLabel || "Property"} ${listingPhrase} ${locationLine}.`,
+        priceLine ? `Demand: ${priceLine}` : null,
+        "Positioned for serious buyers who value location, clarity, and quick viewing access."
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      cta: channelCta
+    },
+    {
+      ...baseCard,
+      title: `Short ${channelName} draft`,
+      body: [
+        `${propertyLabel || "Property"} ${listingPhrase} - ${facts.location ?? "Lahore"}`,
+        priceLine ? `Demand: ${priceLine}` : null,
+        shortFacts,
+        channel === "instagram" ? "#PakistanRealEstate #PropertyForSale #Pislaka" : null
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      cta: channelCta
+    }
+  ];
 }
 
 function parseLocalSocialCopyRequest(message: string, context?: AgentRoutingContext): AgentAction {

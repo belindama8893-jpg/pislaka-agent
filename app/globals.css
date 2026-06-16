@@ -3221,6 +3221,7 @@ a {
 }
 
 .promotion-next-step {
+  width: min(100%, 680px);
   margin-top: 14px;
   padding: 12px 14px;
   border: 1px solid rgba(20, 184, 166, 0.2);
@@ -3234,6 +3235,47 @@ a {
 .promotion-list {
   display: grid;
   gap: 10px;
+}
+
+.promotion-channel-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.promotion-channel-group + .promotion-channel-group {
+  padding-top: 16px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.promotion-options {
+  display: grid;
+  gap: 10px;
+}
+
+.promotion-option {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid rgba(226, 232, 240, 0.78);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.promotion-option-header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.promotion-option-header strong {
+  display: block;
+  min-width: 0;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 650;
 }
 
 .promotion-grid {
