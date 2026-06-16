@@ -10,6 +10,34 @@
 - 能力、提示、确认边界和实体解析策略集中在配置层，便于维护和回归测试。
 - LLM 输出只是 action proposal；真正的安全边界由 typed runtime 和数据库解析负责。
 
+## 中台扩展口
+
+这套架构应作为 AI 产品中台的模板，而不是只服务经纪人 Agent。长期形态是：
+
+```text
+同一套 Agent Runtime
+  + 不同 Capability Registry
+  + 不同 Guidance 策略
+  + 不同 UI Card / Handler
+  + 不同数据权限和业务对象
+= 不同垂直 AI 产品
+```
+
+当前 registry 已为这个方向预留：
+
+```ts
+product: {
+  productScopes: ["broker_agent"],
+  actorTypes: ["broker"]
+}
+```
+
+未来可扩展为：
+
+- `buyer_advisor`：面向国内购房者的选房师。
+- `developer_agent`：面向开发商的项目、库存、渠道和销售线索助手。
+- `internal_ops`：面向内部运营、内容审核、数据质量和客户成功团队。
+
 ## 架构分层
 
 ```mermaid
@@ -50,6 +78,10 @@ flowchart TD
 ```ts
 {
   intent: "create_campaign_links",
+  product: {
+    productScopes: ["broker_agent"],
+    actorTypes: ["broker"]
+  },
   domain: "content_generation",
   requiredEntities: ["listing"],
   confirmation: "always",
@@ -169,7 +201,7 @@ flowchart TD
 ## 新增 Intent 的步骤
 
 1. 在 `lib/agent/types.ts` 的 `agentActionSchema.intent` 中加入 intent。
-2. 在 `lib/agent/registry/intents.ts` 中补完整 capability definition。
+2. 在 `lib/agent/registry/intents.ts` 中补完整 capability definition，并明确 `product.productScopes` 和 `product.actorTypes`。
 3. 如果 LLM 可直接返回该 intent，确认 `routing.exposeToLlm` 没有设为 `false`。
 4. 在 `lib/agent/registry/prompt.ts` 的测试中确认 prompt 能编译出规则。
 5. 如果需要实体解析，在 `lib/agent/entity-resolution.ts` 中接入 typed payload 和 registry resolution policy。
@@ -187,6 +219,7 @@ flowchart TD
 
 修改任何 intent 时，必须检查：
 
+- `product.productScopes` 和 `product.actorTypes` 是否符合目标产品，不要默认所有能力都属于所有产品。
 - `confirmation` 是否和 `policy.risk` 一致。
 - `audit` 是否和风险一致，write/external 通常应为 `trace_confirm_and_write`。
 - `requiredEntities` 是否和 entity-resolution 行为一致。

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { agentIntentRegistry, type AgentIntentDefinition } from "../../lib/agent/registry/intents";
+import {
+  agentIntentRegistry,
+  getAgentIntentDefinitionsForProduct,
+  type AgentIntentDefinition
+} from "../../lib/agent/registry/intents";
 import type { AgentAction } from "../../lib/agent/types";
 
 const expectedIntents = [
@@ -43,6 +47,14 @@ describe("agentIntentRegistry", () => {
   it("keeps every intent ready for configurable routing and guidance", () => {
     (Object.values(agentIntentRegistry) as AgentIntentDefinition[]).forEach((definition) => {
       expect(definition.availability).toBeDefined();
+      expect(definition.product).toEqual(
+        expect.objectContaining({
+          productScopes: expect.any(Array),
+          actorTypes: expect.any(Array)
+        })
+      );
+      expect(definition.product.productScopes.length).toBeGreaterThan(0);
+      expect(definition.product.actorTypes.length).toBeGreaterThan(0);
       expect(definition.input.examples.length).toBeGreaterThan(0);
       expect(definition.routing.priority).toEqual(expect.any(Number));
       expect(definition.routing.channelBehavior).toMatch(/parameter|not_supported/);
@@ -80,5 +92,19 @@ describe("agentIntentRegistry", () => {
         expect(["write", "external", "draft"], definition.intent).toContain(definition.policy.risk);
       }
     });
+  });
+
+  it("scopes current capabilities to the broker agent product", () => {
+    (Object.values(agentIntentRegistry) as AgentIntentDefinition[]).forEach((definition) => {
+      expect(definition.product.productScopes, definition.intent).toContain("broker_agent");
+      expect(definition.product.actorTypes, definition.intent).toContain("broker");
+    });
+  });
+
+  it("can filter capabilities by product scope and actor type", () => {
+    expect(getAgentIntentDefinitionsForProduct({ productScope: "broker_agent", actorType: "broker" })).toHaveLength(
+      expectedIntents.length
+    );
+    expect(getAgentIntentDefinitionsForProduct({ productScope: "buyer_advisor", actorType: "buyer" })).toHaveLength(0);
   });
 });

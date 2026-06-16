@@ -43,6 +43,23 @@ export type AgentIntentRisk = "read" | "draft" | "write" | "external";
 
 export type AgentIntentChannelBehavior = "parameter" | "not_supported";
 
+export type AgentProductScope =
+  | "broker_agent"
+  | "buyer_advisor"
+  | "developer_agent"
+  | "internal_ops";
+
+export type AgentActorType =
+  | "broker"
+  | "buyer"
+  | "developer"
+  | "operator";
+
+export type AgentCapabilityProduct = {
+  productScopes: AgentProductScope[];
+  actorTypes: AgentActorType[];
+};
+
 export type AgentCapabilityAvailability = {
   guest: boolean;
   broker: boolean;
@@ -92,6 +109,7 @@ export type AgentCapabilityPrompt = {
 
 export type AgentIntentDefinition = {
   intent: AgentAction["intent"];
+  product: AgentCapabilityProduct;
   domain: AgentIntentDomain;
   requiredEntities: AgentIntentEntity[];
   confirmation: AgentIntentConfirmation;
@@ -108,9 +126,15 @@ export type AgentIntentDefinition = {
   prompt?: AgentCapabilityPrompt;
 };
 
+const brokerAgentProduct: AgentCapabilityProduct = {
+  productScopes: ["broker_agent"],
+  actorTypes: ["broker"]
+};
+
 export const agentIntentRegistry = {
   create_listing_draft: {
     intent: "create_listing_draft",
+    product: brokerAgentProduct,
     domain: "information_management",
     requiredEntities: [],
     confirmation: "never",
@@ -153,6 +177,7 @@ export const agentIntentRegistry = {
   },
   create_lead: {
     intent: "create_lead",
+    product: brokerAgentProduct,
     domain: "information_management",
     requiredEntities: [],
     confirmation: "always",
@@ -194,6 +219,7 @@ export const agentIntentRegistry = {
   },
   update_listing_draft: {
     intent: "update_listing_draft",
+    product: brokerAgentProduct,
     domain: "information_management",
     requiredEntities: ["listing"],
     confirmation: "always",
@@ -232,6 +258,7 @@ export const agentIntentRegistry = {
   },
   publish_listing: {
     intent: "publish_listing",
+    product: brokerAgentProduct,
     domain: "information_management",
     requiredEntities: ["listing"],
     confirmation: "always",
@@ -264,6 +291,7 @@ export const agentIntentRegistry = {
   },
   generate_social_copy: {
     intent: "generate_social_copy",
+    product: brokerAgentProduct,
     domain: "content_generation",
     requiredEntities: [],
     confirmation: "never",
@@ -302,6 +330,7 @@ export const agentIntentRegistry = {
   },
   create_campaign_links: {
     intent: "create_campaign_links",
+    product: brokerAgentProduct,
     domain: "content_generation",
     requiredEntities: ["listing"],
     confirmation: "always",
@@ -344,6 +373,7 @@ export const agentIntentRegistry = {
   },
   list_today_followups: {
     intent: "list_today_followups",
+    product: brokerAgentProduct,
     domain: "information_management",
     requiredEntities: [],
     confirmation: "never",
@@ -382,6 +412,7 @@ export const agentIntentRegistry = {
   },
   record_lead_followup: {
     intent: "record_lead_followup",
+    product: brokerAgentProduct,
     domain: "information_management",
     requiredEntities: ["lead"],
     confirmation: "conditional",
@@ -420,6 +451,7 @@ export const agentIntentRegistry = {
   },
   create_followup_from_chat: {
     intent: "create_followup_from_chat",
+    product: brokerAgentProduct,
     domain: "information_management",
     requiredEntities: ["lead"],
     confirmation: "always",
@@ -458,6 +490,7 @@ export const agentIntentRegistry = {
   },
   list_leads: {
     intent: "list_leads",
+    product: brokerAgentProduct,
     domain: "information_management",
     requiredEntities: [],
     confirmation: "never",
@@ -493,6 +526,7 @@ export const agentIntentRegistry = {
   },
   draft_lead_reply: {
     intent: "draft_lead_reply",
+    product: brokerAgentProduct,
     domain: "content_generation",
     requiredEntities: ["lead"],
     confirmation: "never",
@@ -532,6 +566,7 @@ export const agentIntentRegistry = {
   },
   create_schedule_event: {
     intent: "create_schedule_event",
+    product: brokerAgentProduct,
     domain: "schedule_tasks",
     requiredEntities: [],
     confirmation: "always",
@@ -570,6 +605,7 @@ export const agentIntentRegistry = {
   },
   list_schedule_events: {
     intent: "list_schedule_events",
+    product: brokerAgentProduct,
     domain: "schedule_tasks",
     requiredEntities: [],
     confirmation: "never",
@@ -605,6 +641,7 @@ export const agentIntentRegistry = {
   },
   update_lead_status: {
     intent: "update_lead_status",
+    product: brokerAgentProduct,
     domain: "information_management",
     requiredEntities: ["lead"],
     confirmation: "always",
@@ -643,6 +680,7 @@ export const agentIntentRegistry = {
   },
   update_lead_details: {
     intent: "update_lead_details",
+    product: brokerAgentProduct,
     domain: "information_management",
     requiredEntities: ["lead"],
     confirmation: "always",
@@ -678,6 +716,7 @@ export const agentIntentRegistry = {
   },
   update_lead_listing: {
     intent: "update_lead_listing",
+    product: brokerAgentProduct,
     domain: "information_management",
     requiredEntities: ["lead", "listing"],
     confirmation: "always",
@@ -713,6 +752,7 @@ export const agentIntentRegistry = {
   },
   show_basic_attribution: {
     intent: "show_basic_attribution",
+    product: brokerAgentProduct,
     domain: "analysis",
     requiredEntities: [],
     confirmation: "never",
@@ -748,6 +788,7 @@ export const agentIntentRegistry = {
   },
   general_reply: {
     intent: "general_reply",
+    product: brokerAgentProduct,
     domain: "general",
     requiredEntities: [],
     confirmation: "never",
@@ -785,4 +826,16 @@ export function getAgentIntentDefinition(intent: AgentAction["intent"]) {
 
 export function getAgentIntentDefinitions() {
   return Object.values(agentIntentRegistry) as AgentIntentDefinition[];
+}
+
+export function getAgentIntentDefinitionsForProduct(options: {
+  actorType?: AgentActorType;
+  productScope: AgentProductScope;
+}) {
+  return getAgentIntentDefinitions().filter((definition) => {
+    const matchesProduct = definition.product.productScopes.includes(options.productScope);
+    const matchesActor = options.actorType ? definition.product.actorTypes.includes(options.actorType) : true;
+
+    return matchesProduct && matchesActor;
+  });
 }
