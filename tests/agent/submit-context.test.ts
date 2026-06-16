@@ -100,6 +100,40 @@ describe("agent submit context", () => {
     });
   });
 
+  it("carries current listing draft facts into workflow memory", () => {
+    expect(
+      inferAgentWorkflowState([
+        {
+          role: "assistant",
+          content: "I drafted a listing preview from your message.",
+          draft: {
+            title: "1 kanal House in DHA Phase 6",
+            city: "Lahore",
+            location_area: "DHA Phase 6",
+            property_type: "house",
+            listing_type: "sale",
+            price_amount: 85000000,
+            price_currency: "PKR",
+            area_value: 1,
+            area_unit: "kanal"
+          },
+          sourceMessage: "Create listing for sale: 1 kanal house in DHA Phase 6 Lahore, demand 8.5 crore"
+        }
+      ])
+    ).toMatchObject({
+      stage: "awaiting_confirmation",
+      active_intent: "create_listing_draft",
+      awaiting: "confirmation",
+      related_entities: [
+        {
+          type: "listing",
+          label: "1 kanal House in DHA Phase 6"
+        }
+      ],
+      summary: expect.stringContaining("Location: DHA Phase 6, Lahore")
+    });
+  });
+
   it("infers needs-selection and collecting-info workflow states", () => {
     expect(
       inferAgentWorkflowState([

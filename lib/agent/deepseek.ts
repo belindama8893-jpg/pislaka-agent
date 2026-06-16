@@ -527,7 +527,7 @@ function getLatestSocialCopyEvidenceContext(context?: AgentRoutingContext) {
       /(?:I can see:|Property details:|Location:|Floor plan|Map showing|房源信息|位置)/i.test(item.content)
   );
 
-  return evidence?.content;
+  return [context?.memory?.workflow?.summary, evidence?.content].filter(Boolean).join("\n");
 }
 
 function extractPromotionFacts(message: string, context?: AgentRoutingContext) {

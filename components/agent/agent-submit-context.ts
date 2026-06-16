@@ -115,6 +115,36 @@ function relatedEntityFromValue(type: WorkflowRelatedEntity["type"], value: unkn
   };
 }
 
+function formatDraftWorkflowSummary(value: unknown) {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const title = typeof value.title === "string" ? value.title : undefined;
+  const location = [value.location_area, value.city].filter((item): item is string => typeof item === "string" && item.trim().length > 0).join(", ");
+  const area =
+    typeof value.area_value === "number" && typeof value.area_unit === "string"
+      ? `${value.area_value} ${value.area_unit}`
+      : undefined;
+  const propertyType = typeof value.property_type === "string" ? value.property_type : undefined;
+  const listingType = typeof value.listing_type === "string" ? value.listing_type : undefined;
+  const price =
+    typeof value.price_amount === "number"
+      ? `PKR ${value.price_amount.toLocaleString("en-US")}`
+      : undefined;
+  const bedrooms = typeof value.bedrooms === "number" ? `${value.bedrooms} bedrooms` : undefined;
+  const bathrooms = typeof value.bathrooms === "number" ? `${value.bathrooms} bathrooms` : undefined;
+  const propertyDetails = [area, propertyType, listingType, price, bedrooms, bathrooms].filter(Boolean).join(" | ");
+
+  return [
+    title ? `Current listing draft: ${title}.` : "Current listing draft is awaiting confirmation.",
+    location ? `Location: ${location}.` : null,
+    propertyDetails ? `Property details: ${propertyDetails}.` : null
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 function getWorkflowRelatedEntities(message: ChatWorkflowMessageRef): WorkflowRelatedEntity[] {
   const entities: WorkflowRelatedEntity[] = [];
   const push = (entity: WorkflowRelatedEntity | null) => {
@@ -142,6 +172,7 @@ function getWorkflowRelatedEntities(message: ChatWorkflowMessageRef): WorkflowRe
   const listingUpdate = isRecord(message.listingUpdate) ? message.listingUpdate : null;
   push(relatedEntityFromValue("listing", listingUpdate?.listing));
 
+  push(relatedEntityFromValue("listing", message.draft));
   push(relatedEntityFromValue("listing", message.promotionTarget));
 
   return entities;
@@ -171,6 +202,8 @@ export function inferAgentWorkflowState(messages: ChatWorkflowMessageRef[]): Age
 
   for (const [field, intent, summary] of awaitingConfirmationFields) {
     if (latestAssistantMessage[field]) {
+      const draftSummary =
+        field === "draft" ? formatDraftWorkflowSummary(latestAssistantMessage[field]) : null;
       return {
         stage: "awaiting_confirmation",
         active_intent: intent,
@@ -178,7 +211,7 @@ export function inferAgentWorkflowState(messages: ChatWorkflowMessageRef[]): Age
         pending_slots: [],
         related_entities: relatedEntities,
         source_message: latestAssistantMessage.sourceMessage,
-        summary: `Waiting for broker confirmation: ${summary}.`
+        summary: draftSummary ?? `Waiting for broker confirmation: ${summary}.`
       };
     }
   }

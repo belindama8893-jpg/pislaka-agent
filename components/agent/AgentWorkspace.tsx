@@ -5566,6 +5566,17 @@ export function AgentWorkspace({
     return uniquePendingMedia(media);
   }
 
+  function getActiveDraftMessage() {
+    if (activeDraftId) {
+      const activeDraftMessage = messages.find((message) => message.id === activeDraftId && message.draft);
+      if (activeDraftMessage?.draft) {
+        return activeDraftMessage;
+      }
+    }
+
+    return [...messages].reverse().find((message) => message.role === "assistant" && message.draft);
+  }
+
   function socialCopyToDraft(action: PendingSocialCopyAction): ListingDraftInput {
     const primaryCard = action.promotion.cards[0];
     const body = primaryCard?.body ?? action.promotion.summary;
@@ -6235,6 +6246,17 @@ export function AgentWorkspace({
     }
 
     if (!target.listing) {
+      const activeDraftMessage = messageMentionsCurrentListing(messageText) ? getActiveDraftMessage() : undefined;
+      if (activeDraftMessage?.draft) {
+        const draftTitle = activeDraftMessage.draft.title ?? "this listing draft";
+        appendAssistantMessage({
+          content: isGuest
+            ? `I can use ${draftTitle} as the promotion target, but campaign links need a saved listing. Sign in and confirm this draft first, then I can generate the WhatsApp promotion links.`
+            : `I can use ${draftTitle} as the promotion target, but campaign links need a saved listing. Confirm & add this draft first, then I can generate the WhatsApp promotion links.`
+        });
+        return;
+      }
+
       const failureUi = buildAgentResolutionFailureUi(resolution ?? { status: "needs_clarification", target_type: "listing" }, {
         targetType: "listing"
       });
