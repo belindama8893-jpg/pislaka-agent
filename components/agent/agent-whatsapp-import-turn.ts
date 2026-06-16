@@ -28,10 +28,15 @@ export function looksLikeWhatsAppChatText(message: string) {
     return false;
   }
 
+  const hasExplicitWhatsAppCue =
+    /whats\s*app|whatsapp|chat export|messages and calls are end-to-end encrypted/i.test(trimmed);
+  const hasTimestampedLine = /^\[?\d{1,2}[/.:-]\d{1,2}[/.:-]\d{2,4},?\s+\d{1,2}:\d{2}/m.test(trimmed);
+  const speakerLines = trimmed.match(/^[\p{L}\p{N} ._+\-()]{1,40}:\s+.+$/gmu) ?? [];
+
   return (
-    /whats\s*app|whatsapp|chat export|messages and calls are end-to-end encrypted/i.test(trimmed) ||
-    /^\[?\d{1,2}[/.:-]\d{1,2}[/.:-]\d{2,4},?\s+\d{1,2}:\d{2}/m.test(trimmed) ||
-    /^[\p{L}\p{N} ._+\-()]+:\s+.+$/mu.test(trimmed)
+    hasExplicitWhatsAppCue ||
+    hasTimestampedLine ||
+    speakerLines.length >= 2
   );
 }
 

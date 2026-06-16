@@ -41,7 +41,7 @@ describe("agent WhatsApp import turn", () => {
   it("creates a handled import turn for pasted chat text", () => {
     expect(
       getWhatsAppImportTurn({
-        message: "Ahmed: Is this still available?",
+        message: "Ahmed: Is this still available?\nBroker: Yes, Sunday 4pm works.",
         files: [],
         hasOutgoingMedia: false,
         isScheduleRequest: false,
@@ -52,6 +52,28 @@ describe("agent WhatsApp import turn", () => {
       requestedAction: "unknown",
       shouldHandle: true
     });
+  });
+
+  it("does not treat a single colon-based business command as chat import", () => {
+    expect(
+      getWhatsAppImportTurn({
+        message: "Create listing for sale: 1 kanal house in DHA Phase 6 Lahore, demand 8.5 crore",
+        files: [],
+        hasOutgoingMedia: false,
+        isScheduleRequest: false,
+        isWhatsAppImportMode: false
+      }).shouldHandle
+    ).toBe(false);
+
+    expect(
+      getWhatsAppImportTurn({
+        message: "Ahmed: Is this still available?",
+        files: [],
+        hasOutgoingMedia: false,
+        isScheduleRequest: false,
+        isWhatsAppImportMode: true
+      }).shouldHandle
+    ).toBe(true);
   });
 
   it("does not let chat text heuristics intercept schedule requests", () => {
