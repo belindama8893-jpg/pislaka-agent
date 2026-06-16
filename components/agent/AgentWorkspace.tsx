@@ -2454,10 +2454,6 @@ function PromotionPack({ promotion, sourceMessage }: { promotion: ListingPromoti
   );
 }
 
-function PromotionFollowUp({ summary }: { summary: string }) {
-  return <div className="promotion-next-step">{summary}</div>;
-}
-
 function AnalyticsChatCard({ summary }: { summary: AnalyticsSummary }) {
   return <AnalyticsSummaryCard compact summary={summary} />;
 }
@@ -8588,7 +8584,7 @@ export function AgentWorkspace({
                 {message.promotion ? (
                   <>
                     <PromotionPack promotion={message.promotion} sourceMessage={message.uiLanguage ?? message.sourceMessage} />
-                    {message.promotion.summary ? <PromotionFollowUp summary={message.promotion.summary} /> : null}
+                    {message.promotion.summary ? <p>{message.promotion.summary}</p> : null}
                   </>
                 ) : null}
                 {message.promotionTarget ? (
