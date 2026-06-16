@@ -21,6 +21,7 @@ import {
   UserPlus
 } from "lucide-react";
 import { AgentComposer, type AgentComposerContextPreview } from "@/components/agent/AgentComposer";
+import { AnalyticsSummaryCard } from "@/components/analytics/AnalyticsDashboard";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
 import { AuthForm } from "@/components/auth/AuthForm";
 import Link from "next/link";
@@ -64,6 +65,7 @@ import {
 } from "@/lib/agent/agent-ui-copy";
 import type { ListingDraftInput, ListingDraftUpdateInput, ListingMediaRecord } from "@/lib/listings/types";
 import type { ListingPromotion, PromotionChannel } from "@/lib/promotions/types";
+import type { AnalyticsFocus, AnalyticsRange, AnalyticsSummary } from "@/lib/analytics/types";
 
 type RecentListingSummary = {
   id: string;
@@ -162,6 +164,7 @@ type ChatMessage = {
   leadResults?: LeadCardItem[];
   leadSourceMessage?: string;
   leadLatestOffer?: boolean;
+  analyticsSummary?: AnalyticsSummary;
   leadDetailsUpdate?: LeadDetailsUpdatePreview;
   leadCreate?: LeadCreatePreview;
   leadBatchStatusUpdate?: LeadBatchStatusUpdatePreview;
@@ -572,6 +575,7 @@ function hasStructuredOutput(message: ChatMessage) {
       message.scheduleEvents ||
       message.leadResults ||
       message.leadLatestOffer ||
+      message.analyticsSummary ||
       message.leadDetailsUpdate ||
       message.leadCreate ||
       message.leadBatchStatusUpdate ||
@@ -608,6 +612,7 @@ function structuredPayloadForMessage(message: ChatMessage): Record<string, unkno
     "leadResults",
     "leadSourceMessage",
     "leadLatestOffer",
+    "analyticsSummary",
     "leadDetailsUpdate",
     "leadCreate",
     "leadBatchStatusUpdate",
@@ -2482,6 +2487,10 @@ function PromotionPack({ promotion, sourceMessage }: { promotion: ListingPromoti
       </div>
     </AgentOutputCard>
   );
+}
+
+function AnalyticsChatCard({ summary }: { summary: AnalyticsSummary }) {
+  return <AnalyticsSummaryCard compact summary={summary} />;
 }
 
 function PromotionConfirmCard({
@@ -6727,6 +6736,55 @@ export function AgentWorkspace({
     });
   }
 
+  async function showAnalyticsSummary(
+    actionResponse: string,
+    payload: Record<string, unknown> | undefined,
+    sourceMessage: string
+  ) {
+    if (isGuest) {
+      handleAuthRequired("read_workspace");
+      return;
+    }
+
+    const range = typeof payload?.range === "string" ? (payload.range as AnalyticsRange) : "week";
+    const focus = typeof payload?.focus === "string" ? (payload.focus as AnalyticsFocus) : "overview";
+    const params = new URLSearchParams({
+      range,
+      focus,
+      time_zone: userTimeZone
+    });
+    const response = await fetch(`/api/analytics?${params.toString()}`);
+
+    if (!response.ok) {
+      if (isUnauthorizedResponse(response)) {
+        handleAuthRequired("read_workspace");
+        return;
+      }
+
+      const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null;
+      appendAssistantMessage({
+        content: errorPayload?.error ?? "I could not read analytics yet. Please try again in a moment.",
+        sourceMessage
+      });
+      return;
+    }
+
+    const result = (await response.json()) as { summary?: AnalyticsSummary };
+    if (!result.summary) {
+      appendAssistantMessage({
+        content: "I could not find analytics data yet. Generate campaign links and collect leads to start tracking.",
+        sourceMessage
+      });
+      return;
+    }
+
+    appendAssistantMessage({
+      content: actionResponse || "Here is the latest performance summary from your workspace.",
+      analyticsSummary: result.summary,
+      sourceMessage
+    });
+  }
+
   function formatResolutionCandidates(candidates: AgentResolutionCandidate[]) {
     return candidates
       .map((candidate) => [candidate.label, candidate.phone].filter(Boolean).join(" · "))
@@ -7796,6 +7854,11 @@ export function AgentWorkspace({
         return;
       }
 
+      if (payload.action.intent === "show_basic_attribution") {
+        await showAnalyticsSummary(payload.action.response, payload.action.payload, agentMessageContent);
+        return;
+      }
+
       if (payload.action.intent === "update_lead_status" && leadPayload) {
         proposeLeadStatusUpdate(payload.action.response, leadPayload, payload.action.resolution);
         return;
@@ -8411,6 +8474,7 @@ export function AgentWorkspace({
                     }}
                   />
                 ) : null}
+                {message.analyticsSummary ? <AnalyticsChatCard summary={message.analyticsSummary} /> : null}
                 {message.leadStatusUpdate ? (
                   <LeadStatusConfirmCard
                     isGuest={isGuest}

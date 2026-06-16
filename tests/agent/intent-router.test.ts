@@ -42,6 +42,14 @@ describe("classifyLocalIntent", () => {
       intent: "lead_query"
     },
     {
+      message: "Which channel has the best conversion rate this week?",
+      intent: "analytics"
+    },
+    {
+      message: "看一下本周统计",
+      intent: "analytics"
+    },
+    {
       message: "I sent message to Ahmed",
       intent: "lead_followup_record"
     },

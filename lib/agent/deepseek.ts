@@ -215,6 +215,7 @@ Lead rules:
 - Use draft_lead_reply when the user asks to reply to a lead/customer/buyer.
 - Use update_lead_status when the user asks to mark/change/update a lead status.
 - Use update_lead_details when the user asks to edit a lead's phone, email, name, or message.
+- Use show_basic_attribution when the broker asks for analytics, statistics, performance, clicks, conversion rate, channel attribution, top channels, top listings, or follow-up health. This is read-only and does not require confirmation.
 - If the user says hot lead, set status to qualified and urgency to high.
 - Never update a lead without confirmation.
 - Never update lead contact details without confirmation.
@@ -414,6 +415,51 @@ function parseLocalLeadQuery(message: string): AgentAction {
     payload: {
       query: message,
       status_filter: extractLeadStatusFilter(message)
+    }
+  };
+}
+
+function extractAnalyticsRange(message: string) {
+  if (/today|aaj|今天|今日/i.test(message)) {
+    return "today";
+  }
+
+  if (/month|30 days|本月|这个月|近30天/i.test(message)) {
+    return "month";
+  }
+
+  if (/all time|overall|全部|所有|历史/i.test(message)) {
+    return "all";
+  }
+
+  return "week";
+}
+
+function extractAnalyticsFocus(message: string) {
+  if (/channel|whatsapp|facebook|instagram|portal|渠道/i.test(message)) {
+    return "channels";
+  }
+
+  if (/listing|property|房源|房子/i.test(message)) {
+    return "listings";
+  }
+
+  if (/follow|reply|跟进|回复/i.test(message)) {
+    return "followups";
+  }
+
+  return "overview";
+}
+
+function parseLocalAnalyticsRequest(message: string): AgentAction {
+  return {
+    intent: "show_basic_attribution",
+    requires_confirmation: false,
+    response: "Here is the latest performance summary from your workspace.",
+    payload: {
+      query: message,
+      range: extractAnalyticsRange(message),
+      focus: extractAnalyticsFocus(message)
     }
   };
 }
@@ -1522,6 +1568,8 @@ function parseLocalAgentAction(message: string, context?: AgentRoutingContext): 
     : classifyLocalIntent(message);
 
   switch (intent) {
+    case "analytics":
+      return parseLocalAnalyticsRequest(message);
     case "today_followups":
       return parseLocalTodayFollowUps(message);
     case "lead_create":
@@ -1622,6 +1670,12 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
   const localIntent = visionSuggestedSchedule ? "schedule_event" : classifyLocalIntent(message);
 
   if (localIntent === "today_followups") {
+    return stripInternalLocationContextFromAction(
+      localizeAgentActionResponse(parseLocalAgentAction(message, context), message)
+    );
+  }
+
+  if (localIntent === "analytics") {
     return stripInternalLocationContextFromAction(
       localizeAgentActionResponse(parseLocalAgentAction(message, context), message)
     );

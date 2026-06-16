@@ -1,4 +1,5 @@
 export type LocalIntentKind =
+  | "analytics"
   | "lead_create"
   | "lead_reply"
   | "lead_status_update"
@@ -54,6 +55,12 @@ export function isLeadReplyRequest(message: string) {
 
 export function isLeadQueryRequest(message: string) {
   return /lead|leads|buyer|buyers|customer|customers|inquir|client|客户|线索|买家|询盘|咨询|跟进哪些|新客户|今日客户|今天.*客户|未跟进/i.test(
+    message
+  );
+}
+
+export function isAnalyticsRequest(message: string) {
+  return /\b(?:analytics|stats|statistics|performance|conversion|convert|attribution|clicks?|views?|traffic)\b|渠道表现|统计|数据看板|转化率|点击|访问|流量|归因|哪个渠道|哪个房源|效果最好|表现最好/i.test(
     message
   );
 }
@@ -174,6 +181,10 @@ export function isListingDraftRequest(message: string) {
 }
 
 export function classifyLocalIntent(message: string): LocalIntentKind {
+  if (isAnalyticsRequest(message)) {
+    return "analytics";
+  }
+
   if (isTodayFollowUpsRequest(message)) {
     return "today_followups";
   }

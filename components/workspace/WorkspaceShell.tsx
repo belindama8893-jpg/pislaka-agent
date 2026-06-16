@@ -33,7 +33,7 @@ const agentNav = [
 const workspaceNav = [
   { id: "listings", label: "Listings", href: "/listings", icon: List },
   { id: "leads", label: "Leads", href: "/leads", icon: Users },
-  { id: "analytics", label: "Analytics", href: "#", icon: BarChart3 },
+  { id: "analytics", label: "Analytics", href: "/analytics", icon: BarChart3 },
   { id: "schedule", label: "Schedule", href: "/schedule", icon: CalendarClock }
 ] as const;
 
