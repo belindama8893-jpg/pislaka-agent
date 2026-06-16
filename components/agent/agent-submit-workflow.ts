@@ -145,3 +145,23 @@ export function getBulkLeadWriteGuard<LeadContext>(message: string, selectedLead
     leadContexts: selectedLeadContexts
   };
 }
+
+export function getEmptyAgentTurnResponse(options: {
+  activeDraftId?: string | null;
+  hasOutgoingMedia: boolean;
+  visionAnalysisError?: string;
+}) {
+  if (!options.hasOutgoingMedia) {
+    return "I attached that context. Tell me what you want to do with it, for example edit it, draft a reply, promote it, or schedule a follow-up.";
+  }
+
+  const errorSuffix = options.visionAnalysisError
+    ? ` I could not analyze the images yet: ${options.visionAnalysisError}`
+    : "";
+
+  if (options.activeDraftId) {
+    return `I added these media files to the current listing preview. They will upload when you confirm the listing.${errorSuffix}`;
+  }
+
+  return `I can use these as listing media. Please add the property details, and I will draft the listing with these files attached.${errorSuffix}`;
+}

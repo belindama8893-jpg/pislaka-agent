@@ -46,6 +46,7 @@ import {
   findLatestPendingPromotionAction,
   findLatestPendingSocialCopyAction,
   getBulkLeadWriteGuard,
+  getEmptyAgentTurnResponse,
   type AgentPendingPromotionAction,
   type AgentPendingSocialCopyAction
 } from "@/components/agent/agent-submit-workflow";
@@ -7523,15 +7524,11 @@ export function AgentWorkspace({
     if (!trimmed && !visionAnalysisContext) {
       appendAssistantMessage({
         uiLanguage: turnUiLanguage,
-        content: hasOutgoingMedia
-          ? activeDraftId
-            ? `I added these media files to the current listing preview. They will upload when you confirm the listing.${
-                visionAnalysisError ? ` I could not analyze the images yet: ${visionAnalysisError}` : ""
-              }`
-            : `I can use these as listing media. Please add the property details, and I will draft the listing with these files attached.${
-                visionAnalysisError ? ` I could not analyze the images yet: ${visionAnalysisError}` : ""
-              }`
-          : "I attached that context. Tell me what you want to do with it, for example edit it, draft a reply, promote it, or schedule a follow-up."
+        content: getEmptyAgentTurnResponse({
+          activeDraftId,
+          hasOutgoingMedia,
+          visionAnalysisError
+        })
       });
       setIsSubmitting(false);
       return;

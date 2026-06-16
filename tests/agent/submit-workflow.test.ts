@@ -4,6 +4,7 @@ import {
   findLatestPendingPromotionAction,
   findLatestPendingSocialCopyAction,
   getBulkLeadWriteGuard,
+  getEmptyAgentTurnResponse,
   isAgentConfirmationMessage
 } from "../../components/agent/agent-submit-workflow";
 
@@ -149,5 +150,33 @@ describe("agent submit workflow", () => {
       kind: "none",
       leadContexts: leads
     });
+  });
+
+  it("builds next-step guidance when the user submits only attachments or context", () => {
+    expect(
+      getEmptyAgentTurnResponse({
+        hasOutgoingMedia: false
+      })
+    ).toBe(
+      "I attached that context. Tell me what you want to do with it, for example edit it, draft a reply, promote it, or schedule a follow-up."
+    );
+
+    expect(
+      getEmptyAgentTurnResponse({
+        activeDraftId: "draft-1",
+        hasOutgoingMedia: true,
+        visionAnalysisError: "low resolution"
+      })
+    ).toBe(
+      "I added these media files to the current listing preview. They will upload when you confirm the listing. I could not analyze the images yet: low resolution"
+    );
+
+    expect(
+      getEmptyAgentTurnResponse({
+        hasOutgoingMedia: true
+      })
+    ).toBe(
+      "I can use these as listing media. Please add the property details, and I will draft the listing with these files attached."
+    );
   });
 });
