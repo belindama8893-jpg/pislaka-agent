@@ -1,3 +1,6 @@
+import type { ListingDraftInput } from "@/lib/listings/types";
+import type { ListingPromotion, PromotionChannel } from "@/lib/promotions/types";
+
 export type AgentPendingPromotionAction<Listing, Channel extends string> = {
   channels: Channel[];
   instruction: string;
@@ -143,6 +146,85 @@ export function getBulkLeadWriteGuard<LeadContext>(message: string, selectedLead
   return {
     kind: looksLikeBulkLeadStatusUpdate(message) ? ("status_update" as const) : ("unsupported_bulk_write" as const),
     leadContexts: selectedLeadContexts
+  };
+}
+
+function formatDraftPrice(draft: ListingDraftInput) {
+  if (!draft.price_amount) {
+    return null;
+  }
+
+  const crore = draft.price_amount / 10000000;
+  if (crore >= 1) {
+    return `PKR ${Number(crore.toFixed(2)).toString()} Crore`;
+  }
+
+  const lakh = draft.price_amount / 100000;
+  if (lakh >= 1) {
+    return `PKR ${Number(lakh.toFixed(2)).toString()} Lakh`;
+  }
+
+  return `PKR ${draft.price_amount.toLocaleString("en-US")}`;
+}
+
+function formatDraftLocation(draft: ListingDraftInput) {
+  return [draft.location_area, draft.city].filter(Boolean).join(", ");
+}
+
+function formatDraftSize(draft: ListingDraftInput) {
+  return draft.area_value && draft.area_unit ? `${draft.area_value} ${draft.area_unit}` : null;
+}
+
+function channelTitle(channel: PromotionChannel) {
+  if (channel === "whatsapp") {
+    return "WhatsApp promotion draft";
+  }
+  if (channel === "facebook") {
+    return "Facebook promotion draft";
+  }
+  if (channel === "instagram") {
+    return "Instagram promotion draft";
+  }
+  return "Portal promotion draft";
+}
+
+export function buildDraftSocialCopyPromotion(
+  draft: ListingDraftInput,
+  channels: PromotionChannel[],
+  instruction: string
+): ListingPromotion {
+  const selectedChannels = channels.length ? channels : (["whatsapp"] as PromotionChannel[]);
+  const location = formatDraftLocation(draft);
+  const size = formatDraftSize(draft);
+  const price = formatDraftPrice(draft);
+  const listingType = draft.listing_type === "rent" ? "for rent" : draft.listing_type === "sale" ? "for sale" : "available";
+  const propertyLabel = [size, draft.property_type].filter(Boolean).join(" ") || draft.property_type || "Property";
+  const opening = [propertyLabel, listingType, location ? `in ${location}` : ""].filter(Boolean).join(" ");
+  const roomLine = [
+    draft.bedrooms !== undefined ? `${draft.bedrooms} beds` : null,
+    draft.bathrooms !== undefined ? `${draft.bathrooms} baths` : null
+  ]
+    .filter(Boolean)
+    .join(" | ");
+  const featureLine = draft.features?.length ? `Features: ${draft.features.join(", ")}` : null;
+
+  return {
+    summary: `Channel copy generated from the current listing draft for: ${instruction}. No tracking links have been generated.`,
+    cards: selectedChannels.map((channel) => ({
+      channel,
+      title: channelTitle(channel),
+      body: [
+        opening || draft.title,
+        price ? `Demand: ${price}` : null,
+        roomLine || null,
+        featureLine,
+        channel === "instagram" ? "DM for details and viewing." : "Interested? Reply for details or a viewing slot."
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      cta: channel === "instagram" ? "DM for details." : "Reply for details.",
+      image_brief: "Use the strongest property photo or listing preview image."
+    }))
   };
 }
 

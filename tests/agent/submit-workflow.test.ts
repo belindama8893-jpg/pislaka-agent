@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildDraftSocialCopyPromotion,
   canHandlePendingActionConfirmation,
   findLatestPendingPromotionAction,
   findLatestPendingSocialCopyAction,
@@ -133,6 +134,35 @@ describe("agent submit workflow", () => {
       instruction: "Create copy",
       channels: ["whatsapp", "facebook"]
     });
+  });
+
+  it("builds no-login channel copy from a current listing draft without tracking links", () => {
+    const promotion = buildDraftSocialCopyPromotion(
+      {
+        title: "1 kanal House in DHA Phase 6",
+        city: "Lahore",
+        location_area: "DHA Phase 6",
+        property_type: "house",
+        listing_type: "sale",
+        price_amount: 85000000,
+        price_currency: "PKR",
+        area_value: 1,
+        area_unit: "kanal",
+        features: []
+      },
+      ["whatsapp"],
+      "Promote this listing on WhatsApp"
+    );
+
+    expect(promotion.cards).toHaveLength(1);
+    expect(promotion.cards[0]).toMatchObject({
+      channel: "whatsapp",
+      title: "WhatsApp promotion draft",
+      cta: "Reply for details."
+    });
+    expect(promotion.cards[0].body).toContain("1 kanal house for sale in DHA Phase 6, Lahore");
+    expect(promotion.cards[0].body).toContain("Demand: PKR 8.5 Crore");
+    expect(promotion.cards[0].landing_url).toBeUndefined();
   });
 
   it("classifies multi-lead write guards", () => {

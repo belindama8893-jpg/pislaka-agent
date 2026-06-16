@@ -48,6 +48,7 @@ import {
 } from "@/components/agent/agent-submit-context";
 import {
   canHandlePendingActionConfirmation,
+  buildDraftSocialCopyPromotion,
   findLatestPendingPromotionAction,
   findLatestPendingSocialCopyAction,
   getBulkLeadWriteGuard,
@@ -6249,10 +6250,15 @@ export function AgentWorkspace({
       const activeDraftMessage = messageMentionsCurrentListing(messageText) ? getActiveDraftMessage() : undefined;
       if (activeDraftMessage?.draft) {
         const draftTitle = activeDraftMessage.draft.title ?? "this listing draft";
+        const channels = extractPromotionChannels(messageText);
+        const selectedChannels = channels.length ? channels : (["whatsapp"] as PromotionChannel[]);
+        const promotion = buildDraftSocialCopyPromotion(activeDraftMessage.draft, selectedChannels, messageText);
         appendAssistantMessage({
           content: isGuest
-            ? `I can use ${draftTitle} as the promotion target, but campaign links need a saved listing. Sign in and confirm this draft first, then I can generate the WhatsApp promotion links.`
-            : `I can use ${draftTitle} as the promotion target, but campaign links need a saved listing. Confirm & add this draft first, then I can generate the WhatsApp promotion links.`
+            ? `I drafted ${selectedChannels.join(", ")} copy for ${draftTitle}. You can use this now. Dedicated tracking links need a saved listing; sign in and confirm this draft when you want those links.`
+            : `I drafted ${selectedChannels.join(", ")} copy for ${draftTitle}. You can use this now. Dedicated tracking links need a saved listing; confirm this draft when you want those links.`,
+          promotion,
+          sourceMessage: messageText
         });
         return;
       }
