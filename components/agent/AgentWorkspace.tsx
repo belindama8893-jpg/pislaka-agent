@@ -2424,16 +2424,14 @@ function PromotionPack({ promotion, sourceMessage }: { promotion: ListingPromoti
                         <Copy size={14} />
                       </button>
                     </div>
-                    <div className="promotion-bubble-content">
-                      <p>{card.body}</p>
-                      {card.cta ? <span className="promotion-cta-text">{card.cta}</span> : null}
-                      {card.landing_url ? (
-                        <a className="promotion-inline-link" href={card.landing_url} target="_blank" rel="noreferrer">
-                          <Globe2 size={13} />
-                          <span>{card.landing_url}</span>
-                        </a>
-                      ) : null}
-                    </div>
+                    <p>{card.body}</p>
+                    {card.cta ? <span className="promotion-cta-text">{card.cta}</span> : null}
+                    {card.landing_url ? (
+                      <a className="promotion-inline-link" href={card.landing_url} target="_blank" rel="noreferrer">
+                        <Globe2 size={13} />
+                        <span>{card.landing_url}</span>
+                      </a>
+                    ) : null}
                     {copiedChannel === copyKey ? <small className="copied-hint">{copy.generic.copiedToClipboard}</small> : null}
                     {card.whatsapp_share_url ? (
                       <div className="promotion-actions">

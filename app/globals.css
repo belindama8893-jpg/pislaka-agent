@@ -3228,7 +3228,7 @@ a {
 .promotion-channel-group {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .promotion-channel-group + .promotion-channel-group {
@@ -3238,17 +3238,19 @@ a {
 
 .promotion-options {
   display: grid;
-  gap: 10px;
+  gap: 0;
 }
 
 .promotion-option {
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  padding: 12px;
-  border: 1px solid rgba(226, 232, 240, 0.78);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.72);
+  gap: 7px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(226, 232, 240, 0.72);
+}
+
+.promotion-option:first-child {
+  border-top: 0;
 }
 
 .promotion-option-header {
@@ -3266,6 +3268,14 @@ a {
   font-weight: 650;
 }
 
+.promotion-option > p {
+  margin: 0;
+  white-space: pre-line;
+  color: #334155;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
 .promotion-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -3278,23 +3288,6 @@ a {
   background: rgba(255, 255, 255, 0.78);
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-}
-
-.promotion-row {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--border-soft);
-}
-
-.promotion-row:first-child {
-  padding-top: 0;
-}
-
-.promotion-row:last-child {
-  padding-bottom: 0;
-  border-bottom: none;
 }
 
 .promotion-card-header {
@@ -3315,12 +3308,6 @@ a {
   border-color: rgba(20, 184, 166, 0.26);
   font-size: 0.72rem;
   font-weight: 560;
-}
-
-.promotion-row .promotion-card-header {
-  padding-bottom: 12px;
-  border-bottom: 1px dashed var(--border-soft);
-  margin-bottom: 2px;
 }
 
 .promotion-channel-title {
@@ -3351,34 +3338,9 @@ a {
   font-weight: 550;
 }
 
-.promotion-row strong {
-  display: block;
-  font-size: 0.95rem;
-  color: var(--text);
-  margin-top: 4px;
-}
-
 .promotion-card p {
   margin: 0;
   white-space: pre-line;
-}
-
-.promotion-bubble-content {
-  background: rgba(241, 245, 249, 0.4);
-  padding: 12px 14px;
-  border-radius: 8px;
-  border: 1px solid rgba(226, 232, 240, 0.6);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.promotion-row p {
-  margin: 0;
-  white-space: pre-line;
-  font-size: 0.88rem;
-  line-height: 1.5;
-  color: #334155;
 }
 
 .promotion-cta-text {
