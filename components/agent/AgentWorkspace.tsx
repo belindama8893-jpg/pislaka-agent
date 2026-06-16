@@ -6832,6 +6832,118 @@ export function AgentWorkspace({
     });
   }
 
+  async function handleAgentActionResponse(action: AgentAction, sourceMessage: string) {
+    const leadPayload = action.payload as LeadOperationPayload | undefined;
+    const handlers: Partial<Record<AgentAction["intent"], () => boolean | Promise<boolean>>> = {
+      create_lead: () => {
+        proposeLeadCreate(action.payload as LeadCreatePayload);
+        return true;
+      },
+      list_leads: () => {
+        if (!leadPayload) {
+          return false;
+        }
+
+        showLeadResults(action.response, leadPayload, sourceMessage);
+        return true;
+      },
+      list_today_followups: async () => {
+        await showTodayFollowUps(action.response);
+        return true;
+      },
+      list_schedule_events: async () => {
+        await showScheduleResults(
+          action.response,
+          action.payload as ScheduleEventListPayload,
+          sourceMessage
+        );
+        return true;
+      },
+      show_basic_attribution: async () => {
+        await showAnalyticsSummary(action.response, action.payload, sourceMessage);
+        return true;
+      },
+      update_lead_status: () => {
+        if (!leadPayload) {
+          return false;
+        }
+
+        proposeLeadStatusUpdate(action.response, leadPayload, action.resolution);
+        return true;
+      },
+      record_lead_followup: () => {
+        if (!leadPayload) {
+          return false;
+        }
+
+        proposeLeadFollowUpRecord(action.response, leadPayload, action.resolution);
+        return true;
+      },
+      update_lead_details: () => {
+        proposeLeadDetailsUpdate(
+          action.response,
+          action.payload as LeadDetailsUpdatePayload,
+          action.resolution
+        );
+        return true;
+      },
+      update_lead_listing: () => {
+        proposeLeadListingUpdate(
+          action.response,
+          action.payload as LeadListingUpdatePayload,
+          action.resolution
+        );
+        return true;
+      },
+      draft_lead_reply: async () => {
+        if (!leadPayload) {
+          return false;
+        }
+
+        await draftReplyForLead(action.response, leadPayload, action.resolution);
+        return true;
+      },
+      generate_social_copy: () => {
+        const socialCopyPayload = action.payload as { promotion?: ListingPromotion };
+        appendAssistantMessage({
+          content: action.response,
+          promotion: socialCopyPayload.promotion
+        });
+        return true;
+      },
+      create_campaign_links: () => {
+        proposePromotionFromMessage(sourceMessage, action.resolution);
+        return true;
+      },
+      publish_listing: () => {
+        if (!looksLikeExternalChannelPromotion(sourceMessage)) {
+          return false;
+        }
+
+        proposePromotionFromMessage(sourceMessage, action.resolution);
+        return true;
+      },
+      update_listing_draft: () => {
+        proposeListingUpdateFromMessage(
+          action.response,
+          sourceMessage,
+          action.payload as ListingUpdatePayload,
+          action.resolution
+        );
+        return true;
+      },
+      create_schedule_event: () =>
+        showScheduleResolutionMessage(
+          action.response,
+          action.payload as BrokerEventDraftInput,
+          action.resolution
+        )
+    };
+
+    const handler = handlers[action.intent];
+    return handler ? await handler() : false;
+  }
+
   function formatResolutionCandidates(candidates: AgentResolutionCandidate[]) {
     return candidates
       .map((candidate) => [candidate.label, candidate.phone].filter(Boolean).join(" · "))
@@ -7867,6 +7979,10 @@ export function AgentWorkspace({
         setConversationId(payload.conversationId);
       }
 
+      if (await handleAgentActionResponse(payload.action, agentMessageContent)) {
+        return;
+      }
+
       const draft =
         payload.action.intent === "create_listing_draft"
           ? (payload.action.payload as ListingDraftInput)
@@ -7875,113 +7991,6 @@ export function AgentWorkspace({
         payload.action.intent === "create_schedule_event"
           ? (payload.action.payload as BrokerEventDraftInput)
           : undefined;
-      const leadPayload = payload.action.payload as LeadOperationPayload | undefined;
-
-      if (payload.action.intent === "create_lead") {
-        proposeLeadCreate(payload.action.payload as LeadCreatePayload);
-        return;
-      }
-
-      if (payload.action.intent === "list_leads" && leadPayload) {
-        showLeadResults(payload.action.response, leadPayload, agentMessageContent);
-        return;
-      }
-
-      if (payload.action.intent === "list_today_followups") {
-        await showTodayFollowUps(payload.action.response);
-        return;
-      }
-
-      if (payload.action.intent === "list_schedule_events") {
-        await showScheduleResults(
-          payload.action.response,
-          payload.action.payload as ScheduleEventListPayload,
-          agentMessageContent
-        );
-        return;
-      }
-
-      if (payload.action.intent === "show_basic_attribution") {
-        await showAnalyticsSummary(payload.action.response, payload.action.payload, agentMessageContent);
-        return;
-      }
-
-      if (payload.action.intent === "update_lead_status" && leadPayload) {
-        proposeLeadStatusUpdate(payload.action.response, leadPayload, payload.action.resolution);
-        return;
-      }
-
-      if (payload.action.intent === "record_lead_followup" && leadPayload) {
-        proposeLeadFollowUpRecord(payload.action.response, leadPayload, payload.action.resolution);
-        return;
-      }
-
-      if (payload.action.intent === "update_lead_details") {
-        proposeLeadDetailsUpdate(
-          payload.action.response,
-          payload.action.payload as LeadDetailsUpdatePayload,
-          payload.action.resolution
-        );
-        return;
-      }
-
-      if (payload.action.intent === "update_lead_listing") {
-        proposeLeadListingUpdate(
-          payload.action.response,
-          payload.action.payload as LeadListingUpdatePayload,
-          payload.action.resolution
-        );
-        return;
-      }
-
-      if (payload.action.intent === "draft_lead_reply" && leadPayload) {
-        await draftReplyForLead(payload.action.response, leadPayload, payload.action.resolution);
-        return;
-      }
-
-      if (payload.action.intent === "generate_social_copy") {
-        const socialCopyPayload = payload.action.payload as { promotion?: ListingPromotion };
-        appendAssistantMessage({
-          content: payload.action.response,
-          promotion: socialCopyPayload.promotion
-        });
-        return;
-      }
-
-      if (payload.action.intent === "create_campaign_links") {
-        proposePromotionFromMessage(agentMessageContent, payload.action.resolution);
-        return;
-      }
-
-      if (
-        payload.action.intent === "publish_listing" &&
-        looksLikeExternalChannelPromotion(agentMessageContent)
-      ) {
-        proposePromotionFromMessage(agentMessageContent, payload.action.resolution);
-        return;
-      }
-
-      if (payload.action.intent === "update_listing_draft") {
-        proposeListingUpdateFromMessage(
-          payload.action.response,
-          agentMessageContent,
-          payload.action.payload as ListingUpdatePayload,
-          payload.action.resolution
-        );
-        return;
-      }
-
-      if (
-        payload.action.intent === "create_schedule_event" &&
-        showScheduleResolutionMessage(
-          payload.action.response,
-          payload.action.payload as BrokerEventDraftInput,
-          payload.action.resolution
-        )
-      ) {
-        return;
-      }
-
       const assistantMessageId = createId();
 
       if (draft) {
