@@ -8,6 +8,7 @@
 
 - 固定业务场景下，Agent 不做开放式闲聊发散，而是把用户推进到明确业务流程。
 - 能力、提示、确认边界和实体解析策略集中在配置层，便于维护和回归测试。
+- 记忆必须分层、标注可信度和使用边界；聊天上下文只能辅助判断，数据库才是业务事实来源。
 - LLM 输出只是 action proposal；真正的安全边界由 typed runtime 和数据库解析负责。
 
 ## 中台扩展口
@@ -47,6 +48,9 @@ flowchart TD
   A --> D["Policy Runtime"]
   A --> E["Resolution Runtime"]
   A --> F["Action Handler Manifest"]
+  K["Memory Runtime"] --> B
+  K --> C
+  K --> E
 
   B --> G["DeepSeek / Local Router"]
   C --> H["Composer Placeholder / Quick Actions"]
@@ -63,6 +67,7 @@ flowchart TD
 | 层 | 文件 | 作用 |
 | --- | --- | --- |
 | Capability Registry | `lib/agent/registry/intents.ts` | 每个 intent 的业务域、输入、路由、确认、风险、实体解析、UI、引导和 prompt metadata |
+| Memory Runtime | `lib/agent/memory.ts` | 把短期聊天、当前选中实体、附件和运行时上下文编译成带可信度/生命周期/使用边界的 memory context |
 | Prompt Compiler | `lib/agent/registry/prompt.ts` | 从 registry 编译 supported intents、routing rules、workflow rules、resolution rules |
 | Guidance Runtime | `lib/agent/guidance.ts` | 根据 broker/workspace 状态生成首页快捷动作、placeholder、下一步建议 |
 | Policy Runtime | `lib/agent/confirmation-policy.ts` | 从 registry 计算 `requires_confirmation`、risk、audit、uiCard、requiresAuthForWrite |
@@ -154,6 +159,54 @@ flowchart TD
 - 因为出现 WhatsApp/Facebook 渠道词就跳过 lead/listing 解析。
 - ambiguous 时静默选择分数最高的候选。
 
+## Memory Runtime
+
+`lib/agent/memory.ts` 负责把分散上下文收敛成统一的 `AgentMemoryRuntimeContext`。它不是“让模型随便记住一切”，而是给每类记忆声明：
+
+- `source`：来自 chat、database、explicit_selection、context_attachment、location_normalization 还是 runtime。
+- `trustLevel`：`reference_only`、`confirmed`、`source_of_truth`。
+- `allowedUse`：可用于 routing、guidance、prompt、entity_resolution 中的哪些环节。
+- `expires`：turn、session、conversation、permanent。
+
+当前第一版 memory 分层：
+
+```ts
+{
+  shortTerm: {
+    messages: [
+      {
+        source: "chat",
+        trustLevel: "reference_only",
+        allowedUse: ["routing", "guidance", "prompt"],
+        expires: "conversation"
+      }
+    ]
+  },
+  workspace: {
+    currentLead: {
+      source: "explicit_selection",
+      trustLevel: "confirmed",
+      allowedUse: ["routing", "guidance", "prompt", "entity_resolution"],
+      expires: "session"
+    },
+    attachments: [
+      {
+        source: "context_attachment",
+        trustLevel: "confirmed",
+        expires: "turn"
+      }
+    ]
+  }
+}
+```
+
+使用原则：
+
+- 聊天记忆可以帮助判断“那套房”“刚才那个客户”“继续发一下”这类多轮意图，但不能当作已保存的业务事实。
+- 当前选中实体和附件可以帮助 routing/guidance/entity resolution，但具体能否使用仍要服从 registry 的 `resolution.allowCurrentContext`。
+- lead、listing、schedule、campaign、follow-up 等长期事实必须来自 PostgreSQL 业务表。
+- 后续扩展 buyer advisor / developer agent 时，应先定义该产品的 memory source、trustLevel 和 allowedUse，而不是直接复用 broker agent 的记忆规则。
+
 ### Channels
 
 渠道永远是参数，不是 intent：
@@ -195,6 +248,7 @@ flowchart TD
 - `components/agent/agent-submit-workflow.ts`
 - `components/agent/agent-whatsapp-import-turn.ts`
 - `components/agent/agent-action-response-handlers.ts`
+- `lib/agent/memory.ts`
 
 新增逻辑时优先放入这些 helper，或者新增同级 helper；不要把新的业务规则直接塞回 `AgentWorkspace.tsx`。
 
@@ -205,9 +259,10 @@ flowchart TD
 3. 如果 LLM 可直接返回该 intent，确认 `routing.exposeToLlm` 没有设为 `false`。
 4. 在 `lib/agent/registry/prompt.ts` 的测试中确认 prompt 能编译出规则。
 5. 如果需要实体解析，在 `lib/agent/entity-resolution.ts` 中接入 typed payload 和 registry resolution policy。
-6. 如果需要前端卡片，在 `components/agent/agent-action-response-handlers.ts` 中增加 handler spec。
-7. 如果需要首页或上下文引导，补 `guidance.proactiveTriggers`、`guidance.nextSteps`、`ui.placeholder`、`ui.actionLabel`。
-8. 增加代表性测试：
+6. 如果 intent 需要多轮上下文，在 `lib/agent/memory.ts` 中确认对应 memory source、trustLevel、allowedUse、expires。
+7. 如果需要前端卡片，在 `components/agent/agent-action-response-handlers.ts` 中增加 handler spec。
+8. 如果需要首页或上下文引导，补 `guidance.proactiveTriggers`、`guidance.nextSteps`、`ui.placeholder`、`ui.actionLabel`。
+9. 增加代表性测试：
    - registry invariant。
    - prompt compiler。
    - confirmation policy。
@@ -224,6 +279,7 @@ flowchart TD
 - `audit` 是否和风险一致，write/external 通常应为 `trace_confirm_and_write`。
 - `requiredEntities` 是否和 entity-resolution 行为一致。
 - `resolution.allowCurrentContext` 是否会造成错误实体绑定。
+- 所需 memory 是否只是辅助判断，还是会影响实体解析；后者必须有 confirmed/source_of_truth 级别上下文。
 - `resolution.allowLatestOnlyWhenExplicit` 是否只用于 listing 类 workflow。
 - `routing.negativeExamples` 是否覆盖容易误判的渠道词场景。
 - `guidance.nextSteps` 是否符合经纪人日常节奏。
@@ -237,6 +293,7 @@ flowchart TD
 - `tests/agent/registry-prompt.test.ts`
 - `tests/agent/confirmation-policy.test.ts`
 - `tests/agent/entity-resolution.test.ts`
+- `tests/agent/memory.test.ts`
 - `tests/agent/action-response-handlers.test.ts`
 - `tests/agent/guidance.test.ts`
 - `tests/agent/submit-workflow.test.ts`

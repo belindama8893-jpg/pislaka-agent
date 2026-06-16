@@ -39,6 +39,11 @@ import {
   formatSupportedIntentsForPrompt,
   formatWorkflowRulesForPrompt
 } from "@/lib/agent/registry/prompt";
+import {
+  formatAgentMemoryForPrompt,
+  getAgentMemoryRecentMessages,
+  type AgentMemoryRuntimeContext
+} from "@/lib/agent/memory";
 
 const deepseekRequestTimeoutMs = 8000;
 const supportedIntentsPrompt = formatSupportedIntentsForPrompt();
@@ -491,7 +496,7 @@ function readableChannelName(channel: string) {
 }
 
 function getLatestSocialCopyEvidenceContext(context?: AgentRoutingContext) {
-  const recentMessages = context?.recentMessages?.filter((item) => item.content.trim()).slice().reverse() ?? [];
+  const recentMessages = getRoutingRecentMessages(context).slice().reverse();
   const evidence = recentMessages.find(
     (item) =>
       item.role === "assistant" &&
@@ -1197,7 +1202,10 @@ function isContextualListingDraftRequest(message: string) {
 
 function getLatestImageObservationContext(context?: AgentRoutingContext) {
   const recentAssistantMessages =
-    context?.recentMessages?.filter((item) => item.role === "assistant" && item.content.trim()).slice().reverse() ?? [];
+    getRoutingRecentMessages(context)
+      .filter((item) => item.role === "assistant")
+      .slice()
+      .reverse();
 
   return recentAssistantMessages.find(
     (item) =>
@@ -1586,22 +1594,26 @@ function parseLocalAgentAction(message: string, context?: AgentRoutingContext): 
 type AgentRoutingContext = {
   timeZone?: string;
   locationContext?: PakistanLocationNormalizationResult;
+  memory?: AgentMemoryRuntimeContext;
   recentMessages?: Array<{
     role: "user" | "assistant";
     content: string;
   }>;
 };
 
-function formatRecentContext(context?: AgentRoutingContext) {
-  const recentMessages = context?.recentMessages?.filter((item) => item.content.trim()).slice(-20) ?? [];
+function getRoutingRecentMessages(context?: AgentRoutingContext) {
+  const memoryMessages = getAgentMemoryRecentMessages(context?.memory);
+  const recentMessages = memoryMessages.length ? memoryMessages : context?.recentMessages ?? [];
 
-  if (!recentMessages.length) {
-    return "No prior chat context.";
-  }
+  return recentMessages.filter((item) => item.content.trim()).slice(-20);
+}
 
-  return recentMessages
-    .map((item) => `${item.role === "user" ? "Broker" : "Assistant"}: ${item.content.slice(0, 500)}`)
-    .join("\n");
+function getRoutingTimeZone(context?: AgentRoutingContext) {
+  return context?.memory?.runtime.timeZone ?? context?.timeZone;
+}
+
+function getRoutingLocationContext(context?: AgentRoutingContext) {
+  return context?.memory?.runtime.locationContext ?? context?.locationContext;
 }
 
 export async function routeAgentMessage(message: string, context?: AgentRoutingContext): Promise<AgentAction> {
@@ -1644,7 +1656,7 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
     return finalizeAgentActionResponse(parseLocalSocialCopyRequest(message, context), message);
   }
 
-  const routingMessage = buildLocationEnhancedRoutingMessage(message, context?.locationContext);
+  const routingMessage = buildLocationEnhancedRoutingMessage(message, getRoutingLocationContext(context));
   const visionSuggestedSchedule = hasVisionScheduleEvidence(message);
   const localIntent = visionSuggestedSchedule ? "schedule_event" : classifyLocalIntent(message);
 
@@ -1693,13 +1705,11 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
           { role: "system", content: systemPrompt },
           {
             role: "user",
-            content: `User time zone: ${getResolvedTimeZone(context?.timeZone)}\nCurrent date in user time zone: ${new Date().toLocaleDateString("en-CA", {
-              timeZone: getResolvedTimeZone(context?.timeZone)
+            content: `User time zone: ${getResolvedTimeZone(getRoutingTimeZone(context))}\nCurrent date in user time zone: ${new Date().toLocaleDateString("en-CA", {
+              timeZone: getResolvedTimeZone(getRoutingTimeZone(context))
             })}\n\nVerified Pakistan real estate location terms from the hierarchy API. Use these only to normalize location names and improve entity extraction; do not treat them as saved listings or leads:\n${formatLocationContextForPrompt(
-              context?.locationContext
-            )}\n\nRecent chat context for short-term reference only. Do not treat chat text as confirmed business facts unless the target is resolved through database-backed APIs:\n${formatRecentContext(
-              context
-            )}\n\nUser message: ${message}`
+              getRoutingLocationContext(context)
+            )}\n\nCompiled agent memory:\n${formatAgentMemoryForPrompt(context?.memory)}\n\nUser message: ${message}`
           }
         ]
       })
