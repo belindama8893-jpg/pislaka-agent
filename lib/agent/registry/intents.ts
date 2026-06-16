@@ -86,6 +86,10 @@ export type AgentCapabilityGuidance = {
   completionPrompt?: string;
 };
 
+export type AgentCapabilityPrompt = {
+  workflowRules?: string[];
+};
+
 export type AgentIntentDefinition = {
   intent: AgentAction["intent"];
   domain: AgentIntentDomain;
@@ -101,6 +105,7 @@ export type AgentIntentDefinition = {
   resolution: AgentCapabilityResolution;
   ui: AgentCapabilityUi;
   guidance: AgentCapabilityGuidance;
+  prompt?: AgentCapabilityPrompt;
 };
 
 export const agentIntentRegistry = {
@@ -138,6 +143,12 @@ export const agentIntentRegistry = {
       proactiveTriggers: ["broker_has_no_listings", "empty_workspace"],
       nextSteps: ["create_campaign_links"],
       completionPrompt: "The listing draft is ready. Save it first, then I can create promotion links."
+    },
+    prompt: {
+      workflowRules: [
+        "If required listing details are missing, still return a draft with known fields and mention what is missing in response.",
+        "Never claim a listing draft is saved, published, shared, or sent until a backend tool result confirms it."
+      ]
     }
   },
   create_lead: {
@@ -173,6 +184,12 @@ export const agentIntentRegistry = {
     guidance: {
       proactiveTriggers: ["broker_has_no_leads", "new_chat_without_saved_lead"],
       nextSteps: ["draft_lead_reply", "create_schedule_event"]
+    },
+    prompt: {
+      workflowRules: [
+        "New lead creation is a write action and must require confirmation before saving.",
+        "If a selected listing is relevant, include listing_id only when it is explicitly selected or resolved."
+      ]
     }
   },
   update_listing_draft: {
@@ -205,6 +222,12 @@ export const agentIntentRegistry = {
     guidance: {
       proactiveTriggers: ["listing_selected"],
       nextSteps: ["create_campaign_links"]
+    },
+    prompt: {
+      workflowRules: [
+        "For listing updates, extract the target words into payload.query and include only fields the broker explicitly changed.",
+        "Never save listing edits without confirmation."
+      ]
     }
   },
   publish_listing: {
@@ -234,6 +257,9 @@ export const agentIntentRegistry = {
     guidance: {
       proactiveTriggers: ["saved_listing_is_draft"],
       nextSteps: ["create_campaign_links"]
+    },
+    prompt: {
+      workflowRules: ["Publishing a listing is an internal confirmed write action and should not be selected directly by LLM routing."]
     }
   },
   generate_social_copy: {
@@ -266,6 +292,12 @@ export const agentIntentRegistry = {
     guidance: {
       proactiveTriggers: ["listing_selected", "media_uploaded_without_instruction"],
       nextSteps: ["create_campaign_links"]
+    },
+    prompt: {
+      workflowRules: [
+        "Social copy generation may draft copy in chat, but must not publish or send externally.",
+        "If the broker asks for links or trackable promotion, route to create_campaign_links instead."
+      ]
     }
   },
   create_campaign_links: {
@@ -302,6 +334,12 @@ export const agentIntentRegistry = {
     guidance: {
       proactiveTriggers: ["listing_created_not_promoted", "broker_has_listings"],
       nextSteps: ["list_leads", "show_basic_attribution"]
+    },
+    prompt: {
+      workflowRules: [
+        "Trackable links require a confirmed saved asset or listing target.",
+        "Do not silently publish externally; generate channel copy and lead-page links, then require confirmation."
+      ]
     }
   },
   list_today_followups: {
@@ -337,6 +375,9 @@ export const agentIntentRegistry = {
     guidance: {
       proactiveTriggers: ["today_followups_due", "overdue_followups"],
       nextSteps: ["draft_lead_reply", "record_lead_followup", "create_schedule_event"]
+    },
+    prompt: {
+      workflowRules: ["Today's follow-up list is read-only and does not require confirmation."]
     }
   },
   record_lead_followup: {
@@ -369,6 +410,12 @@ export const agentIntentRegistry = {
     guidance: {
       proactiveTriggers: ["reply_drafted", "lead_selected"],
       nextSteps: ["create_schedule_event", "update_lead_status"]
+    },
+    prompt: {
+      workflowRules: [
+        "Open WhatsApp and reply draft do not mean sent; only record message_sent when the broker says it was sent or clicks Sent.",
+        "Interested or hot maps to status qualified and urgency high. Not interested maps to status lost."
+      ]
     }
   },
   create_followup_from_chat: {
@@ -401,6 +448,12 @@ export const agentIntentRegistry = {
     guidance: {
       proactiveTriggers: ["whatsapp_chat_imported"],
       nextSteps: ["draft_lead_reply", "create_schedule_event", "update_lead_status"]
+    },
+    prompt: {
+      workflowRules: [
+        "A WhatsApp chat follow-up must be matched to a lead before it can be saved.",
+        "Saving chat-derived follow-up history is a write action and must require confirmation."
+      ]
     }
   },
   list_leads: {
@@ -433,6 +486,9 @@ export const agentIntentRegistry = {
     guidance: {
       proactiveTriggers: ["broker_has_leads"],
       nextSteps: ["draft_lead_reply", "list_today_followups"]
+    },
+    prompt: {
+      workflowRules: ["Lead list/search is read-only and does not require confirmation."]
     }
   },
   draft_lead_reply: {
@@ -466,6 +522,12 @@ export const agentIntentRegistry = {
     guidance: {
       proactiveTriggers: ["lead_needs_reply", "lead_selected", "whatsapp_chat_imported"],
       nextSteps: ["record_lead_followup", "create_schedule_event"]
+    },
+    prompt: {
+      workflowRules: [
+        "A reply draft may be shown in chat without confirmation, but opening or sending externally must require explicit confirmation.",
+        "Reply drafting must not update last_contacted_at or create a message_sent follow-up."
+      ]
     }
   },
   create_schedule_event: {
@@ -498,6 +560,12 @@ export const agentIntentRegistry = {
     guidance: {
       proactiveTriggers: ["lead_has_viewing_signal", "reply_drafted", "lead_selected"],
       nextSteps: ["list_schedule_events", "record_lead_followup"]
+    },
+    prompt: {
+      workflowRules: [
+        "Schedule events must include a clear time/date when the broker gives one, using ISO 8601 in the broker timezone.",
+        "Creating, editing, or canceling a schedule item is a write action and must require confirmation."
+      ]
     }
   },
   list_schedule_events: {
@@ -530,6 +598,9 @@ export const agentIntentRegistry = {
     guidance: {
       proactiveTriggers: ["today_schedule_due"],
       nextSteps: ["record_lead_followup", "draft_lead_reply"]
+    },
+    prompt: {
+      workflowRules: ["Schedule queries are read-only and do not require confirmation."]
     }
   },
   update_lead_status: {
@@ -562,6 +633,12 @@ export const agentIntentRegistry = {
     guidance: {
       proactiveTriggers: ["strong_status_signal_from_chat"],
       nextSteps: ["record_lead_followup", "create_schedule_event"]
+    },
+    prompt: {
+      workflowRules: [
+        "Lead status changes must require confirmation.",
+        "Hot or interested maps to status qualified and urgency high. Not interested maps to status lost."
+      ]
     }
   },
   update_lead_details: {
@@ -594,6 +671,9 @@ export const agentIntentRegistry = {
     guidance: {
       proactiveTriggers: ["lead_selected"],
       nextSteps: ["draft_lead_reply", "record_lead_followup"]
+    },
+    prompt: {
+      workflowRules: ["Lead contact/detail edits must require confirmation before saving."]
     }
   },
   update_lead_listing: {
@@ -626,6 +706,9 @@ export const agentIntentRegistry = {
     guidance: {
       proactiveTriggers: ["lead_selected", "listing_selected"],
       nextSteps: ["draft_lead_reply", "create_schedule_event"]
+    },
+    prompt: {
+      workflowRules: ["Lead-listing relation changes must resolve both lead and listing before confirmation."]
     }
   },
   show_basic_attribution: {
@@ -658,6 +741,9 @@ export const agentIntentRegistry = {
     guidance: {
       proactiveTriggers: ["campaign_links_created", "broker_has_campaign_activity"],
       nextSteps: ["list_leads", "create_campaign_links"]
+    },
+    prompt: {
+      workflowRules: ["Basic attribution and analytics are read-only and do not require confirmation."]
     }
   },
   general_reply: {

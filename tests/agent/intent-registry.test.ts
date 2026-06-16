@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentIntentRegistry } from "../../lib/agent/registry/intents";
+import { agentIntentRegistry, type AgentIntentDefinition } from "../../lib/agent/registry/intents";
 import type { AgentAction } from "../../lib/agent/types";
 
 const expectedIntents = [
@@ -41,7 +41,7 @@ describe("agentIntentRegistry", () => {
   });
 
   it("keeps every intent ready for configurable routing and guidance", () => {
-    Object.values(agentIntentRegistry).forEach((definition) => {
+    (Object.values(agentIntentRegistry) as AgentIntentDefinition[]).forEach((definition) => {
       expect(definition.availability).toBeDefined();
       expect(definition.input.examples.length).toBeGreaterThan(0);
       expect(definition.routing.priority).toEqual(expect.any(Number));
@@ -59,6 +59,9 @@ describe("agentIntentRegistry", () => {
           nextSteps: expect.any(Array)
         })
       );
+      if (definition.prompt?.workflowRules) {
+        expect(definition.prompt.workflowRules.length).toBeGreaterThan(0);
+      }
     });
   });
 });

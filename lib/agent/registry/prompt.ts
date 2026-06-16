@@ -30,3 +30,16 @@ function formatIntentRule(definition: AgentIntentDefinition) {
 export function formatRoutingRulesForPrompt(definitions: AgentIntentDefinition[] = getPromptVisibleIntentDefinitions()) {
   return definitions.map(formatIntentRule).join("\n");
 }
+
+export function formatWorkflowRulesForPrompt(definitions: AgentIntentDefinition[] = getPromptVisibleIntentDefinitions()) {
+  const configuredRules = definitions.flatMap((definition) =>
+    (definition.prompt?.workflowRules ?? []).map((rule) => `- ${rule}`)
+  );
+  const riskRules = [
+    "- Never claim a listing, lead, schedule item, campaign, message, document, or external post is saved, published, shared, sent, or completed unless a backend tool result confirms it.",
+    "- Any write, status update, schedule change, campaign generation, external message/open, export/share, or bulk action must require explicit confirmation.",
+    "- Read-only list/search, draft content shown inside chat, analytics summaries, and preview cards can run without confirmation."
+  ];
+
+  return [...configuredRules, ...riskRules].join("\n");
+}

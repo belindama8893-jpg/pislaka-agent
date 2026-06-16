@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatRoutingRulesForPrompt,
   formatSupportedIntentsForPrompt,
+  formatWorkflowRulesForPrompt,
   getPromptVisibleIntentDefinitions
 } from "../../lib/agent/registry/prompt";
 
@@ -31,5 +32,14 @@ describe("agent registry prompt compiler", () => {
     definitions.forEach((definition) => {
       expect(prompt).toContain(definition.intent);
     });
+  });
+
+  it("compiles workflow execution rules from capability metadata", () => {
+    const prompt = formatWorkflowRulesForPrompt();
+
+    expect(prompt).toContain("only record message_sent when the broker says it was sent or clicks Sent");
+    expect(prompt).toContain("Hot or interested maps to status qualified and urgency high");
+    expect(prompt).toContain("Any write, status update, schedule change");
+    expect(prompt).toContain("Read-only list/search");
   });
 });

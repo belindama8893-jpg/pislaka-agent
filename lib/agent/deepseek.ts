@@ -34,11 +34,16 @@ import {
 } from "@/lib/events/time";
 import { getListingImportUrl, importListingDraftFromUrl } from "@/lib/listings/import-from-url";
 import { formatScheduleQueryResponse, localizeAgentActionResponse } from "@/lib/agent/response-language";
-import { formatRoutingRulesForPrompt, formatSupportedIntentsForPrompt } from "@/lib/agent/registry/prompt";
+import {
+  formatRoutingRulesForPrompt,
+  formatSupportedIntentsForPrompt,
+  formatWorkflowRulesForPrompt
+} from "@/lib/agent/registry/prompt";
 
 const deepseekRequestTimeoutMs = 8000;
 const supportedIntentsPrompt = formatSupportedIntentsForPrompt();
 const routingRulesPrompt = formatRoutingRulesForPrompt();
+const workflowRulesPrompt = formatWorkflowRulesForPrompt();
 
 const systemPrompt = `
 You are Pislaka Agent, an AI assistant for real estate brokers in Pakistan.
@@ -191,23 +196,8 @@ Lead-listing relation update output shape:
   }
 }
 
-Lead rules:
-- Use create_lead when the user asks to add, create, record, or save a lead/customer/buyer.
-- Use update_lead_listing when the user asks to link, attach, associate, move, change, or assign a lead/customer/buyer to a listing/property.
-- Use list_leads when the user asks who/which leads/customers/buyers to follow up, new leads, hot leads, or today's leads.
-- Use list_today_followups when the user asks specifically who to follow up today, today's follow-ups, or simply says "follow up" as a standalone request.
-- Use record_lead_followup when the user says they sent a message, contacted a lead, the lead is interested/hot, or the lead is not interested.
-- Use draft_lead_reply when the user asks to reply to a lead/customer/buyer.
-- Use update_lead_status when the user asks to mark/change/update a lead status.
-- Use update_lead_details when the user asks to edit a lead's phone, email, name, or message.
-- Use show_basic_attribution when the broker asks for analytics, statistics, performance, clicks, conversion rate, channel attribution, top channels, top listings, or follow-up health. This is read-only and does not require confirmation.
-- If the user says hot lead, set status to qualified and urgency to high.
-- Never update a lead without confirmation.
-- Never update lead contact details without confirmation.
-- Open WhatsApp and reply draft do not mean sent. Only record message_sent when the broker says it was sent or clicks Sent.
-- Interested or hot maps to status qualified and urgency high. Not interested maps to status lost.
-- Use update_listing_draft when the user asks to change/edit/update/correct an existing listing or this/current listing.
-- Never save listing edits without confirmation.
+Workflow rules:
+${workflowRulesPrompt}
 
 Rules:
 - Return only one JSON object.
