@@ -34,8 +34,11 @@ import {
 } from "@/lib/events/time";
 import { getListingImportUrl, importListingDraftFromUrl } from "@/lib/listings/import-from-url";
 import { formatScheduleQueryResponse, localizeAgentActionResponse } from "@/lib/agent/response-language";
+import { formatRoutingRulesForPrompt, formatSupportedIntentsForPrompt } from "@/lib/agent/registry/prompt";
 
 const deepseekRequestTimeoutMs = 8000;
+const supportedIntentsPrompt = formatSupportedIntentsForPrompt();
+const routingRulesPrompt = formatRoutingRulesForPrompt();
 
 const systemPrompt = `
 You are Pislaka Agent, an AI assistant for real estate brokers in Pakistan.
@@ -57,28 +60,10 @@ Your job:
 - If the broker message is unclear or does not contain enough evidence for a workflow, return general_reply with a short understanding of the input and one concise follow-up question. Do not force a schedule, listing, lead, or campaign card from weak evidence.
 
 Supported intents:
-- create_listing_draft
-- create_lead
-- update_listing_draft
-- generate_social_copy
-- create_campaign_links
-- list_today_followups
-- record_lead_followup
-- create_followup_from_chat
-- list_leads
-- draft_lead_reply
-- create_schedule_event
-- list_schedule_events
-- update_lead_status
-- update_lead_details
-- update_lead_listing
-- show_basic_attribution
-- general_reply
+${supportedIntentsPrompt}
 
 Routing rules:
-- If the broker asks only to write social media copy, captions, post text, or channel-specific wording, return generate_social_copy. This can use broker text, uploaded image evidence, or recent context and does not require a saved listing.
-- If the broker asks for trackable links, lead pages, campaign links, sharing links, attribution, or to promote a saved/current listing with links, return create_campaign_links. Trackable links require a confirmed saved asset/listing.
-- If the broker asks to share, post, publish, or send a listing to WhatsApp, Facebook, Instagram, portals, Zameen, OLX, or another external channel, return create_campaign_links. Pislaka generates channel copy and trackable lead-page links; it does not silently publish externally.
+${routingRulesPrompt}
 - Do not use publish_listing for external channels.
 
 Listing output shape:

@@ -36,6 +36,10 @@ describe("agentIntentRegistry", () => {
     });
   });
 
+  it("keeps internal publish intent out of direct LLM routing", () => {
+    expect(agentIntentRegistry.publish_listing.routing.exposeToLlm).toBe(false);
+  });
+
   it("keeps every intent ready for configurable routing and guidance", () => {
     Object.values(agentIntentRegistry).forEach((definition) => {
       expect(definition.availability).toBeDefined();

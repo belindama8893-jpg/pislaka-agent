@@ -60,6 +60,8 @@ export type AgentCapabilityRouting = {
   triggerPhrases: string[];
   negativeExamples?: string[];
   channelBehavior: AgentIntentChannelBehavior;
+  exposeToLlm?: boolean;
+  promptRule?: string;
 };
 
 export type AgentCapabilityPolicy = {
@@ -119,7 +121,9 @@ export const agentIntentRegistry = {
     routing: {
       priority: 70,
       triggerPhrases: ["create listing", "draft listing", "property for sale", "property for rent"],
-      channelBehavior: "not_supported"
+      channelBehavior: "not_supported",
+      promptRule:
+        "Use create_listing_draft when the broker gives property facts or asks to create a listing. If details are incomplete, still return a draft with known fields and mention what is missing."
     },
     policy: { risk: "draft" },
     resolution: { allowCurrentContext: false, allowLatestOnlyWhenExplicit: false },
@@ -153,7 +157,9 @@ export const agentIntentRegistry = {
     routing: {
       priority: 65,
       triggerPhrases: ["add lead", "create customer", "save buyer", "record inquiry"],
-      channelBehavior: "parameter"
+      channelBehavior: "parameter",
+      promptRule:
+        "Use create_lead when the broker asks to add, create, record, or save a lead/customer/buyer."
     },
     policy: { risk: "write" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: false },
@@ -186,7 +192,9 @@ export const agentIntentRegistry = {
     routing: {
       priority: 75,
       triggerPhrases: ["change listing", "update property", "edit this listing"],
-      channelBehavior: "not_supported"
+      channelBehavior: "not_supported",
+      promptRule:
+        "Use update_listing_draft when the broker asks to change, edit, update, or correct an existing listing or this/current listing. Only include fields the broker explicitly changed."
     },
     policy: { risk: "write" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: true },
@@ -216,7 +224,9 @@ export const agentIntentRegistry = {
     routing: {
       priority: 80,
       triggerPhrases: ["publish listing", "make listing live"],
-      channelBehavior: "not_supported"
+      channelBehavior: "not_supported",
+      exposeToLlm: false,
+      promptRule: "Do not return publish_listing from LLM routing. External publishing must route through confirmed promotion workflows."
     },
     policy: { risk: "write" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: true },
@@ -243,7 +253,9 @@ export const agentIntentRegistry = {
     routing: {
       priority: 68,
       triggerPhrases: ["write copy", "caption", "post text", "social copy"],
-      channelBehavior: "parameter"
+      channelBehavior: "parameter",
+      promptRule:
+        "Use generate_social_copy when the broker asks only to write social media copy, captions, post text, or channel-specific wording. This can use broker text, uploaded image evidence, or recent context and does not require a saved listing."
     },
     policy: { risk: "draft" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: true },
@@ -274,7 +286,9 @@ export const agentIntentRegistry = {
       priority: 85,
       triggerPhrases: ["promote", "campaign links", "share listing", "advertise"],
       negativeExamples: ["Reply to Ahmed on WhatsApp"],
-      channelBehavior: "parameter"
+      channelBehavior: "parameter",
+      promptRule:
+        "Use create_campaign_links when the broker asks for trackable links, lead pages, campaign links, sharing links, attribution, or to promote/share/post/publish/send a saved/current listing to WhatsApp, Facebook, Instagram, portals, Zameen, OLX, or another external channel. Pislaka generates channel copy and trackable lead-page links; it does not silently publish externally."
     },
     policy: { risk: "external" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: true },
@@ -307,7 +321,9 @@ export const agentIntentRegistry = {
     routing: {
       priority: 90,
       triggerPhrases: ["follow up", "today followups", "clients need reply"],
-      channelBehavior: "not_supported"
+      channelBehavior: "not_supported",
+      promptRule:
+        "Use list_today_followups when the broker asks specifically who to follow up today, today's follow-ups, or simply says follow up as a standalone request."
     },
     policy: { risk: "read" },
     resolution: { allowCurrentContext: false, allowLatestOnlyWhenExplicit: false },
@@ -340,7 +356,9 @@ export const agentIntentRegistry = {
     routing: {
       priority: 78,
       triggerPhrases: ["sent message", "customer is interested", "not interested", "save follow-up"],
-      channelBehavior: "parameter"
+      channelBehavior: "parameter",
+      promptRule:
+        "Use record_lead_followup when the broker says they sent a message, contacted a lead, the lead is interested/hot, or the lead is not interested."
     },
     policy: { risk: "write" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: false },
@@ -370,7 +388,9 @@ export const agentIntentRegistry = {
     routing: {
       priority: 82,
       triggerPhrases: ["save this chat", "record whatsapp chat", "chat follow-up"],
-      channelBehavior: "parameter"
+      channelBehavior: "parameter",
+      promptRule:
+        "Use create_followup_from_chat when the broker explicitly asks to save, record, or attach a WhatsApp chat as follow-up history for a matched lead."
     },
     policy: { risk: "write" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: false },
@@ -400,7 +420,9 @@ export const agentIntentRegistry = {
     routing: {
       priority: 55,
       triggerPhrases: ["show leads", "list buyers", "hot leads", "new customers"],
-      channelBehavior: "parameter"
+      channelBehavior: "parameter",
+      promptRule:
+        "Use list_leads when the broker asks who/which leads/customers/buyers to follow up, new leads, hot leads, or today's leads without specifically asking for today's follow-up queue."
     },
     policy: { risk: "read" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: false },
@@ -431,7 +453,9 @@ export const agentIntentRegistry = {
       priority: 88,
       triggerPhrases: ["reply to", "respond to", "message back", "draft reply"],
       negativeExamples: ["Promote this listing on WhatsApp"],
-      channelBehavior: "parameter"
+      channelBehavior: "parameter",
+      promptRule:
+        "Use draft_lead_reply when the broker asks to reply, respond, message back, or draft a WhatsApp/manual reply to a lead/customer/buyer."
     },
     policy: { risk: "draft" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: false },
@@ -461,7 +485,9 @@ export const agentIntentRegistry = {
     routing: {
       priority: 80,
       triggerPhrases: ["schedule", "viewing", "appointment", "remind me"],
-      channelBehavior: "not_supported"
+      channelBehavior: "not_supported",
+      promptRule:
+        "Use create_schedule_event when the broker asks to schedule a viewing, appointment, reminder, callback, signing, handover, deadline, or recurring review."
     },
     policy: { risk: "write" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: false },
@@ -491,7 +517,9 @@ export const agentIntentRegistry = {
     routing: {
       priority: 60,
       triggerPhrases: ["what do I have today", "show schedule", "today appointments"],
-      channelBehavior: "not_supported"
+      channelBehavior: "not_supported",
+      promptRule:
+        "Use list_schedule_events when the broker asks to view, check, or list schedule items, appointments, reminders, or agenda items."
     },
     policy: { risk: "read" },
     resolution: { allowCurrentContext: false, allowLatestOnlyWhenExplicit: false },
@@ -521,7 +549,9 @@ export const agentIntentRegistry = {
     routing: {
       priority: 83,
       triggerPhrases: ["mark lead", "update status", "hot lead", "lost lead"],
-      channelBehavior: "not_supported"
+      channelBehavior: "not_supported",
+      promptRule:
+        "Use update_lead_status when the broker asks to mark, change, or update a lead status. Hot or interested maps to qualified/high; not interested maps to lost."
     },
     policy: { risk: "write" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: false },
@@ -551,7 +581,9 @@ export const agentIntentRegistry = {
     routing: {
       priority: 74,
       triggerPhrases: ["change lead phone", "update customer", "edit buyer"],
-      channelBehavior: "not_supported"
+      channelBehavior: "not_supported",
+      promptRule:
+        "Use update_lead_details when the broker asks to edit a lead's phone, email, name, or message."
     },
     policy: { risk: "write" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: false },
@@ -581,7 +613,9 @@ export const agentIntentRegistry = {
     routing: {
       priority: 76,
       triggerPhrases: ["attach lead to listing", "move buyer to property", "link customer to listing"],
-      channelBehavior: "not_supported"
+      channelBehavior: "not_supported",
+      promptRule:
+        "Use update_lead_listing when the broker asks to link, attach, associate, move, change, or assign a lead/customer/buyer to a listing/property."
     },
     policy: { risk: "write" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: false },
@@ -611,7 +645,9 @@ export const agentIntentRegistry = {
     routing: {
       priority: 50,
       triggerPhrases: ["analytics", "performance", "attribution", "conversion"],
-      channelBehavior: "parameter"
+      channelBehavior: "parameter",
+      promptRule:
+        "Use show_basic_attribution when the broker asks for analytics, statistics, performance, clicks, views, traffic, conversion rate, channel attribution, top channels, top listings, or follow-up health. This is read-only and does not require confirmation."
     },
     policy: { risk: "read" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: false },
@@ -641,7 +677,9 @@ export const agentIntentRegistry = {
     routing: {
       priority: 0,
       triggerPhrases: [],
-      channelBehavior: "not_supported"
+      channelBehavior: "not_supported",
+      promptRule:
+        "Use general_reply when the message is unclear or does not contain enough evidence for a workflow. Ask one concise follow-up question."
     },
     policy: { risk: "read" },
     resolution: { allowCurrentContext: false, allowLatestOnlyWhenExplicit: false },
@@ -657,4 +695,8 @@ export const agentIntentRegistry = {
 
 export function getAgentIntentDefinition(intent: AgentAction["intent"]) {
   return agentIntentRegistry[intent] as AgentIntentDefinition;
+}
+
+export function getAgentIntentDefinitions() {
+  return Object.values(agentIntentRegistry) as AgentIntentDefinition[];
 }
