@@ -64,4 +64,21 @@ describe("agentIntentRegistry", () => {
       }
     });
   });
+
+  it("keeps policy risk, confirmation, and audit settings aligned", () => {
+    (Object.values(agentIntentRegistry) as AgentIntentDefinition[]).forEach((definition) => {
+      if (definition.policy.risk === "write" || definition.policy.risk === "external") {
+        expect(definition.confirmation, definition.intent).not.toBe("never");
+        expect(definition.audit, definition.intent).toBe("trace_confirm_and_write");
+      }
+
+      if (definition.policy.risk === "read" || definition.policy.risk === "draft") {
+        expect(definition.audit, definition.intent).not.toBe("trace_confirm_and_write");
+      }
+
+      if (definition.availability.requiresAuthForWrite) {
+        expect(["write", "external", "draft"], definition.intent).toContain(definition.policy.risk);
+      }
+    });
+  });
 });
