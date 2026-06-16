@@ -302,14 +302,23 @@ export const agentIntentRegistry = {
     input: {
       requiredSlots: [],
       optionalSlots: ["channel", "listing_facts", "media", "tone"],
-      examples: ["Write Facebook copy for this villa", "Make WhatsApp copy from these photos"]
+      examples: [
+        "Write Facebook copy for this villa",
+        "Make WhatsApp copy from these photos",
+        "Promote this listing on WhatsApp"
+      ]
     },
     routing: {
-      priority: 68,
-      triggerPhrases: ["write copy", "caption", "post text", "social copy"],
+      priority: 72,
+      triggerPhrases: ["write copy", "caption", "post text", "social copy", "promote on whatsapp", "share post"],
+      negativeExamples: [
+        "Create campaign links for this listing",
+        "Generate a tracking link",
+        "Make a lead page for this property"
+      ],
       channelBehavior: "parameter",
       promptRule:
-        "Use generate_social_copy when the broker asks only to write social media copy, captions, post text, or channel-specific wording. This can use broker text, uploaded image evidence, or recent context and does not require a saved listing."
+        "Use generate_social_copy when the broker asks for ordinary channel copy, captions, post text, WhatsApp wording, or a lightweight promote/share/post draft without explicitly asking for tracking links, dedicated links, campaign links, lead pages, or attribution. This can use broker text, uploaded image evidence, unsaved current draft context, or recent context and does not require a saved listing."
     },
     policy: { risk: "draft" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: true },
@@ -324,7 +333,8 @@ export const agentIntentRegistry = {
     prompt: {
       workflowRules: [
         "Social copy generation may draft copy in chat, but must not publish or send externally.",
-        "If the broker asks for links or trackable promotion, route to create_campaign_links instead."
+        "If the broker asks for ordinary promote/share/post wording without link, tracking, lead page, or attribution language, stay on generate_social_copy.",
+        "If the broker asks for links, trackable promotion, lead pages, campaign links, or attribution, route to create_campaign_links instead."
       ]
     }
   },
@@ -341,15 +351,23 @@ export const agentIntentRegistry = {
     input: {
       requiredSlots: ["listing_target"],
       optionalSlots: ["channels", "audience", "tone"],
-      examples: ["Promote my DHA 5 villa on WhatsApp and Facebook", "Create campaign links for this listing"]
+      examples: [
+        "Create campaign links for this listing",
+        "Generate tracking links for my DHA 5 villa on WhatsApp and Facebook",
+        "Make a lead page for this property"
+      ]
     },
     routing: {
       priority: 85,
-      triggerPhrases: ["promote", "campaign links", "share listing", "advertise"],
-      negativeExamples: ["Reply to Ahmed on WhatsApp"],
+      triggerPhrases: ["campaign links", "tracking links", "lead page", "attribution links", "dedicated links"],
+      negativeExamples: [
+        "Reply to Ahmed on WhatsApp",
+        "Promote this listing on WhatsApp",
+        "Write WhatsApp copy for this listing"
+      ],
       channelBehavior: "parameter",
       promptRule:
-        "Use create_campaign_links when the broker asks for trackable links, lead pages, campaign links, sharing links, attribution, or to promote/share/post/publish/send a saved/current listing to WhatsApp, Facebook, Instagram, portals, Zameen, OLX, or another external channel. Pislaka generates channel copy and trackable lead-page links; it does not silently publish externally."
+        "Use create_campaign_links only when the broker explicitly asks for trackable links, dedicated links, lead pages, campaign links, attribution, or measurable promotion links for a saved/current listing. Do not use this intent for ordinary WhatsApp/Facebook/Instagram copy, caption, post text, or lightweight promote/share wording unless the user asks for links or tracking."
     },
     policy: { risk: "external" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: true },
@@ -367,6 +385,7 @@ export const agentIntentRegistry = {
     prompt: {
       workflowRules: [
         "Trackable links require a confirmed saved asset or listing target.",
+        "Ordinary channel copy can be generated without auth via generate_social_copy; do not escalate it to campaign links unless the broker asks for links, tracking, lead pages, or attribution.",
         "Do not silently publish externally; generate channel copy and lead-page links, then require confirmation."
       ]
     }

@@ -217,7 +217,8 @@ Schedule is an independent workflow and does not require every event to bind a l
 | "I sent message to Ahmed" | `record_lead_followup` | Resolve Ahmed before writing `message_sent` |
 | "Mark Ahmed as hot lead" | `update_lead_status` | Must exact-match Ahmed first |
 | "Show hot leads" | `list_leads` | Read-only |
-| "Promote my DHA 5 10 marla villa on WhatsApp and Facebook" | `create_campaign_links` | Requires listing confirmation and channel selection |
+| "Promote this listing on WhatsApp" | `generate_social_copy` | Ordinary channel copy; no login or saved listing required |
+| "Create campaign links for my DHA 5 10 marla villa on WhatsApp and Facebook" | `create_campaign_links` | Requires saved listing confirmation and channel selection |
 | "Create a listing for 1 kanal DHA Phase 6 8.5 crore" | `create_listing_draft` | Editable preview before save |
 | "Change this listing price to 1.2 crore" | `update_listing_draft` | Resolve the current listing and confirm before update |
 | "Schedule viewing with Ahmed tomorrow at 3pm" | `create_schedule_event` | Calendar preview before save |

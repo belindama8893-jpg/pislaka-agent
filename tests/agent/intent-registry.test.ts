@@ -44,6 +44,20 @@ describe("agentIntentRegistry", () => {
     expect(agentIntentRegistry.publish_listing.routing.exposeToLlm).toBe(false);
   });
 
+  it("separates ordinary promotion copy from dedicated campaign links", () => {
+    expect(agentIntentRegistry.generate_social_copy.routing.promptRule).toContain("ordinary channel copy");
+    expect(agentIntentRegistry.generate_social_copy.routing.promptRule).toContain("does not require a saved listing");
+    expect(agentIntentRegistry.generate_social_copy.routing.negativeExamples).toContain(
+      "Create campaign links for this listing"
+    );
+
+    expect(agentIntentRegistry.create_campaign_links.routing.promptRule).toContain("only when the broker explicitly asks");
+    expect(agentIntentRegistry.create_campaign_links.routing.promptRule).toContain("trackable links");
+    expect(agentIntentRegistry.create_campaign_links.routing.negativeExamples).toContain(
+      "Promote this listing on WhatsApp"
+    );
+  });
+
   it("keeps every intent ready for configurable routing and guidance", () => {
     (Object.values(agentIntentRegistry) as AgentIntentDefinition[]).forEach((definition) => {
       expect(definition.availability).toBeDefined();

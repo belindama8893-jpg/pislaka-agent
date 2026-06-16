@@ -23,8 +23,11 @@ describe("agent registry prompt compiler", () => {
 
     expect(prompt).toContain("Use draft_lead_reply");
     expect(prompt).toContain("Use create_campaign_links");
+    expect(prompt).toContain("Use generate_social_copy");
     expect(prompt).toContain("Channel words are parameters");
     expect(prompt).toContain("Avoid this intent for: Reply to Ahmed on WhatsApp");
+    expect(prompt).toContain("ordinary channel copy");
+    expect(prompt).toContain("Do not use this intent for ordinary WhatsApp");
   });
 
   it("keeps every visible intent represented in the routing prompt", () => {

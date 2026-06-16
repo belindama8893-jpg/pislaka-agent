@@ -495,7 +495,17 @@ function isTrackableCampaignLinkRequest(message: string) {
 }
 
 function isSocialCopyRequest(message: string) {
+  const channelCopyCue =
+    /\b(?:promote|share|post|advertise)\b[\s\S]{0,80}\b(?:whats\s*app|whatsapp|wa|facebook|fb|instagram|insta|ig|portal)\b/i.test(
+      message
+    ) ||
+    /\b(?:whats\s*app|whatsapp|wa|facebook|fb|instagram|insta|ig|portal)\b[\s\S]{0,80}\b(?:promote|share|post|advertise)\b/i.test(
+      message
+    ) ||
+    /(?:推广|宣传|发布)[\s\S]{0,30}(?:WhatsApp|Facebook|Instagram|文案|帖子|内容)/iu.test(message);
+
   return (
+    (!isTrackableCampaignLinkRequest(message) && channelCopyCue) ||
     /\b(?:write|draft|create|generate|prepare|make)\b[\s\S]{0,60}\b(?:copy|caption|post|text|content|message)\b/i.test(
       message
     ) ||

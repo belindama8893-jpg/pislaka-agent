@@ -3,6 +3,20 @@ import { routeAgentMessage } from "../../lib/agent/deepseek";
 import { compileAgentMemoryContext } from "../../lib/agent/memory";
 
 describe("current listing draft routing context", () => {
+  it("routes ordinary WhatsApp promotion wording to social copy, not campaign links", async () => {
+    const action = await routeAgentMessage("Promote this listing on WhatsApp");
+
+    expect(action.intent).toBe("generate_social_copy");
+    expect(action.requires_confirmation).toBe(false);
+  });
+
+  it("keeps explicit tracking-link requests on campaign links", async () => {
+    const action = await routeAgentMessage("Create campaign links for this listing on WhatsApp");
+
+    expect(action.intent).toBe("create_campaign_links");
+    expect(action.requires_confirmation).toBe(true);
+  });
+
   it("uses the current draft workflow summary for social copy follow-ups", async () => {
     const memory = compileAgentMemoryContext({
       workflowState: {
