@@ -46,6 +46,7 @@ import {
   type AgentMemoryRuntimeContext
 } from "@/lib/agent/memory";
 import { applySemanticRouteConfidenceGate } from "@/lib/agent/semantic-routing";
+import { buildFallbackSocialCopyPromotion, generateSocialCopyPromotion } from "@/lib/agent/social-copy";
 
 const deepseekRequestTimeoutMs = 8000;
 const supportedIntentsPrompt = formatSupportedIntentsForPrompt();
@@ -516,19 +517,6 @@ function isSocialCopyRequest(message: string) {
   );
 }
 
-function readableChannelName(channel: string) {
-  if (channel === "whatsapp") {
-    return "WhatsApp";
-  }
-  if (channel === "facebook") {
-    return "Facebook";
-  }
-  if (channel === "instagram") {
-    return "Instagram";
-  }
-  return "portal";
-}
-
 function getLatestSocialCopyEvidenceContext(context?: AgentRoutingContext) {
   const recentMessages = getRoutingRecentMessages(context).slice().reverse();
   const evidence = recentMessages.find(
@@ -604,6 +592,58 @@ function extractPromotionFacts(message: string, context?: AgentRoutingContext) {
 
 type PromotionFacts = ReturnType<typeof extractPromotionFacts>;
 
+function parsePromotionPriceAmount(price: string | undefined) {
+  if (!price) {
+    return undefined;
+  }
+
+  const amountMatch = price.match(/(?:PKR\s*)?([\d,]+(?:\.\d+)?)/i);
+  if (!amountMatch) {
+    return undefined;
+  }
+
+  const amount = Number(amountMatch[1].replace(/,/g, ""));
+  if (!Number.isFinite(amount)) {
+    return undefined;
+  }
+
+  if (/\bcrore\b/i.test(price)) {
+    return amount * 10000000;
+  }
+
+  if (/\blakh\b/i.test(price)) {
+    return amount * 100000;
+  }
+
+  return amount;
+}
+
+function promotionFactsToSocialCopyInput(facts: PromotionFacts) {
+  const price = facts.text.match(/Price:\s*([^|]+)/i)?.[1]?.trim();
+  const normalizedPrice = formatPromotionPriceLabel(price);
+  const locationParts = facts.location?.split(",").map((part) => part.trim()).filter(Boolean) ?? [];
+  const city = locationParts.at(-1) ?? (facts.location ? undefined : "Lahore");
+  const locationArea = locationParts.length > 1 ? locationParts.slice(0, -1).join(", ") : facts.location;
+  const areaMatch = facts.size?.match(/^(\d+(?:\.\d+)?)\s*(kanal|marla|sqft|sqm)\b/i);
+
+  return {
+    title: [facts.size, facts.propertyType, facts.location].filter(Boolean).join(" ") || undefined,
+    city,
+    location_area: locationArea,
+    property_type: facts.propertyType,
+    listing_type: facts.listingType,
+    price_amount: parsePromotionPriceAmount(price),
+    price_label: normalizedPrice,
+    price_currency: "PKR",
+    area_value: areaMatch ? Number(areaMatch[1]) : undefined,
+    area_unit: areaMatch ? areaMatch[2].toLowerCase() : undefined,
+    bedrooms: facts.bedrooms,
+    bathrooms: facts.bathrooms,
+    features: facts.features,
+    source_notes: facts.sourceNotes
+  };
+}
+
 function formatPromotionPriceLabel(price: string | undefined) {
   if (!price) {
     return undefined;
@@ -632,189 +672,11 @@ function formatPromotionPriceLabel(price: string | undefined) {
   return `PKR ${amount.toLocaleString("en-US")}`;
 }
 
-function buildWhatsAppCopyCards(facts: PromotionFacts) {
-  const propertyLabel = [
-    facts.size,
-    facts.propertyType ? facts.propertyType[0].toUpperCase() + facts.propertyType.slice(1) : "Property"
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const locationLine = facts.location ? `in ${facts.location}` : "in a convenient Lahore location";
-  const priceLine = formatPromotionPriceLabel(facts.text.match(/Price:\s*([^|]+)/i)?.[1]?.trim());
-  const detailsLine = [
-    facts.bedrooms ? `${facts.bedrooms} bedrooms` : "",
-    facts.bathrooms ? `${facts.bathrooms} bathrooms` : "",
-    facts.features.length ? facts.features.join(", ") : ""
-  ]
-    .filter(Boolean)
-    .join(" | ");
-  const listingPhrase = facts.listingType === "rent" ? "for rent" : facts.listingType === "sale" ? "for sale" : "available";
-
-  return [
-    {
-      channel: "whatsapp" as const,
-      title: "Direct buyer WhatsApp draft",
-      body: [
-        `${propertyLabel} ${listingPhrase} ${locationLine}.`,
-        priceLine ? `Demand: ${priceLine}` : null,
-        detailsLine || null,
-        "Interested? Reply for details or a viewing slot."
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
-      cta: "Reply for details.",
-      image_brief: "Use the clearest front photo or listing preview image."
-    },
-    {
-      channel: "whatsapp" as const,
-      title: "Premium WhatsApp draft",
-      body: [
-        `Available now: ${propertyLabel} ${listingPhrase} ${locationLine}.`,
-        priceLine ? `Demand: ${priceLine}` : null,
-        detailsLine ? `Highlights: ${detailsLine}` : null,
-        "A strong option for serious buyers looking for a clean location and quick viewing."
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
-      cta: "Message to arrange a viewing.",
-      image_brief: "Use a polished exterior or best room photo first."
-    },
-    {
-      channel: "whatsapp" as const,
-      title: "Short broadcast WhatsApp draft",
-      body: [
-        `${propertyLabel} ${listingPhrase} - ${facts.location ?? "Lahore"}`,
-        priceLine ? `Demand: ${priceLine}` : null,
-        "Reply for details, pictures, or viewing time."
-      ]
-        .filter(Boolean)
-        .join("\n"),
-      cta: "Reply for details.",
-      image_brief: "Use one clear property image with minimal text."
-    }
-  ];
-}
-
-function buildSocialCopyCard(channel: "whatsapp" | "facebook" | "instagram" | "portal", facts: PromotionFacts) {
-  const title = `${readableChannelName(channel)} promotion draft`;
-  const shortFacts = facts.text.replace(/\s+/g, " ").slice(0, 360);
-  const propertyLabel = [
-    facts.size,
-    facts.bedrooms ? `${facts.bedrooms}-bed` : "",
-    facts.propertyType ? facts.propertyType[0].toUpperCase() + facts.propertyType.slice(1) : "Property"
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const locationLine = facts.location ? `in ${facts.location}` : "in a convenient Lahore location";
-  const detailsLine = [
-    facts.bedrooms ? `${facts.bedrooms} bedrooms` : "",
-    facts.bathrooms ? `${facts.bathrooms} bathrooms` : "",
-    facts.features.length ? facts.features.join(", ") : ""
-  ]
-    .filter(Boolean)
-    .join(" | ");
-  const accessLine = facts.nearbyAreas.length
-    ? `with convenient access to ${facts.nearbyAreas.join(" and ")}`
-    : "with convenient access to the surrounding neighborhood";
-  const listingPhrase = facts.listingType === "rent" ? "for rent" : facts.listingType === "sale" ? "for sale" : "available";
-
-  if (channel === "facebook") {
-    return {
-      channel,
-      title,
-      body: `${propertyLabel} ${listingPhrase} ${locationLine}.\n\n${detailsLine ? `${detailsLine}\n\n` : ""}A compact, practical layout ${accessLine}. Ideal for buyers looking for a clear floor plan and a well-connected Johar Town address.\n\nPrice and final availability to be confirmed.`,
-      cta: "Message for details or a viewing.",
-      image_brief: "Use the clearest uploaded image or floor plan as the post visual."
-    };
-  }
-
-  if (channel === "instagram") {
-    return {
-      channel,
-      title,
-      body: `${shortFacts}\n\nDM for details and viewing.\n#PakistanRealEstate #PropertyForSale #Pislaka`,
-      cta: "DM for details.",
-      image_brief: "Use the most visual uploaded image; keep text overlay minimal."
-    };
-  }
-
-  if (channel === "portal") {
-    return {
-      channel,
-      title,
-      body: `${propertyLabel} ${listingPhrase} ${locationLine}.\n\n${shortFacts}\n\nContact for verified price, location, and viewing schedule.`,
-      cta: "Contact for viewing.",
-      image_brief: "Use straightforward property media: floor plan or strongest listing image first."
-    };
-  }
-
-  return {
-    channel,
-    title,
-    body: `${shortFacts}\n\nInterested? Reply for details or a viewing slot.`,
-    cta: "Reply for details.",
-    image_brief: "Use the strongest uploaded property image or floor plan."
-  };
-}
-
-function buildSocialCopyCards(channel: "whatsapp" | "facebook" | "instagram" | "portal", facts: PromotionFacts) {
-  if (channel === "whatsapp") {
-    return buildWhatsAppCopyCards(facts);
-  }
-
-  const baseCard = buildSocialCopyCard(channel, facts);
-  const channelName = readableChannelName(channel);
-  const shortFacts = facts.text.replace(/\s+/g, " ").slice(0, 260);
-  const locationLine = facts.location ? `in ${facts.location}` : "in a convenient Lahore location";
-  const propertyLabel = [
-    facts.size,
-    facts.propertyType ? facts.propertyType[0].toUpperCase() + facts.propertyType.slice(1) : "Property"
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const listingPhrase = facts.listingType === "rent" ? "for rent" : facts.listingType === "sale" ? "for sale" : "available";
-  const priceLine = formatPromotionPriceLabel(facts.text.match(/Price:\s*([^|]+)/i)?.[1]?.trim());
-  const channelCta = channel === "instagram" ? "DM for details." : channel === "portal" ? "Contact for viewing." : "Message for details.";
-
-  return [
-    {
-      ...baseCard,
-      title: `Direct buyer ${channelName} draft`,
-      cta: channelCta
-    },
-    {
-      ...baseCard,
-      title: `Premium ${channelName} draft`,
-      body: [
-        `${propertyLabel || "Property"} ${listingPhrase} ${locationLine}.`,
-        priceLine ? `Demand: ${priceLine}` : null,
-        "Positioned for serious buyers who value location, clarity, and quick viewing access."
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
-      cta: channelCta
-    },
-    {
-      ...baseCard,
-      title: `Short ${channelName} draft`,
-      body: [
-        `${propertyLabel || "Property"} ${listingPhrase} - ${facts.location ?? "Lahore"}`,
-        priceLine ? `Demand: ${priceLine}` : null,
-        shortFacts,
-        channel === "instagram" ? "#PakistanRealEstate #PropertyForSale #Pislaka" : null
-      ]
-        .filter(Boolean)
-        .join("\n"),
-      cta: channelCta
-    }
-  ];
-}
-
-function parseLocalSocialCopyRequest(message: string, context?: AgentRoutingContext): AgentAction {
+async function parseLocalSocialCopyRequest(message: string, context?: AgentRoutingContext): Promise<AgentAction> {
   const channels = extractPromotionChannelsFromMessage(message);
   const facts = extractPromotionFacts(message, context);
-  const cards = channels.flatMap((channel) => buildSocialCopyCards(channel, facts));
-  const optionCount = cards.length;
+  const promotion = await generateSocialCopyPromotion(promotionFactsToSocialCopyInput(facts), message, [...channels]);
+  const optionCount = promotion.cards.length;
 
   return {
     intent: "generate_social_copy",
@@ -823,18 +685,27 @@ function parseLocalSocialCopyRequest(message: string, context?: AgentRoutingCont
     payload: {
       query: stripUploadedImageEvidence(message),
       channels,
-      promotion: {
-        summary:
-          "Want dedicated tracking links and attribution? Save this as a promotion asset/listing first, then I can generate link tracking.",
-        cards
-      }
+      promotion
     }
   };
 }
 
 function parseLocalPromotionRequest(message: string, context?: AgentRoutingContext): AgentAction {
   if (isSocialCopyRequest(message) && !isTrackableCampaignLinkRequest(message)) {
-    return parseLocalSocialCopyRequest(message, context);
+    const channels = extractPromotionChannelsFromMessage(message);
+    const facts = extractPromotionFacts(message, context);
+    const promotion = buildFallbackSocialCopyPromotion(promotionFactsToSocialCopyInput(facts), [...channels], message);
+
+    return {
+      intent: "generate_social_copy",
+      requires_confirmation: false,
+      response: `I drafted ${promotion.cards.length > 1 ? `${promotion.cards.length} copy options` : "social media copy"} from the available details.`,
+      payload: {
+        query: stripUploadedImageEvidence(message),
+        channels,
+        promotion
+      }
+    };
   }
 
   return {
@@ -1833,7 +1704,7 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
   }
 
   if (isSocialCopyRequest(message) && !isTrackableCampaignLinkRequest(message)) {
-    return finalizeAgentActionResponse(parseLocalSocialCopyRequest(message, context), message);
+    return finalizeAgentActionResponse(await parseLocalSocialCopyRequest(message, context), message);
   }
 
   const routingMessage = buildLocationEnhancedRoutingMessage(message, getRoutingLocationContext(context));
@@ -1848,6 +1719,10 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
     return finalizeAgentActionResponse(parseLocalAgentAction(message, context), message);
   }
 
+  if (localIntent === "lead_create") {
+    return finalizeAgentActionResponse(parseLocalAgentAction(message, context), message);
+  }
+
   if (localIntent === "schedule_event" || localIntent === "schedule_query") {
     return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);
   }
@@ -1857,7 +1732,7 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
   }
 
   if (localIntent === "promotion" && isSocialCopyRequest(message) && !isTrackableCampaignLinkRequest(message)) {
-    return finalizeAgentActionResponse(parseLocalSocialCopyRequest(message, context), message);
+    return finalizeAgentActionResponse(await parseLocalSocialCopyRequest(message, context), message);
   }
 
   if (!env.deepseekApiKey) {

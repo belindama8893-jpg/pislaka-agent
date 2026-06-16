@@ -28,6 +28,7 @@ function dependencies(): AgentActionResponseHandlerDependencies {
     proposeLeadStatusUpdate: vi.fn(),
     proposeListingUpdateFromMessage: vi.fn(),
     proposePromotionFromMessage: vi.fn(),
+    showGeneratedSocialCopy: vi.fn().mockResolvedValue(undefined),
     showAnalyticsSummary: vi.fn().mockResolvedValue(undefined),
     showLeadResults: vi.fn(),
     showScheduleResolutionMessage: vi.fn(() => false),
@@ -131,7 +132,7 @@ describe("agent action response handlers", () => {
     expect(deps.showScheduleResolutionMessage).toHaveBeenCalled();
   });
 
-  it("shows generated social copy inside the assistant message", async () => {
+  it("routes generated social copy to the workspace social copy handler", async () => {
     const deps = dependencies();
     const handlers = createAgentActionResponseHandlers(deps);
     const promotion = { channels: [] };
@@ -142,9 +143,6 @@ describe("agent action response handlers", () => {
     );
 
     expect(handled).toBe(true);
-    expect(deps.appendAssistantMessage).toHaveBeenCalledWith({
-      content: "Action response",
-      promotion
-    });
+    expect(deps.showGeneratedSocialCopy).toHaveBeenCalledWith("Action response", promotion, "Write Facebook copy");
   });
 });

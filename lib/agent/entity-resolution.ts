@@ -138,7 +138,7 @@ function scoreLead(query: string, lead: LeadListItem) {
 }
 
 function leadQueryFromPayload(payload: Pick<LeadOperationPayload, "lead_name" | "query">) {
-  return [payload.lead_name, payload.query].filter(Boolean).join(" ").trim();
+  return payload.lead_name?.trim() || payload.query?.trim() || "";
 }
 
 function scheduleLeadQueryFromPayload(payload: BrokerEventDraftInput) {

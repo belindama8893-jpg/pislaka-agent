@@ -2902,9 +2902,31 @@ function LeadCreateConfirmCard({
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState<LeadCreatePayload>(() => ({
+    ...preview.payload,
+    full_name: preview.payload.full_name ?? "",
+    phone: preview.payload.phone ?? "",
+    email: preview.payload.email ?? "",
+    message: preview.payload.message ?? "",
+    status: preview.payload.status ?? "new",
+    urgency: preview.payload.urgency ?? "normal",
+    source_channel: preview.payload.source_channel ?? "manual"
+  }));
   const [status, setStatus] = useState<string | null>(null);
   const language = getCardLanguage(sourceMessage);
   const copy = getAgentCardCopy(language);
+
+  const draftToSave: LeadCreatePayload = {
+    ...draft,
+    full_name: draft.full_name?.trim() || undefined,
+    phone: draft.phone?.trim() || undefined,
+    email: draft.email?.trim() || undefined,
+    message: draft.message?.trim() || undefined,
+    source_channel: draft.source_channel?.trim() || "manual",
+    status: draft.status ?? "new",
+    urgency: draft.urgency ?? "normal"
+  };
 
   async function handleConfirm() {
     if (isSaving || isSaved) {
@@ -2923,7 +2945,7 @@ function LeadCreateConfirmCard({
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(preview.payload)
+      body: JSON.stringify(draftToSave)
     });
 
     if (!response.ok) {
@@ -2988,9 +3010,19 @@ function LeadCreateConfirmCard({
   return (
     <AgentOutputCard
       actions={
-        <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaved ? copy.buttons.saved : isSaving ? copy.buttons.saving : copy.buttons.confirmSave}
-        </button>
+        <>
+          <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
+            <CheckCircle2 size={15} /> {isSaved ? copy.buttons.saved : isSaving ? copy.buttons.saving : copy.buttons.confirmSave}
+          </button>
+          <button
+            className="outline-button small"
+            type="button"
+            disabled={isSaving || isSaved}
+            onClick={() => setIsEditing(!isEditing)}
+          >
+            <Pencil size={14} /> {isEditing ? copy.buttons.preview : copy.buttons.editCard}
+          </button>
+        </>
       }
       className="lead-chat-card"
       hint={copy.hints.confirmNewLead}
@@ -2999,24 +3031,97 @@ function LeadCreateConfirmCard({
       title={copy.generic.confirmNewLead}
       tone="lead"
     >
-      <div className="listing-update-list">
-        {[
-          [copy.generic.fieldName, preview.payload.full_name],
-          [copy.generic.fieldPhone, preview.payload.phone],
-          [copy.generic.fieldEmail, preview.payload.email],
-          [copy.generic.fieldStatus, formatLeadStatusForLanguage(preview.payload.status ?? "new", preview.payload.urgency ?? "normal", language)],
-          [copy.generic.fieldMessage, preview.payload.message]
-        ]
-          .filter(([, value]) => Boolean(value))
-          .map(([label, value]) => (
-            <div className="listing-update-row" key={label}>
-              <span>{label}</span>
-              <div>
-                <strong>{String(value)}</strong>
+      {isEditing ? (
+        <div className="agent-draft-form">
+          <div className="agent-draft-grid">
+            <label>
+              <span>{copy.generic.fieldName}</span>
+              <input
+                value={draft.full_name ?? ""}
+                onChange={(event) => setDraft({ ...draft, full_name: event.target.value })}
+              />
+            </label>
+            <label>
+              <span>{copy.generic.fieldPhone}</span>
+              <input
+                inputMode="tel"
+                value={draft.phone ?? ""}
+                onChange={(event) => setDraft({ ...draft, phone: event.target.value })}
+              />
+            </label>
+            <label>
+              <span>{copy.generic.fieldEmail}</span>
+              <input
+                inputMode="email"
+                value={draft.email ?? ""}
+                onChange={(event) => setDraft({ ...draft, email: event.target.value })}
+              />
+            </label>
+            <label>
+              <span>{copy.generic.fieldStatus}</span>
+              <select
+                value={draft.status ?? "new"}
+                onChange={(event) =>
+                  setDraft({ ...draft, status: event.target.value as LeadCreatePayload["status"] })
+                }
+              >
+                <option value="new">New</option>
+                <option value="contacted">Contacted</option>
+                <option value="qualified">Qualified</option>
+                <option value="closed">Closed</option>
+                <option value="lost">Lost</option>
+              </select>
+            </label>
+            <label>
+              <span>Urgency</span>
+              <select
+                value={draft.urgency ?? "normal"}
+                onChange={(event) =>
+                  setDraft({ ...draft, urgency: event.target.value as LeadCreatePayload["urgency"] })
+                }
+              >
+                <option value="low">Low</option>
+                <option value="normal">Normal</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label>
+              <span>Source</span>
+              <input
+                value={draft.source_channel ?? "manual"}
+                onChange={(event) => setDraft({ ...draft, source_channel: event.target.value })}
+              />
+            </label>
+          </div>
+          <label>
+            <span>{copy.generic.fieldMessage}</span>
+            <textarea
+              value={draft.message ?? ""}
+              onChange={(event) => setDraft({ ...draft, message: event.target.value })}
+            />
+          </label>
+        </div>
+      ) : (
+        <div className="listing-update-list">
+          {[
+            [copy.generic.fieldName, draftToSave.full_name],
+            [copy.generic.fieldPhone, draftToSave.phone],
+            [copy.generic.fieldEmail, draftToSave.email],
+            [copy.generic.fieldStatus, formatLeadStatusForLanguage(draftToSave.status ?? "new", draftToSave.urgency ?? "normal", language)],
+            ["Source", draftToSave.source_channel],
+            [copy.generic.fieldMessage, draftToSave.message]
+          ]
+            .filter(([, value]) => Boolean(value))
+            .map(([label, value]) => (
+              <div className="listing-update-row" key={label}>
+                <span>{label}</span>
+                <div>
+                  <strong>{String(value)}</strong>
+                </div>
               </div>
-            </div>
-          ))}
-      </div>
+            ))}
+        </div>
+      )}
       {preview.followUp ? (
         <div className="listing-update-list compact">
           <div className="listing-update-row">
@@ -6250,7 +6355,7 @@ export function AgentWorkspace({
     };
   }
 
-  function proposePromotionFromMessage(messageText: string, resolution?: AgentResolution) {
+  async function proposePromotionFromMessage(messageText: string, resolution?: AgentResolution) {
     const target = getPromotionTarget(messageText, resolution);
 
     if (target.ambiguous) {
@@ -6271,7 +6376,7 @@ export function AgentWorkspace({
         const draftTitle = activeDraftMessage.draft.title ?? "this listing draft";
         const channels = extractPromotionChannels(messageText);
         const selectedChannels = channels.length ? channels : (["whatsapp"] as PromotionChannel[]);
-        const promotion = buildDraftSocialCopyPromotion(activeDraftMessage.draft, selectedChannels, messageText);
+        const promotion = await generateSocialCopyForDraft(activeDraftMessage.draft, messageText, selectedChannels);
         appendAssistantMessage({
           content: isGuest
             ? `I drafted ${selectedChannels.join(", ")} copy for ${draftTitle}. You can use this now. Dedicated tracking links need a saved listing; sign in and confirm this draft when you want those links.`
@@ -6447,7 +6552,7 @@ export function AgentWorkspace({
       };
     }
 
-    const query = [payload.lead_name, payload.query].filter(Boolean).join(" ");
+    const query = payload.lead_name?.trim() || payload.query?.trim() || "";
     const scoredLeads = workspaceLeads
       .map((lead) => ({ lead, score: scoreLeadMatch(query, lead) }))
       .filter((item) => item.score >= 4)
@@ -6665,6 +6770,34 @@ export function AgentWorkspace({
     });
   }
 
+  async function showGeneratedSocialCopy(
+    actionResponse: string,
+    promotion: ListingPromotion | undefined,
+    sourceMessage: string
+  ) {
+    const activeDraftMessage = messageMentionsCurrentListing(sourceMessage) ? getActiveDraftMessage() : undefined;
+
+    if (activeDraftMessage?.draft) {
+      const draftTitle = activeDraftMessage.draft.title ?? "this listing draft";
+      const channels = extractPromotionChannels(sourceMessage);
+      const selectedChannels = channels.length ? channels : (["whatsapp"] as PromotionChannel[]);
+      const draftPromotion = await generateSocialCopyForDraft(activeDraftMessage.draft, sourceMessage, selectedChannels);
+
+      appendAssistantMessage({
+        content: `I drafted ${selectedChannels.join(", ")} copy for ${draftTitle}. You can use this now. Dedicated tracking links need a saved listing; confirm this draft when you want those links.`,
+        promotion: draftPromotion,
+        sourceMessage
+      });
+      return;
+    }
+
+    appendAssistantMessage({
+      content: actionResponse,
+      promotion,
+      sourceMessage
+    });
+  }
+
   const agentActionResponseHandlers = createAgentActionResponseHandlers({
     appendAssistantMessage,
     draftReplyForLead,
@@ -6676,6 +6809,7 @@ export function AgentWorkspace({
     proposeLeadStatusUpdate,
     proposeListingUpdateFromMessage,
     proposePromotionFromMessage,
+    showGeneratedSocialCopy,
     showAnalyticsSummary,
     showLeadResults,
     showScheduleResolutionMessage,
@@ -7463,6 +7597,38 @@ export function AgentWorkspace({
             : "I could not reach the promotion service. Please try again in a moment."
       });
       return false;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  async function generateSocialCopyForDraft(
+    draft: ListingDraftInput,
+    instruction: string,
+    channels: PromotionChannel[]
+  ): Promise<ListingPromotion> {
+    const selectedChannels = channels.length ? channels : (["whatsapp"] as PromotionChannel[]);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 20000);
+
+    try {
+      const response = await fetch("/api/agent/social-copy", {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ draft, instruction, channels: selectedChannels })
+      });
+
+      if (!response.ok) {
+        return buildDraftSocialCopyPromotion(draft, selectedChannels, instruction);
+      }
+
+      const payload = (await response.json()) as { promotion?: ListingPromotion };
+      return payload.promotion ?? buildDraftSocialCopyPromotion(draft, selectedChannels, instruction);
+    } catch {
+      return buildDraftSocialCopyPromotion(draft, selectedChannels, instruction);
     } finally {
       window.clearTimeout(timeout);
     }

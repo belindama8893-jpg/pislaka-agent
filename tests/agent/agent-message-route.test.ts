@@ -168,6 +168,30 @@ describe("agent message route", () => {
     });
   });
 
+  it("skips location normalization for deterministic lead creation messages", async () => {
+    mockedCreateSupabaseServerClient.mockResolvedValue(makeSupabase({ user: null }) as never);
+
+    const message =
+      "Create a new lead named Ali Khan, phone 0300 1234567, interested in DHA Phase 6 house, mark as hot";
+    const response = await POST(makeRequest({ message }));
+    const emptyLocationContext = { enabled: false, verifiedLocations: [] };
+
+    expect(response.status).toBe(200);
+    expect(mockedNormalizePakistanLocationTerms).not.toHaveBeenCalled();
+    expect(mockedRouteAgentMessage).toHaveBeenCalledWith(message, {
+      timeZone: undefined,
+      locationContext: emptyLocationContext,
+      memory: expect.objectContaining({
+        shortTerm: { messages: [] }
+      }),
+      recentMessages: undefined
+    });
+    expect(await response.json()).toEqual({
+      action: routedAction,
+      location_context: emptyLocationContext
+    });
+  });
+
   it("routes signed-in users without a broker profile without writing conversation history", async () => {
     mockedCreateSupabaseServerClient.mockResolvedValue(makeSupabase({ user: { id: "user-1" }, broker: null }) as never);
 

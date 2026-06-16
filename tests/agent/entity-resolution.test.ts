@@ -78,6 +78,15 @@ function updateLeadStatusAction(payload: Record<string, unknown>): AgentAction {
   };
 }
 
+function updateLeadDetailsAction(payload: Record<string, unknown>): AgentAction {
+  return {
+    intent: "update_lead_details",
+    requires_confirmation: true,
+    response: "Please confirm the lead details update.",
+    payload
+  };
+}
+
 function updateListingAction(payload: Record<string, unknown>): AgentAction {
   return {
     intent: "update_listing_draft",
@@ -214,6 +223,40 @@ describe("resolveAgentActionEntities lead resolution", () => {
       target_type: "lead"
     });
     expect(resolved.payload).not.toHaveProperty("lead_id");
+  });
+
+  it("uses the extracted lead name instead of noisy detail-update text for target matching", async () => {
+    getRecentLeadsForBrokerMock.mockResolvedValue([
+      makeLead({
+        id: ahmedTwoId,
+        full_name: "Ahmed Khan"
+      }),
+      makeLead({
+        id: saraId,
+        full_name: "Sara Malik",
+        phone: "03009998887"
+      })
+    ]);
+
+    const resolved = await resolveAgentActionEntities(
+      updateLeadDetailsAction({
+        lead_name: "Ahmed",
+        query: "Update lead Ahmed phone to 0300 9998887",
+        phone: "03009998887"
+      }),
+      makeSupabaseWithListings([]),
+      brokerId
+    );
+
+    expect(resolved.resolution).toMatchObject({
+      status: "matched",
+      target_type: "lead",
+      target_id: ahmedTwoId
+    });
+    expect(resolved.payload).toMatchObject({
+      lead_id: ahmedTwoId,
+      phone: "03009998887"
+    });
   });
 
   it("uses an explicit selected lead context without searching by latest record", async () => {

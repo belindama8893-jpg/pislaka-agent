@@ -42,6 +42,10 @@ describe("classifyLocalIntent", () => {
       intent: "lead_query"
     },
     {
+      message: "Create a new lead named Ali Khan, phone 0300 1234567, interested in DHA Phase 6 house, mark as hot",
+      intent: "lead_create"
+    },
+    {
       message: "Which channel has the best conversion rate this week?",
       intent: "analytics"
     },

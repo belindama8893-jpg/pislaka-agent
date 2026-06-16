@@ -69,7 +69,15 @@ export type AgentActionResponseHandlerDependencies = {
     payload: ListingUpdatePayload,
     resolution: AgentAction["resolution"]
   ) => void;
-  proposePromotionFromMessage: (sourceMessage: string, resolution: AgentAction["resolution"]) => void;
+  proposePromotionFromMessage: (
+    sourceMessage: string,
+    resolution: AgentAction["resolution"]
+  ) => void | Promise<void>;
+  showGeneratedSocialCopy: (
+    response: string,
+    promotion: ListingPromotion | undefined,
+    sourceMessage: string
+  ) => void | Promise<void>;
   showAnalyticsSummary: (
     response: string,
     payload: Record<string, unknown> | undefined,
@@ -194,30 +202,27 @@ const agentActionResponseHandlerSpecs: AgentActionResponseHandlerSpec[] = [
   },
   {
     intent: "generate_social_copy",
-    createHandler: (dependencies) => (action) => {
+    createHandler: (dependencies) => async (action, sourceMessage) => {
       const socialCopyPayload = action.payload as { promotion?: ListingPromotion };
-      dependencies.appendAssistantMessage({
-        content: action.response,
-        promotion: socialCopyPayload.promotion
-      });
+      await dependencies.showGeneratedSocialCopy(action.response, socialCopyPayload.promotion, sourceMessage);
       return true;
     }
   },
   {
     intent: "create_campaign_links",
-    createHandler: (dependencies) => (action, sourceMessage) => {
-      dependencies.proposePromotionFromMessage(sourceMessage, action.resolution);
+    createHandler: (dependencies) => async (action, sourceMessage) => {
+      await dependencies.proposePromotionFromMessage(sourceMessage, action.resolution);
       return true;
     }
   },
   {
     intent: "publish_listing",
-    createHandler: (dependencies) => (action, sourceMessage) => {
+    createHandler: (dependencies) => async (action, sourceMessage) => {
       if (!dependencies.looksLikeExternalChannelPromotion(sourceMessage)) {
         return false;
       }
 
-      dependencies.proposePromotionFromMessage(sourceMessage, action.resolution);
+      await dependencies.proposePromotionFromMessage(sourceMessage, action.resolution);
       return true;
     }
   },

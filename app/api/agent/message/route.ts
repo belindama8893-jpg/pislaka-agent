@@ -5,6 +5,7 @@ import {
 } from "@/lib/agent/conversations";
 import { routeAgentMessage } from "@/lib/agent/deepseek";
 import { resolveAgentActionEntities } from "@/lib/agent/entity-resolution";
+import { classifyLocalIntent } from "@/lib/agent/intent-router";
 import { normalizePakistanLocationTerms } from "@/lib/agent/location-normalization";
 import { compileAgentMemoryContext } from "@/lib/agent/memory";
 import { agentMessageSchema } from "@/lib/agent/types";
@@ -22,7 +23,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    const locationContext = await normalizePakistanLocationTerms(parsed.data.message);
+    const localIntent = classifyLocalIntent(parsed.data.message);
+    const locationContext =
+      localIntent === "lead_create"
+        ? { enabled: false, verifiedLocations: [] }
+        : await normalizePakistanLocationTerms(parsed.data.message);
     const supabase = await createSupabaseServerClient();
     const {
       data: { user }
