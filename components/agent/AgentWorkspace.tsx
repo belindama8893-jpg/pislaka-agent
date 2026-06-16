@@ -32,6 +32,10 @@ import {
   createAgentComposerContextPreviews,
   type AgentComposerContextAttachment
 } from "@/components/agent/agent-composer-context";
+import {
+  formatAgentComposerFileSize,
+  summarizeAgentFileAttachments
+} from "@/components/agent/agent-composer-files";
 import { createAgentGuidanceComposerActions } from "@/components/agent/agent-guidance-actions";
 import { AuthForm } from "@/components/auth/AuthForm";
 import Link from "next/link";
@@ -1132,20 +1136,6 @@ function formatListingCurrency(amount: number | null | undefined, currency = "PK
   return `${currency} ${amount.toLocaleString("en-PK")}`;
 }
 
-function formatFileSize(bytes: number) {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-
-  const kilobytes = bytes / 1024;
-  if (kilobytes < 1024) {
-    return `${kilobytes.toFixed(kilobytes >= 100 ? 0 : 1)} KB`;
-  }
-
-  const megabytes = kilobytes / 1024;
-  return `${megabytes.toFixed(megabytes >= 100 ? 0 : 1)} MB`;
-}
-
 function formatChatImportBudget(summary: ChatFollowupSummary) {
   if (summary.budget.text) {
     return summary.budget.text;
@@ -1456,16 +1446,6 @@ function leadFromContextAttachment(attachment: ChatContextAttachment): LeadListI
     campaign_code: null,
     campaign_channel: typeof snapshot.campaign_channel === "string" ? snapshot.campaign_channel : null
   };
-}
-
-function summarizeFileAttachments(fileAttachments: PendingFileAttachment[]) {
-  if (!fileAttachments.length) {
-    return "";
-  }
-
-  return `Attached ${fileAttachments.length} file${fileAttachments.length === 1 ? "" : "s"}: ${fileAttachments
-    .map((item) => item.file.name)
-    .join(", ")}.`;
 }
 
 async function prepareImageForVision(file: File) {
@@ -7540,7 +7520,7 @@ export function AgentWorkspace({
     const mediaSummary = hasOutgoingMedia
       ? `Attached ${outgoingMedia.length} listing media file${outgoingMedia.length === 1 ? "" : "s"}.`
       : "";
-    const fileSummary = summarizeFileAttachments(outgoingFiles);
+    const fileSummary = summarizeAgentFileAttachments(outgoingFiles);
     const userMessageContent = trimmed || mediaSummary;
     const visibleUserMessageContent = [userMessageContent, fileSummary].filter(Boolean).join("\n\n");
     let agentMessageContent = [trimmed, mediaSummary, fileSummary].filter(Boolean).join("\n\n");
@@ -8749,7 +8729,7 @@ export function AgentWorkspace({
           id: item.id,
           label: item.kind === "whatsapp_chat" ? "WhatsApp chat" : "File",
           name: item.file.name,
-          sizeLabel: formatFileSize(item.file.size)
+          sizeLabel: formatAgentComposerFileSize(item.file.size)
         }))}
         isListening={isListening}
         isTranscribing={isTranscribing}
