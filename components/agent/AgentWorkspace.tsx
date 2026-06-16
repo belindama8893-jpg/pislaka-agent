@@ -34,9 +34,13 @@ import {
 } from "@/components/agent/agent-composer-context";
 import {
   formatAgentComposerFileSize,
-  summarizeAgentFileAttachments
 } from "@/components/agent/agent-composer-files";
 import { createAgentGuidanceComposerActions } from "@/components/agent/agent-guidance-actions";
+import {
+  buildAgentTurnContent,
+  createRecentAgentContextMessages,
+  getSelectedAgentContextEntityId
+} from "@/components/agent/agent-submit-context";
 import { AuthForm } from "@/components/auth/AuthForm";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -5561,16 +5565,6 @@ export function AgentWorkspace({
     };
   }, []);
 
-  function recentContextMessages() {
-    return messages
-      .filter((message) => message.content.trim())
-      .slice(-20)
-      .map((message) => ({
-        role: message.role,
-        content: message.content
-      }));
-  }
-
   function prepareGuestTranscriptRestore() {
     if (!isGuest) {
       return;
@@ -5802,12 +5796,8 @@ export function AgentWorkspace({
     });
   }
 
-  function selectedContextEntityId(type: ChatContextAttachment["type"]) {
-    return [...contextAttachments].reverse().find((item) => item.type === type)?.entity_id;
-  }
-
   function getActiveLead() {
-    const leadId = selectedContextEntityId("lead") ?? activeLeadId;
+    const leadId = getSelectedAgentContextEntityId(contextAttachments, "lead") ?? activeLeadId;
     if (!leadId) {
       return null;
     }
@@ -7517,15 +7507,15 @@ export function AgentWorkspace({
       return;
     }
 
-    const mediaSummary = hasOutgoingMedia
-      ? `Attached ${outgoingMedia.length} listing media file${outgoingMedia.length === 1 ? "" : "s"}.`
-      : "";
-    const fileSummary = summarizeAgentFileAttachments(outgoingFiles);
-    const userMessageContent = trimmed || mediaSummary;
-    const visibleUserMessageContent = [userMessageContent, fileSummary].filter(Boolean).join("\n\n");
-    let agentMessageContent = [trimmed, mediaSummary, fileSummary].filter(Boolean).join("\n\n");
-    const currentListingId = selectedContextEntityId("listing") ?? activeListingId ?? undefined;
-    const currentLeadId = selectedContextEntityId("lead") ?? activeLeadId ?? undefined;
+    const { agentMessageContent: initialAgentMessageContent, mediaSummary, visibleUserMessageContent } =
+      buildAgentTurnContent({
+        message: trimmed,
+        mediaCount: outgoingMedia.length,
+        fileAttachments: outgoingFiles
+      });
+    let agentMessageContent = initialAgentMessageContent;
+    const currentListingId = getSelectedAgentContextEntityId(outgoingContext, "listing") ?? activeListingId ?? undefined;
+    const currentLeadId = getSelectedAgentContextEntityId(outgoingContext, "lead") ?? activeLeadId ?? undefined;
     const outgoingLeadId = outgoingContext.find((item) => item.type === "lead")?.entity_id ?? activeLeadId ?? null;
     const hasWhatsAppChatFile = outgoingFiles.some((item) => item.kind === "whatsapp_chat" || isWhatsAppChatFile(item.file));
     const shouldImportWhatsAppChat =
@@ -7757,7 +7747,7 @@ export function AgentWorkspace({
           current_lead_id: currentLeadId,
           time_zone: userTimeZone,
           context_attachments: outgoingContext,
-          context_messages: recentContextMessages()
+          context_messages: createRecentAgentContextMessages(messages)
         })
       });
       clearTimeout(timeout);
