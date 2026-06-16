@@ -240,6 +240,8 @@ Examples:
 
 ## Implementation Contract
 
+Architecture note: capability metadata, guidance, confirmation policy, entity resolution policy, and action handler manifests are documented in `docs/agent-capability-architecture.zh-CN.md`. New agent workflows should start from the capability registry instead of adding ad hoc rules to `AgentWorkspace.tsx` or prompt strings.
+
 The backend router should return one normalized object:
 
 ```json
