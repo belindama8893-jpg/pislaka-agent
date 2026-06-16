@@ -250,6 +250,70 @@ describe("resolveAgentActionEntities lead resolution", () => {
       urgency: "high"
     });
   });
+
+  it("does not use the current lead id when the broker names a different unresolved lead", async () => {
+    getRecentLeadsForBrokerMock.mockResolvedValue([
+      makeLead({
+        id: saraId,
+        full_name: "Sara Malik"
+      })
+    ]);
+
+    const resolved = await resolveAgentActionEntities(
+      updateLeadStatusAction({
+        query: "Mark Bilal as hot",
+        lead_name: "Bilal",
+        status: "qualified",
+        urgency: "high"
+      }),
+      makeSupabaseWithListings([]),
+      brokerId,
+      { currentLeadId: saraId }
+    );
+
+    expect(resolved.resolution).toMatchObject({
+      status: "no_match",
+      target_type: "lead"
+    });
+    expect(resolved.payload).not.toHaveProperty("lead_id");
+  });
+
+  it("uses an attached lead context as an explicit target", async () => {
+    getRecentLeadsForBrokerMock.mockResolvedValue([
+      makeLead({
+        id: saraId,
+        full_name: "Sara Malik"
+      })
+    ]);
+
+    const resolved = await resolveAgentActionEntities(
+      updateLeadStatusAction({
+        query: "Mark as hot",
+        status: "qualified",
+        urgency: "high"
+      }),
+      makeSupabaseWithListings([]),
+      brokerId,
+      {
+        contextAttachments: [
+          {
+            id: `lead:${saraId}`,
+            type: "lead",
+            entity_id: saraId
+          }
+        ]
+      }
+    );
+
+    expect(resolved.resolution).toMatchObject({
+      status: "matched",
+      target_type: "lead",
+      target_id: saraId
+    });
+    expect(resolved.payload).toMatchObject({
+      lead_id: saraId
+    });
+  });
 });
 
 describe("resolveAgentActionEntities listing resolution", () => {
