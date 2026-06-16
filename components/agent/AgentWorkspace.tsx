@@ -41,6 +41,14 @@ import {
   createRecentAgentContextMessages,
   getSelectedAgentContextEntityId
 } from "@/components/agent/agent-submit-context";
+import {
+  canHandlePendingActionConfirmation,
+  findLatestPendingPromotionAction,
+  findLatestPendingSocialCopyAction,
+  getBulkLeadWriteGuard,
+  type AgentPendingPromotionAction,
+  type AgentPendingSocialCopyAction
+} from "@/components/agent/agent-submit-workflow";
 import { AuthForm } from "@/components/auth/AuthForm";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -224,19 +232,9 @@ type GuestStoredTranscript = {
   messages: GuestStoredMessage[];
 };
 
-type PendingPromotionAction = {
-  messageId: string;
-  listing: RecentListingSummary;
-  instruction: string;
-  channels: PromotionChannel[];
-};
+type PendingPromotionAction = AgentPendingPromotionAction<RecentListingSummary, PromotionChannel>;
 
-type PendingSocialCopyAction = {
-  messageId: string;
-  promotion: ListingPromotion;
-  instruction: string;
-  channels: PromotionChannel[];
-};
+type PendingSocialCopyAction = AgentPendingSocialCopyAction<ListingPromotion, PromotionChannel>;
 
 type ListingSavedPreview = {
   listingId: string;
@@ -757,12 +755,6 @@ const promotionChannels: Array<{ channel: PromotionChannel; label: string }> = [
   { channel: "instagram", label: "Instagram" },
   { channel: "portal", label: "Portal" }
 ];
-
-function isConfirmationMessage(messageText: string) {
-  return /^(?:yes|y|ok|okay|confirm|confirmed|go ahead|do it|proceed|sure|haan|han|ji|是|对|确认|可以|好的)$/i.test(
-    messageText.trim()
-  );
-}
 
 function extractPromotionChannels(messageText: string): PromotionChannel[] {
   const normalized = messageText.toLowerCase();
@@ -1617,10 +1609,6 @@ function getProgressCopy(
   ];
 }
 
-function looksLikeBulkLeadWrite(message: string) {
-  return /reply|follow[-\s]?up|follow up|mark|status|schedule|hot|warm|contacted|qualified|phone|mobile|number|email|name|contact|话术|回复|跟进|标记|状态|安排|回访|电话|手机号|邮箱|名字/i.test(message);
-}
-
 function leadStatusFromMessage(message: string): Pick<LeadBatchStatusUpdatePreview, "status" | "urgency"> | null {
   if (/lost|无效|丢失/i.test(message)) {
     return { status: "lost" };
@@ -1643,10 +1631,6 @@ function leadStatusFromMessage(message: string): Pick<LeadBatchStatusUpdatePrevi
   }
 
   return null;
-}
-
-function looksLikeBulkLeadStatusUpdate(message: string) {
-  return /mark|status|hot|contacted|qualified|closed|lost|new|标记|状态|已联系|成交|丢失|无效|高意向/i.test(message);
 }
 
 function formatListingUpdateValue(value: unknown, field: string) {
@@ -5577,61 +5561,11 @@ export function AgentWorkspace({
   }
 
   function latestPendingPromotionAction(): PendingPromotionAction | null {
-    for (const message of [...messages].reverse()) {
-      if (message.role !== "assistant") {
-        continue;
-      }
-
-      if (message.role === "assistant" && message.promotion) {
-        return null;
-      }
-
-      if (message.promotionTarget && !consumedPendingActionIds.includes(message.id)) {
-        return {
-          messageId: message.id,
-          listing: message.promotionTarget,
-          instruction: message.promotionInstruction ?? "",
-          channels: message.promotionChannels?.length ? message.promotionChannels : ["whatsapp"]
-        };
-      }
-
-      if (!message.isProgress) {
-        return null;
-      }
-    }
-
-    return null;
+    return findLatestPendingPromotionAction(messages, consumedPendingActionIds, ["whatsapp"]);
   }
 
   function latestPendingSocialCopyAction(): PendingSocialCopyAction | null {
-    for (const message of [...messages].reverse()) {
-      if (message.role !== "assistant") {
-        continue;
-      }
-
-      if (message.draft || message.promotionTarget || message.listingSaved) {
-        return null;
-      }
-
-      if (
-        message.promotion &&
-        !consumedPendingActionIds.includes(message.id) &&
-        message.promotion.cards.every((card) => !card.landing_url)
-      ) {
-        return {
-          messageId: message.id,
-          promotion: message.promotion,
-          instruction: message.sourceMessage ?? message.content,
-          channels: message.promotion.cards.map((card) => card.channel)
-        };
-      }
-
-      if (!message.isProgress) {
-        return null;
-      }
-    }
-
-    return null;
+    return findLatestPendingSocialCopyAction(messages, consumedPendingActionIds);
   }
 
   function uniquePendingMedia(media: PendingMedia[]) {
@@ -7642,10 +7576,12 @@ export function AgentWorkspace({
     const pendingPromotionAction = latestPendingPromotionAction();
     if (
       pendingPromotionAction &&
-      isConfirmationMessage(trimmed) &&
-      !hasOutgoingMedia &&
-      !hasOutgoingFiles &&
-      !hasOutgoingContext
+      canHandlePendingActionConfirmation({
+        message: trimmed,
+        hasOutgoingMedia,
+        hasOutgoingFiles,
+        hasOutgoingContext
+      })
     ) {
       setConsumedPendingActionIds((current) => [...current, pendingPromotionAction.messageId]);
       const generated = await generatePromotionForListing(
@@ -7667,10 +7603,12 @@ export function AgentWorkspace({
     const pendingSocialCopyAction = latestPendingSocialCopyAction();
     if (
       pendingSocialCopyAction &&
-      isConfirmationMessage(trimmed) &&
-      !hasOutgoingMedia &&
-      !hasOutgoingFiles &&
-      !hasOutgoingContext
+      canHandlePendingActionConfirmation({
+        message: trimmed,
+        hasOutgoingMedia,
+        hasOutgoingFiles,
+        hasOutgoingContext
+      })
     ) {
       setConsumedPendingActionIds((current) => [...current, pendingSocialCopyAction.messageId]);
       const assistantMessageId = createId();
@@ -7698,9 +7636,10 @@ export function AgentWorkspace({
     }
 
     const selectedLeadContexts = outgoingContext.filter((item) => item.type === "lead");
-    if (selectedLeadContexts.length > 1 && looksLikeBulkLeadWrite(trimmed)) {
-      if (looksLikeBulkLeadStatusUpdate(trimmed)) {
-        proposeBatchLeadStatusUpdate(trimmed, selectedLeadContexts);
+    const bulkLeadWriteGuard = getBulkLeadWriteGuard(trimmed, selectedLeadContexts);
+    if (bulkLeadWriteGuard.kind !== "none") {
+      if (bulkLeadWriteGuard.kind === "status_update") {
+        proposeBatchLeadStatusUpdate(trimmed, bulkLeadWriteGuard.leadContexts);
         setIsSubmitting(false);
         return;
       }
