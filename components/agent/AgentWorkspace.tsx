@@ -37,6 +37,10 @@ import {
 } from "@/components/agent/agent-composer-files";
 import { createAgentGuidanceComposerActions } from "@/components/agent/agent-guidance-actions";
 import {
+  buildAgentResolutionFailureUi,
+  formatAgentResolutionFailureMessage
+} from "@/components/agent/agent-resolution-ui";
+import {
   buildAgentTurnContent,
   createRecentAgentContextMessages,
   getSelectedAgentContextEntityId,
@@ -6152,21 +6156,6 @@ export function AgentWorkspace({
     };
   }
 
-  function formatListingCandidates(candidates: ListingResolutionCandidate[]) {
-    return candidates
-      .map((candidate) =>
-        [
-          candidate.label,
-          [candidate.area_value, candidate.area_unit].filter(Boolean).join(" "),
-          candidate.location_area ?? candidate.listing_area
-        ]
-          .filter(Boolean)
-          .join(" · ")
-      )
-      .filter(Boolean)
-      .join(", ");
-  }
-
   function getPromotionTarget(messageText: string, resolution?: AgentResolution) {
     const availableListings = [...sessionSavedListings, ...recentListings.filter((listing) => !sessionSavedListings.some((saved) => saved.id === listing.id))];
 
@@ -6246,8 +6235,13 @@ export function AgentWorkspace({
     }
 
     if (!target.listing) {
+      const failureUi = buildAgentResolutionFailureUi(resolution ?? { status: "needs_clarification", target_type: "listing" }, {
+        targetType: "listing"
+      });
       appendAssistantMessage({
-        content: "I need a confirmed listing before I can create a promotion pack. Describe a property first, confirm it, then ask me to promote it."
+        content: failureUi
+          ? formatAgentResolutionFailureMessage(failureUi)
+          : "I need a confirmed listing before I can create a promotion pack. Describe a property first, confirm it, then ask me to promote it."
       });
       return;
     }
@@ -6329,9 +6323,13 @@ export function AgentWorkspace({
     }
 
     if (!target.listing) {
+      const failureUi = buildAgentResolutionFailureUi(resolution ?? { status: "no_match", target_type: "listing" }, {
+        targetType: "listing"
+      });
       appendAssistantMessage({
-        content:
-          "I could not find the listing to update. Please add the exact title, area, size, bedrooms, or use the listing card before changing it."
+        content: failureUi
+          ? formatAgentResolutionFailureMessage(failureUi)
+          : "I could not find the listing to update. Please add the exact title, area, size, bedrooms, or use the listing card before changing it."
       });
       return;
     }
@@ -6638,13 +6636,6 @@ export function AgentWorkspace({
     showTodayFollowUps
   });
 
-  function formatResolutionCandidates(candidates: AgentResolutionCandidate[]) {
-    return candidates
-      .map((candidate) => [candidate.label, candidate.phone].filter(Boolean).join(" · "))
-      .filter(Boolean)
-      .join(", ");
-  }
-
   function appendEntitySelectionMessage({
     targetType,
     intent,
@@ -6653,9 +6644,19 @@ export function AgentWorkspace({
     originalMessage,
     payload
   }: EntitySelectionPreview) {
+    const failureUi = buildAgentResolutionFailureUi(
+      {
+        status: "ambiguous",
+        target_type: targetType,
+        candidates
+      },
+      { targetType }
+    );
+
     appendAssistantMessage({
-      content:
-        targetType === "listing"
+      content: failureUi
+        ? formatAgentResolutionFailureMessage(failureUi)
+        : targetType === "listing"
           ? "I found multiple matching listings. Choose the exact property before I continue."
           : "I found multiple matching leads. Choose the exact buyer before I continue.",
       entitySelection: {
@@ -6691,22 +6692,15 @@ export function AgentWorkspace({
       return true;
     }
 
-    const candidateText = isListingTarget
-      ? formatListingCandidates(resolution.candidates ?? [])
-      : formatResolutionCandidates(resolution.candidates ?? []);
+    const failureUi = buildAgentResolutionFailureUi(resolution, {
+      targetType: resolution.target_type
+    });
 
-    const content =
-      resolution.status === "ambiguous"
-        ? candidateText
-          ? `I found more than one matching ${isListingTarget ? "listing" : "lead"}: ${candidateText}. Please add one more detail before I schedule it.`
-          : `I found more than one matching ${isListingTarget ? "listing" : "lead"}. Please add one more detail before I schedule it.`
-        : resolution.status === "needs_clarification"
-          ? isListingTarget
-            ? "I need to know which listing this schedule item is for before I can prepare it."
-            : "I need to know which lead or client this schedule item is for before I can prepare it."
-          : isListingTarget
-            ? "I could not find the listing for this schedule item. Please add the exact area, title, size, or use the listing card."
-            : "I could not find the lead for this schedule item. Please add the buyer name, phone number, or open Leads to choose the exact record.";
+    const content = failureUi
+      ? formatAgentResolutionFailureMessage(failureUi)
+      : isListingTarget
+        ? "I could not resolve the listing for this schedule item. Please add one more detail."
+        : "I could not resolve the lead for this schedule item. Please add one more detail.";
 
     appendAssistantMessage({ content });
 
@@ -6733,9 +6727,14 @@ export function AgentWorkspace({
     }
 
     if (!target.lead) {
-      const requestedLead = payload.lead_name ? ` "${payload.lead_name}"` : "";
+      const failureUi = buildAgentResolutionFailureUi(resolution ?? { status: "no_match", target_type: "lead" }, {
+        requestedLabel: payload.lead_name,
+        targetType: "lead"
+      });
       appendAssistantMessage({
-        content: `I could not find a matching recent lead${requestedLead}. Please check the buyer name, phone number, or open Leads to choose the exact record.`
+        content: failureUi
+          ? formatAgentResolutionFailureMessage(failureUi)
+          : "I could not find a matching recent lead. Please check the buyer name, phone number, or open Leads to choose the exact record."
       });
       return;
     }
@@ -6772,9 +6771,14 @@ export function AgentWorkspace({
     }
 
     if (!target.lead) {
-      const requestedLead = payload.lead_name ? ` "${payload.lead_name}"` : "";
+      const failureUi = buildAgentResolutionFailureUi(resolution ?? { status: "no_match", target_type: "lead" }, {
+        requestedLabel: payload.lead_name,
+        targetType: "lead"
+      });
       appendAssistantMessage({
-        content: `I could not find a matching recent lead${requestedLead}. Please check the buyer name, phone number, or open Leads to choose the exact record.`
+        content: failureUi
+          ? formatAgentResolutionFailureMessage(failureUi)
+          : "I could not find a matching recent lead. Please check the buyer name, phone number, or open Leads to choose the exact record."
       });
       return;
     }
@@ -6820,9 +6824,14 @@ export function AgentWorkspace({
     }
 
     if (!target.lead) {
-      const requestedLead = payload.lead_name ? ` "${payload.lead_name}"` : "";
+      const failureUi = buildAgentResolutionFailureUi(resolution ?? { status: "no_match", target_type: "lead" }, {
+        requestedLabel: payload.lead_name,
+        targetType: "lead"
+      });
       appendAssistantMessage({
-        content: `I could not find a matching recent lead${requestedLead}. Please check the buyer name, phone number, or open Leads to choose the exact record.`
+        content: failureUi
+          ? formatAgentResolutionFailureMessage(failureUi)
+          : "I could not find a matching recent lead. Please check the buyer name, phone number, or open Leads to choose the exact record."
       });
       return;
     }
@@ -6901,8 +6910,13 @@ export function AgentWorkspace({
     }
 
     if (resolution?.target_type === "listing" && resolution.status !== "matched") {
+      const failureUi = buildAgentResolutionFailureUi(resolution, {
+        targetType: "listing"
+      });
       appendAssistantMessage({
-        content: "I need a confirmed listing before I can change this lead's primary listing. Select a listing card or add more property details."
+        content: failureUi
+          ? formatAgentResolutionFailureMessage(failureUi)
+          : "I need a confirmed listing before I can change this lead's primary listing. Select a listing card or add more property details."
       });
       return;
     }
@@ -6921,7 +6935,12 @@ export function AgentWorkspace({
 
     if (!target.lead) {
       appendAssistantMessage({
-        content: "I need a confirmed lead before I can change the primary listing. Select a lead card or add the buyer name or phone."
+        content:
+          formatAgentResolutionFailureMessage(
+            buildAgentResolutionFailureUi(resolution ?? { status: "needs_clarification", target_type: "lead" }, {
+              targetType: "lead"
+            })!
+          )
       });
       return;
     }
@@ -6932,7 +6951,12 @@ export function AgentWorkspace({
 
     if (!listing) {
       appendAssistantMessage({
-        content: "I need a confirmed listing before I can change this lead's primary listing. Select a listing card or add more property details."
+        content:
+          formatAgentResolutionFailureMessage(
+            buildAgentResolutionFailureUi({ status: "needs_clarification", target_type: "listing" }, {
+              targetType: "listing"
+            })!
+          )
       });
       return;
     }
@@ -6966,9 +6990,14 @@ export function AgentWorkspace({
     }
 
     if (!target.lead) {
-      const requestedLead = payload.lead_name ? ` "${payload.lead_name}"` : "";
+      const failureUi = buildAgentResolutionFailureUi(resolution ?? { status: "no_match", target_type: "lead" }, {
+        requestedLabel: payload.lead_name,
+        targetType: "lead"
+      });
       appendAssistantMessage({
-        content: `I could not find a matching recent lead${requestedLead} to reply to. Please check the buyer name, phone number, or open Leads to choose the exact record.`
+        content: failureUi
+          ? formatAgentResolutionFailureMessage(failureUi)
+          : "I could not find a matching recent lead to reply to. Please check the buyer name, phone number, or open Leads to choose the exact record."
       });
       return;
     }

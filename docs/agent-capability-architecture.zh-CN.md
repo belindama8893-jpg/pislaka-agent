@@ -72,6 +72,7 @@ flowchart TD
 | Guidance Runtime | `lib/agent/guidance.ts` | 根据 broker/workspace 状态生成首页快捷动作、placeholder、下一步建议 |
 | Policy Runtime | `lib/agent/confirmation-policy.ts` | 从 registry 计算 `requires_confirmation`、risk、audit、uiCard、requiresAuthForWrite |
 | Resolution Runtime | `lib/agent/entity-resolution.ts` | 按 registry 的 `allowCurrentContext` 和 `allowLatestOnlyWhenExplicit` 解析 lead/listing/schedule |
+| Resolution UI Contract | `components/agent/agent-resolution-ui.ts` | 把 no_match、ambiguous、needs_clarification 统一成标准 message/actions/candidates |
 | Router | `lib/agent/deepseek.ts` | LLM/local fallback 输出 `AgentAction`，最终统一应用 policy |
 | Handler Manifest | `components/agent/agent-action-response-handlers.ts` | intent 到前端 handler 的映射，同时暴露 policy manifest |
 | Workspace Shell | `components/agent/AgentWorkspace.tsx` | 负责 UI state、消息流、卡片渲染；不应继续承载业务规则 |
@@ -158,6 +159,37 @@ flowchart TD
 - 找不到目标 listing 时拿最近 listing 顶上。
 - 因为出现 WhatsApp/Facebook 渠道词就跳过 lead/listing 解析。
 - ambiguous 时静默选择分数最高的候选。
+
+## Resolution UI Contract
+
+`components/agent/agent-resolution-ui.ts` 统一 `no_match`、`ambiguous`、`needs_clarification` 三类失败状态的展示 contract：
+
+```ts
+{
+  status: "no_match" | "ambiguous" | "needs_clarification",
+  message: {
+    headline: "Couldn't find this lead",
+    detail: "No saved lead matches \"Ahmed\". Check the buyer name or phone number."
+  },
+  actions: [
+    { label: "Show recent leads", type: "fallback_list" },
+    { label: "Try again", type: "retry_input" }
+  ],
+  candidates: [
+    {
+      id: "...",
+      displayLabel: "Ahmed Raza · +92 300... · DHA Villa"
+    }
+  ]
+}
+```
+
+使用原则：
+
+- `no_match`：说明找不到哪个对象，并给出 fallback/retry 动作，不允许静默展示最新记录。
+- `ambiguous`：必须暂停流程，展示候选，让经纪人选择；所有 intent 复用同一候选 copy 结构。
+- `needs_clarification`：说明缺哪类信息，引导补充细节，而不是强行猜目标。
+- 前端可以继续用现有卡片渲染，但文案和候选 label 应来自 contract，避免每个 handler 各写一套提示。
 
 ## Memory Runtime
 
