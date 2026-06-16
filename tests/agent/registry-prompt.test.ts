@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatResolutionRulesForPrompt,
   formatRoutingRulesForPrompt,
   formatSupportedIntentsForPrompt,
   formatWorkflowRulesForPrompt,
@@ -39,7 +40,19 @@ describe("agent registry prompt compiler", () => {
 
     expect(prompt).toContain("only record message_sent when the broker says it was sent or clicks Sent");
     expect(prompt).toContain("Hot or interested maps to status qualified and urgency high");
+    expect(prompt).toContain("If an entity is missing or ambiguous");
+    expect(prompt).toContain("latest listing only when the broker explicitly says latest");
     expect(prompt).toContain("Any write, status update, schedule change");
     expect(prompt).toContain("Read-only list/search");
+  });
+
+  it("compiles entity resolution rules from capability metadata", () => {
+    const prompt = formatResolutionRulesForPrompt();
+
+    expect(prompt).toContain("create_campaign_links");
+    expect(prompt).toContain("update_listing_draft");
+    expect(prompt).toContain("general_reply");
+    expect(prompt).toContain("must not use current context automatically");
+    expect(prompt).toContain("WhatsApp or Facebook are parameters");
   });
 });
