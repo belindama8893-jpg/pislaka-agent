@@ -43,6 +43,22 @@ export type AgentGuidanceSuggestion = {
   confirmationRequired: boolean;
 };
 
+export type AgentGuidanceLeadInput = {
+  next_follow_up_at?: string | null;
+};
+
+export type AgentGuidanceContextInput = {
+  leads: AgentGuidanceLeadInput[];
+  listingCount: number;
+  sessionListingCount?: number;
+  hasStarted: boolean;
+  isWhatsAppImportMode?: boolean;
+  activeLeadId?: string | null;
+  activeListingId?: string | null;
+  timeZone?: string;
+  now?: Date;
+};
+
 type RankedIntent = {
   intent: AgentAction["intent"];
   reason: string;
@@ -142,6 +158,62 @@ function rankedHomeIntents(context: AgentGuidanceContext): RankedIntent[] {
   );
 
   return ranked;
+}
+
+function getDayKey(date: Date, timeZone?: string) {
+  return date.toLocaleDateString("en-CA", timeZone ? { timeZone } : undefined);
+}
+
+function getFollowupCounts(leads: AgentGuidanceLeadInput[], timeZone?: string, now = new Date()) {
+  const todayKey = getDayKey(now, timeZone);
+  const nowTime = now.getTime();
+
+  return leads.reduce(
+    (counts, lead) => {
+      if (!lead.next_follow_up_at) {
+        return counts;
+      }
+
+      const followupDate = new Date(lead.next_follow_up_at);
+      const followupTime = followupDate.getTime();
+      if (Number.isNaN(followupTime)) {
+        return counts;
+      }
+
+      if (followupTime <= nowTime) {
+        counts.overdue += 1;
+      }
+
+      if (getDayKey(followupDate, timeZone) === todayKey) {
+        counts.today += 1;
+      }
+
+      return counts;
+    },
+    { overdue: 0, today: 0 }
+  );
+}
+
+export function buildAgentGuidanceContext(input: AgentGuidanceContextInput): AgentGuidanceContext {
+  const listingCount = input.listingCount + (input.sessionListingCount ?? 0);
+  const followupCounts = getFollowupCounts(input.leads, input.timeZone, input.now);
+
+  return {
+    brokerState: {
+      hasListings: listingCount > 0,
+      hasLeads: input.leads.length > 0,
+      recentListingCount: listingCount,
+      recentLeadCount: input.leads.length,
+      todayFollowupCount: followupCounts.today,
+      overdueFollowupCount: followupCounts.overdue
+    },
+    conversationState: {
+      hasStarted: input.hasStarted,
+      isWhatsAppImportMode: input.isWhatsAppImportMode,
+      activeLeadId: input.activeLeadId,
+      activeListingId: input.activeListingId
+    }
+  };
 }
 
 export function getAgentGuidanceSuggestions(

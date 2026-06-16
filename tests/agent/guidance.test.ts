@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildAgentGuidanceContext,
   getAgentComposerPlaceholder,
   getAgentGuidanceSuggestions,
   type AgentGuidanceBrokerState,
@@ -38,6 +39,40 @@ describe("agent guidance", () => {
       intent: "create_listing_draft",
       label: "List from Link",
       confirmationRequired: false
+    });
+  });
+
+  it("builds guidance context from broker workspace state", () => {
+    const context = buildAgentGuidanceContext({
+      leads: [
+        { next_follow_up_at: "2026-06-16T08:00:00.000Z" },
+        { next_follow_up_at: "2026-06-15T23:00:00.000Z" },
+        { next_follow_up_at: "not-a-date" },
+        {}
+      ],
+      listingCount: 0,
+      sessionListingCount: 1,
+      hasStarted: true,
+      activeLeadId: "lead-1",
+      activeListingId: null,
+      isWhatsAppImportMode: false,
+      timeZone: "Asia/Shanghai",
+      now: new Date("2026-06-16T06:00:00.000Z")
+    });
+
+    expect(context).toMatchObject({
+      brokerState: {
+        hasListings: true,
+        hasLeads: true,
+        recentListingCount: 1,
+        recentLeadCount: 4,
+        todayFollowupCount: 2,
+        overdueFollowupCount: 1
+      },
+      conversationState: {
+        hasStarted: true,
+        activeLeadId: "lead-1"
+      }
     });
   });
 

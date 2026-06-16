@@ -50,9 +50,9 @@ import type {
 } from "@/lib/agent/types";
 import { isScheduleRequest } from "@/lib/agent/intent-router";
 import {
+  buildAgentGuidanceContext,
   getAgentComposerPlaceholder,
-  getAgentGuidanceSuggestions,
-  type AgentGuidanceContext
+  getAgentGuidanceSuggestions
 } from "@/lib/agent/guidance";
 import {
   detectAgentResponseLanguage,
@@ -5371,63 +5371,29 @@ export function AgentWorkspace({
     return () => window.removeEventListener("popstate", handlePopState);
   }, [shouldHandleHomeBackNavigation, welcomeMessageContent]);
 
-  const guidanceContext = useMemo<AgentGuidanceContext>(() => {
-    const todayKey = new Date().toLocaleDateString("en-CA", { timeZone: userTimeZone });
-    const now = Date.now();
-    const followupCounts = workspaceLeads.reduce(
-      (counts, lead) => {
-        if (!lead.next_follow_up_at) {
-          return counts;
-        }
-
-        const followupTime = new Date(lead.next_follow_up_at).getTime();
-        if (Number.isNaN(followupTime)) {
-          return counts;
-        }
-
-        if (followupTime <= now) {
-          counts.overdue += 1;
-        }
-
-        const followupDayKey = new Date(lead.next_follow_up_at).toLocaleDateString("en-CA", {
-          timeZone: userTimeZone
-        });
-        if (followupDayKey === todayKey) {
-          counts.today += 1;
-        }
-
-        return counts;
-      },
-      { overdue: 0, today: 0 }
-    );
-    const listingCount = recentListings.length + sessionSavedListings.length;
-
-    return {
-      brokerState: {
-        hasListings: listingCount > 0,
-        hasLeads: workspaceLeads.length > 0,
-        recentListingCount: listingCount,
-        recentLeadCount: workspaceLeads.length,
-        todayFollowupCount: followupCounts.today,
-        overdueFollowupCount: followupCounts.overdue
-      },
-      conversationState: {
+  const guidanceContext = useMemo(
+    () =>
+      buildAgentGuidanceContext({
+        leads: workspaceLeads,
+        listingCount: recentListings.length,
+        sessionListingCount: sessionSavedListings.length,
         hasStarted,
         isWhatsAppImportMode,
         activeLeadId,
-        activeListingId
-      }
-    };
-  }, [
-    activeLeadId,
-    activeListingId,
-    hasStarted,
-    isWhatsAppImportMode,
-    recentListings.length,
-    sessionSavedListings.length,
-    userTimeZone,
-    workspaceLeads
-  ]);
+        activeListingId,
+        timeZone: userTimeZone
+      }),
+    [
+      activeLeadId,
+      activeListingId,
+      hasStarted,
+      isWhatsAppImportMode,
+      recentListings.length,
+      sessionSavedListings.length,
+      userTimeZone,
+      workspaceLeads
+    ]
+  );
   const quickActions = getAgentGuidanceSuggestions(guidanceContext, { surface: "home", limit: 4 }).map(
     (suggestion) => ({
       icon: guidanceActionIcons[suggestion.intent] ?? Sparkles,
