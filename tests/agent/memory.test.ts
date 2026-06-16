@@ -53,7 +53,7 @@ describe("agent memory runtime", () => {
       source: "explicit_selection",
       trustLevel: "confirmed",
       allowedUse: ["routing", "guidance", "prompt", "entity_resolution"],
-      expires: "session"
+      expires: "turn"
     });
     expect(memory.workspace.currentListing).toMatchObject({
       entityId: "22222222-2222-2222-2222-222222222222",
@@ -90,5 +90,20 @@ describe("agent memory runtime", () => {
     expect(getAgentMemoryRecentMessages(memory)).toEqual([
       { role: "assistant", content: "I can see: Location: DHA Phase 5." }
     ]);
+  });
+
+  it("does not retain stale workspace context when the next turn has no active selection", () => {
+    const firstTurn = compileAgentMemoryContext({
+      currentLeadId: "11111111-1111-1111-1111-111111111111"
+    });
+    const nextTurn = compileAgentMemoryContext({});
+
+    expect(firstTurn.workspace.currentLead).toMatchObject({
+      entityId: "11111111-1111-1111-1111-111111111111",
+      expires: "turn"
+    });
+    expect(nextTurn.workspace.currentLead).toBeUndefined();
+    expect(nextTurn.workspace.currentListing).toBeUndefined();
+    expect(nextTurn.workspace.attachments).toEqual([]);
   });
 });

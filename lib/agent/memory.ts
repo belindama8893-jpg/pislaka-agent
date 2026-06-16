@@ -72,7 +72,7 @@ const selectedEntityMemory: AgentMemoryMetadata = {
   source: "explicit_selection",
   trustLevel: "confirmed",
   allowedUse: ["routing", "guidance", "prompt", "entity_resolution"],
-  expires: "session"
+  expires: "turn"
 };
 
 const attachmentMemory: AgentMemoryMetadata = {

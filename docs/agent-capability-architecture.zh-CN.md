@@ -187,7 +187,7 @@ flowchart TD
       source: "explicit_selection",
       trustLevel: "confirmed",
       allowedUse: ["routing", "guidance", "prompt", "entity_resolution"],
-      expires: "session"
+      expires: "turn"
     },
     attachments: [
       {
@@ -204,6 +204,8 @@ flowchart TD
 
 - 聊天记忆可以帮助判断“那套房”“刚才那个客户”“继续发一下”这类多轮意图，但不能当作已保存的业务事实。
 - 当前选中实体和附件可以帮助 routing/guidance/entity resolution，但具体能否使用仍要服从 registry 的 `resolution.allowCurrentContext`。
+- `workspace.currentLead/currentListing` 是 turn-level context：每一轮都必须由当前 UI/URL/明确附件重新提供；如果下一轮没有 active selection，Memory Runtime 不会保留上一轮的 lead/listing。
+- 当前上下文必须跟随“最后一次明确选中”替换，不允许把很久以前选中的客户/房源当成默认目标。
 - lead、listing、schedule、campaign、follow-up 等长期事实必须来自 PostgreSQL 业务表。
 - 后续扩展 buyer advisor / developer agent 时，应先定义该产品的 memory source、trustLevel 和 allowedUse，而不是直接复用 broker agent 的记忆规则。
 
