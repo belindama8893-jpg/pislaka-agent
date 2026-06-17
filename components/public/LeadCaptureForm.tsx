@@ -1,12 +1,14 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import { Check } from "lucide-react";
+import { getPublicListingAnalyticsContext, trackPublicListingEvent } from "@/lib/analytics/browser";
 
 export function LeadCaptureForm({ campaignCode }: { campaignCode: string }) {
   const [status, setStatus] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const hasTrackedStart = useRef(false);
 
   function buildLeadMessage(formData: FormData) {
     const message = String(formData.get("message") || "").trim();
@@ -24,6 +26,18 @@ export function LeadCaptureForm({ campaignCode }: { campaignCode: string }) {
     return [message || "I am interested in this property. Please share more details.", ...context].join("\n");
   }
 
+  function trackFormStart() {
+    if (hasTrackedStart.current) {
+      return;
+    }
+
+    hasTrackedStart.current = true;
+    trackPublicListingEvent({
+      campaignCode,
+      eventName: "lead_form_start"
+    });
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isSubmitted) {
@@ -35,6 +49,11 @@ export function LeadCaptureForm({ campaignCode }: { campaignCode: string }) {
 
     setIsSubmitting(true);
     setStatus("Sending inquiry...");
+    trackPublicListingEvent({
+      campaignCode,
+      eventName: "lead_submit_attempt"
+    });
+    const analyticsContext = getPublicListingAnalyticsContext();
 
     const response = await fetch("/api/leads", {
       method: "POST",
@@ -46,7 +65,8 @@ export function LeadCaptureForm({ campaignCode }: { campaignCode: string }) {
         full_name: formData.get("full_name"),
         phone: formData.get("phone"),
         email: formData.get("email"),
-        message: buildLeadMessage(formData)
+        message: buildLeadMessage(formData),
+        ...analyticsContext
       })
     });
 
@@ -57,13 +77,21 @@ export function LeadCaptureForm({ campaignCode }: { campaignCode: string }) {
       return;
     }
 
+    const payload = (await response.json().catch(() => null)) as { lead?: { id?: string } } | null;
+    trackPublicListingEvent({
+      campaignCode,
+      eventName: "lead_submit_success",
+      metadata: {
+        lead_id: payload?.lead?.id
+      }
+    });
     setIsSubmitted(true);
     setStatus("Inquiry sent. The broker will follow up soon.");
     setIsSubmitting(false);
   }
 
   return (
-    <form className="lead-capture-form" onSubmit={handleSubmit}>
+    <form className="lead-capture-form" onFocusCapture={trackFormStart} onSubmit={handleSubmit}>
       <label>
         <span>Name</span>
         <input name="full_name" autoComplete="name" disabled={isSubmitting || isSubmitted} required />

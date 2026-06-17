@@ -5,7 +5,11 @@ export const leadRequestSchema = z.object({
   full_name: z.string().min(1),
   phone: z.string().min(3),
   email: z.string().email().optional().or(z.literal("")),
-  message: z.string().max(1000).optional()
+  message: z.string().max(1000).optional(),
+  visitor_id: z.string().trim().min(8).max(120).optional(),
+  session_id: z.string().trim().min(8).max(120).optional(),
+  experiment_key: z.string().trim().max(120).optional(),
+  variant: z.string().trim().max(80).optional()
 });
 
 export const manualLeadCreateSchema = z

@@ -1,7 +1,12 @@
-import { BarChart3, Clock3, Flame, MousePointerClick, TrendingUp, Users } from "lucide-react";
+import { BarChart3, Clock3, Eye, Flame, MousePointerClick, TrendingUp, Users } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import type { AnalyticsSummary, ChannelPerformance, ListingPerformance } from "@/lib/analytics/types";
+import type {
+  AnalyticsSummary,
+  ChannelPerformance,
+  ListingPerformance,
+  VariantPerformance
+} from "@/lib/analytics/types";
 
 type AnalyticsDashboardProps = {
   summary: AnalyticsSummary;
@@ -12,12 +17,13 @@ type AnalyticsSummaryCardProps = {
   summary: AnalyticsSummary;
 };
 
-function formatPercent(value: number) {
-  return `${value.toFixed(value % 1 === 0 ? 0 : 1)}%`;
+function formatPercent(value: number | null | undefined) {
+  const safeValue = value ?? 0;
+  return `${safeValue.toFixed(safeValue % 1 === 0 ? 0 : 1)}%`;
 }
 
-function formatNumber(value: number) {
-  return value.toLocaleString("en-PK");
+function formatNumber(value: number | null | undefined) {
+  return (value ?? 0).toLocaleString("en-PK");
 }
 
 function getChannelLabel(channel: string) {
@@ -80,7 +86,8 @@ function ChannelRows({ channels, limit = 5 }: { channels: ChannelPerformance[]; 
           <div>
             <strong>{getChannelLabel(channel.channel)}</strong>
             <span>
-              {formatNumber(channel.clicks)} clicks / {formatNumber(channel.leads)} leads
+              {formatNumber(channel.pageViews)} views / {formatNumber(channel.clicks)} clicks /{" "}
+              {formatNumber(channel.leads)} leads
             </span>
           </div>
           <b>{formatPercent(channel.conversionRate)}</b>
@@ -102,7 +109,7 @@ function ListingRows({ listings, limit = 5 }: { listings: ListingPerformance[]; 
           <div>
             <strong>{listing.title}</strong>
             <span>
-              {[listing.location, `${formatNumber(listing.clicks)} clicks`, `${formatNumber(listing.leads)} leads`]
+              {[listing.location, `${formatNumber(listing.pageViews)} views`, `${formatNumber(listing.leads)} leads`]
                 .filter(Boolean)
                 .join(" / ")}
             </span>
@@ -114,9 +121,36 @@ function ListingRows({ listings, limit = 5 }: { listings: ListingPerformance[]; 
   );
 }
 
+function VariantRows({ variants, limit = 5 }: { variants: VariantPerformance[]; limit?: number }) {
+  if (!variants.length) {
+    return <p className="analytics-empty">No gray-test variants recorded in this range yet.</p>;
+  }
+
+  return (
+    <div className="analytics-table-list">
+      {variants.slice(0, limit).map((variant) => (
+        <article className="analytics-performance-row" key={`${variant.experimentKey}:${variant.variant}`}>
+          <div>
+            <strong>{variant.variant}</strong>
+            <span>
+              {formatNumber(variant.uniqueVisitors)} visitors / {formatNumber(variant.pageViews)} views /{" "}
+              {formatNumber(variant.submissions || variant.leads)} submits
+            </span>
+          </div>
+          <b>{formatPercent(variant.submitRate)}</b>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 export function AnalyticsSummaryCard({ compact = false, summary }: AnalyticsSummaryCardProps) {
-  const topChannel = summary.channelPerformance[0];
-  const topListing = summary.listingPerformance[0];
+  const channelPerformance = summary.channelPerformance ?? [];
+  const listingPerformance = summary.listingPerformance ?? [];
+  const topChannel = channelPerformance[0];
+  const topListing = listingPerformance[0];
+  const totals = summary.totals;
+  const followUpStats = summary.followUpStats;
 
   return (
     <section className={`analytics-summary-card ${compact ? "compact" : ""}`} aria-label="Analytics summary">
@@ -132,26 +166,26 @@ export function AnalyticsSummaryCard({ compact = false, summary }: AnalyticsSumm
         <StatTile
           icon={<Users size={16} />}
           label="Leads"
-          value={formatNumber(summary.totals.leads)}
-          note={`${formatNumber(summary.totals.todayLeads)} today`}
+          value={formatNumber(totals?.leads)}
+          note={`${formatNumber(totals?.todayLeads)} today`}
+        />
+        <StatTile
+          icon={<Users size={16} />}
+          label="Visitors"
+          value={formatNumber(totals?.uniqueVisitors)}
+          note={`${formatPercent(totals?.pageViewConversionRate)} visitor conversion`}
+        />
+        <StatTile
+          icon={<Eye size={16} />}
+          label="Page views"
+          value={formatNumber(totals?.pageViews)}
+          note={`${formatNumber(totals?.clicks)} tracked clicks`}
         />
         <StatTile
           icon={<MousePointerClick size={16} />}
-          label="Clicks"
-          value={formatNumber(summary.totals.clicks)}
-          note={`${formatPercent(summary.totals.conversionRate)} conversion`}
-        />
-        <StatTile
-          icon={<Flame size={16} />}
-          label="Hot leads"
-          value={formatNumber(summary.followUpStats.hotLeads)}
-          note={`${formatNumber(summary.followUpStats.notContacted)} need first reply`}
-        />
-        <StatTile
-          icon={<Clock3 size={16} />}
-          label="Follow-ups"
-          value={formatNumber(summary.followUpStats.dueToday)}
-          note={`${formatNumber(summary.followUpStats.overdue)} overdue`}
+          label="Form starts"
+          value={formatNumber(totals?.formStarts)}
+          note={`${formatPercent(totals?.formCompletionRate)} completion`}
         />
       </div>
 
@@ -172,6 +206,12 @@ export function AnalyticsSummaryCard({ compact = false, summary }: AnalyticsSumm
 }
 
 export function AnalyticsDashboard({ summary }: AnalyticsDashboardProps) {
+  const statusCounts = summary.statusCounts ?? [];
+  const channelPerformance = summary.channelPerformance ?? [];
+  const variantPerformance = summary.variantPerformance ?? [];
+  const listingPerformance = summary.listingPerformance ?? [];
+  const followUpStats = summary.followUpStats;
+
   return (
     <div className="analytics-dashboard">
       <AnalyticsSummaryCard summary={summary} />
@@ -185,7 +225,7 @@ export function AnalyticsDashboard({ summary }: AnalyticsDashboardProps) {
           <TrendingUp size={18} />
         </div>
         <div className="analytics-status-grid">
-          {summary.statusCounts.map((item) => (
+          {statusCounts.map((item) => (
             <article className={`analytics-status-pill ${item.status}`} key={item.status}>
               <span>{getStatusLabel(item.status)}</span>
               <strong>{formatNumber(item.count)}</strong>
@@ -202,7 +242,18 @@ export function AnalyticsDashboard({ summary }: AnalyticsDashboardProps) {
           </div>
           <MousePointerClick size={18} />
         </div>
-        <ChannelRows channels={summary.channelPerformance} />
+        <ChannelRows channels={channelPerformance} />
+      </section>
+
+      <section className="analytics-panel" aria-labelledby="variant-performance-title">
+        <div className="analytics-panel-header">
+          <div>
+            <span>Gray test</span>
+            <h2 id="variant-performance-title">Variant performance</h2>
+          </div>
+          <Eye size={18} />
+        </div>
+        <VariantRows variants={variantPerformance} />
       </section>
 
       <section className="analytics-panel" aria-labelledby="listing-performance-title">
@@ -213,7 +264,7 @@ export function AnalyticsDashboard({ summary }: AnalyticsDashboardProps) {
           </div>
           <BarChart3 size={18} />
         </div>
-        <ListingRows listings={summary.listingPerformance} />
+        <ListingRows listings={listingPerformance} />
       </section>
 
       <section className="analytics-panel" aria-labelledby="followup-health-title">
@@ -225,10 +276,10 @@ export function AnalyticsDashboard({ summary }: AnalyticsDashboardProps) {
           <Clock3 size={18} />
         </div>
         <div className="analytics-followup-grid">
-          <StatTile icon={<Clock3 size={16} />} label="Due today" value={formatNumber(summary.followUpStats.dueToday)} />
-          <StatTile icon={<Clock3 size={16} />} label="Overdue" value={formatNumber(summary.followUpStats.overdue)} />
-          <StatTile icon={<Flame size={16} />} label="Hot leads" value={formatNumber(summary.followUpStats.hotLeads)} />
-          <StatTile icon={<Users size={16} />} label="No first reply" value={formatNumber(summary.followUpStats.notContacted)} />
+          <StatTile icon={<Clock3 size={16} />} label="Due today" value={formatNumber(followUpStats?.dueToday)} />
+          <StatTile icon={<Clock3 size={16} />} label="Overdue" value={formatNumber(followUpStats?.overdue)} />
+          <StatTile icon={<Flame size={16} />} label="Hot leads" value={formatNumber(followUpStats?.hotLeads)} />
+          <StatTile icon={<Users size={16} />} label="No first reply" value={formatNumber(followUpStats?.notContacted)} />
         </div>
         <Link className="outline-button small analytics-followup-link" href="/leads">
           Review leads

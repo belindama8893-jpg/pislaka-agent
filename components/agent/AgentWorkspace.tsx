@@ -66,6 +66,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { AgentChatMessageRecord } from "@/lib/agent/conversations";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { trackProductEvent } from "@/lib/analytics/browser";
 import type { BrokerEventDraftInput, BrokerEventRecord } from "@/lib/events/types";
 import { formatLeadStatusLabel, getLeadStatusClassName } from "@/lib/leads/display";
 import {
@@ -5278,6 +5279,7 @@ export function AgentWorkspace({
   const hasPositionedInitialThreadRef = useRef(false);
   const hasStartedRef = useRef(false);
   const hasPushedHomeHistoryRef = useRef(false);
+  const hasTrackedAuthModalOpenRef = useRef(false);
   const assistantStreamTimersRef = useRef<Map<string, number>>(new Map());
   const pendingProgressMessageIdRef = useRef<string | null>(null);
   const lastAuthPromptRef = useRef<AuthRequiredReason | null>(null);
@@ -5290,6 +5292,20 @@ export function AgentWorkspace({
   useEffect(() => {
     setUserTimeZone(getResolvedTimeZone());
   }, []);
+
+  useEffect(() => {
+    if (!isAuthModalOpen || hasTrackedAuthModalOpenRef.current) {
+      return;
+    }
+
+    hasTrackedAuthModalOpenRef.current = true;
+    trackProductEvent({
+      eventName: "auth_modal_opened",
+      metadata: {
+        source: initialAuthOpen ? "home_auth_param" : "agent_workspace"
+      }
+    });
+  }, [initialAuthOpen, isAuthModalOpen]);
 
   useEffect(() => {
     if (isGuest) {

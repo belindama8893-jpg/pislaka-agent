@@ -2,6 +2,7 @@
 
 import { type FormEvent, useState } from "react";
 import { Lock, Mail } from "lucide-react";
+import { trackProductEvent } from "@/lib/analytics/browser";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type AuthMode = "sign-in" | "sign-up";
@@ -43,6 +44,13 @@ export function AuthForm({ onAuthStarted }: AuthFormProps = {}) {
   async function handleGoogleSignIn() {
     setStatus(null);
     setIsSubmitting(true);
+    trackProductEvent({
+      eventName: "auth_started",
+      metadata: {
+        method: "google",
+        mode
+      }
+    });
     onAuthStarted?.();
     window.location.href = new URL("/api/auth/google", window.location.origin).toString();
   }
@@ -57,6 +65,13 @@ export function AuthForm({ onAuthStarted }: AuthFormProps = {}) {
     }
 
     setIsSubmitting(true);
+    trackProductEvent({
+      eventName: "auth_started",
+      metadata: {
+        method: "password",
+        mode
+      }
+    });
     onAuthStarted?.();
     const supabase = createSupabaseBrowserClient();
 
@@ -85,6 +100,13 @@ export function AuthForm({ onAuthStarted }: AuthFormProps = {}) {
       return;
     }
 
+    trackProductEvent({
+      eventName: "auth_succeeded",
+      metadata: {
+        method: "password",
+        mode
+      }
+    });
     window.location.href = "/";
   }
 

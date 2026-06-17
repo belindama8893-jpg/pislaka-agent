@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { recordProductAnalyticsEvent } from "@/lib/analytics/server-events";
 import { requireCurrentBroker } from "@/lib/auth/current-user";
 
 const profileUpdateSchema = z.object({
@@ -68,6 +69,18 @@ export async function PATCH(request: Request) {
       metadata: {
         source: "api"
       }
+    });
+
+    await recordProductAnalyticsEvent(supabase, {
+      authUserId: updatedProfile.auth_user_id,
+      brokerId: broker.id,
+      eventName: "profile_completed",
+      metadata: {
+        had_full_name_before: Boolean(broker.full_name),
+        had_city_before: Boolean(broker.city),
+        had_agency_before: Boolean(broker.agency_name)
+      },
+      request
     });
 
     return NextResponse.json({ broker: updatedProfile });

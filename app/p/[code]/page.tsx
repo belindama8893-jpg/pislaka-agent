@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { LeadCaptureForm } from "@/components/public/LeadCaptureForm";
+import { PublicListingAnalytics } from "@/components/public/PublicListingAnalytics";
 import type { ListingMediaRecord, ListingRecord } from "@/lib/listings/types";
 import { createServiceClient } from "@/lib/supabase/server";
 
@@ -108,6 +109,7 @@ export default async function PublicListingPage({
 
   return (
     <main className="public-listing-page">
+      <PublicListingAnalytics campaignCode={campaign.code} />
       <section className="public-listing-shell">
         <div className="public-listing-main">
           {heroMedia?.signed_url ? (

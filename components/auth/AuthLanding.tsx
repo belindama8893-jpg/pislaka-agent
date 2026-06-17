@@ -5,6 +5,8 @@ import { BarChart3, CalendarClock, Home, List, Megaphone, MessageCircle, Users }
 import Image from "next/image";
 import { AgentComposer } from "@/components/agent/AgentComposer";
 import { AuthForm } from "@/components/auth/AuthForm";
+import { ProductAnalyticsTracker } from "@/components/analytics/ProductAnalyticsTracker";
+import { trackProductEvent } from "@/lib/analytics/browser";
 
 const quickActions = [
   {
@@ -54,14 +56,21 @@ export function AuthLanding() {
 
   function requireSignIn(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
+    trackProductEvent({
+      eventName: "auth_modal_opened",
+      metadata: {
+        source: "landing"
+      }
+    });
     setShowAuth(true);
   }
 
   return (
     <main className="auth-page auth-homepage">
+      <ProductAnalyticsTracker eventName="home_page_view" metadata={{ state: "auth_landing" }} />
       <header className="auth-shell-topbar">
         <Image className="auth-brand-logo" src="/logo.png" alt="Pislaka" width={324} height={120} priority />
-        <button className="auth-trigger" type="button" onClick={() => setShowAuth(true)}>
+        <button className="auth-trigger" type="button" onClick={() => requireSignIn()}>
           Sign in
         </button>
       </header>
@@ -73,7 +82,7 @@ export function AuthLanding() {
 
         <nav className="auth-sidebar-nav" aria-label="Agent conversations">
           <p>Agent conversations</p>
-          <button type="button" onClick={() => setShowAuth(true)}>
+          <button type="button" onClick={() => requireSignIn()}>
             <Megaphone size={18} />
             <span>Agent Chat</span>
           </button>
@@ -85,7 +94,7 @@ export function AuthLanding() {
             const Icon = page.icon;
 
             return (
-              <button key={page.label} type="button" onClick={() => setShowAuth(true)}>
+              <button key={page.label} type="button" onClick={() => requireSignIn()}>
                 <Icon size={18} />
                 <span>{page.label}</span>
               </button>
@@ -106,14 +115,14 @@ export function AuthLanding() {
                 label: action.label,
                 onClick: () => {
                   setDraft(action.prompt);
-                  setShowAuth(true);
+                  requireSignIn();
                 }
               }))}
               className="auth-agent-composer"
-              onAttach={() => setShowAuth(true)}
+              onAttach={() => requireSignIn()}
               onChange={setDraft}
               onSubmit={requireSignIn}
-              onVoice={() => setShowAuth(true)}
+              onVoice={() => requireSignIn()}
               placeholder="Paste a listing link, WhatsApp chat, or ask anything..."
               value={draft}
             />

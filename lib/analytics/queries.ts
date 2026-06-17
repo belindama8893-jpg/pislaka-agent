@@ -5,12 +5,29 @@ import type {
   AnalyticsStatusCount,
   AnalyticsSummary,
   ChannelPerformance,
-  ListingPerformance
+  ListingPerformance,
+  VariantPerformance
 } from "@/lib/analytics/types";
 
 type ClickEventRow = {
   listing_id: string | null;
   channel: string | null;
+  created_at: string;
+};
+
+type AnalyticsEventRow = {
+  event_name:
+    | "page_view"
+    | "lead_form_view"
+    | "lead_form_start"
+    | "lead_submit_attempt"
+    | "lead_submit_success"
+    | "whatsapp_opened";
+  listing_id: string | null;
+  channel: string | null;
+  visitor_id: string | null;
+  experiment_key: string | null;
+  variant: string | null;
   created_at: string;
 };
 
@@ -20,6 +37,8 @@ type LeadAnalyticsRow = {
   source_channel: string | null;
   status: AnalyticsStatusCount["status"];
   urgency: "low" | "normal" | "high" | null;
+  experiment_key: string | null;
+  variant: string | null;
   last_contacted_at: string | null;
   next_follow_up_at: string | null;
   created_at: string;
@@ -95,6 +114,14 @@ function getConversionRate(leads: number, clicks: number) {
   return Math.round((leads / clicks) * 1000) / 10;
 }
 
+function getRate(numerator: number, denominator: number) {
+  if (!denominator) {
+    return numerator ? 100 : 0;
+  }
+
+  return Math.round((numerator / denominator) * 1000) / 10;
+}
+
 function getChannel(value: string | null | undefined) {
   return value?.trim() || "unknown";
 }
@@ -124,7 +151,9 @@ async function getLeadRowsForRange(
   const query = applyCreatedAtRange(
     supabase
       .from("leads")
-      .select("id, listing_id, source_channel, status, urgency, last_contacted_at, next_follow_up_at, created_at")
+      .select(
+        "id, listing_id, source_channel, status, urgency, experiment_key, variant, last_contacted_at, next_follow_up_at, created_at"
+      )
       .eq("broker_id", brokerId)
       .limit(5000),
     rangeWindow
@@ -136,6 +165,32 @@ async function getLeadRowsForRange(
   }
 
   return (data ?? []) as LeadAnalyticsRow[];
+}
+
+async function getAnalyticsEventRowsForRange(
+  supabase: SupabaseClient,
+  brokerId: string,
+  rangeWindow: { from?: string; to?: string }
+) {
+  const query = applyCreatedAtRange(
+    supabase
+      .from("analytics_events")
+      .select("event_name, listing_id, channel, visitor_id, experiment_key, variant, created_at")
+      .eq("broker_id", brokerId)
+      .limit(10000),
+    rangeWindow
+  );
+  const { data, error } = await query;
+
+  if (error) {
+    if (/analytics_events/i.test(error.message)) {
+      return [];
+    }
+
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as AnalyticsEventRow[];
 }
 
 async function getClickRowsForRange(
@@ -221,24 +276,41 @@ export async function getBrokerAnalyticsSummary(
   const todayWindow = getRangeWindow("today", options.timeZone);
   const weekWindow = getRangeWindow("week", options.timeZone);
 
-  const [leadRows, clickRows, openLeadRows, todayLeads, weekLeads] = await Promise.all([
+  const [leadRows, clickRows, analyticsEventRows, openLeadRows, todayLeads, weekLeads] = await Promise.all([
     getLeadRowsForRange(supabase, brokerId, rangeWindow),
     getClickRowsForRange(supabase, brokerId, rangeWindow),
+    getAnalyticsEventRowsForRange(supabase, brokerId, rangeWindow),
     getAllOpenLeadRows(supabase, brokerId),
     countLeadsInRange(supabase, brokerId, todayWindow),
     countLeadsInRange(supabase, brokerId, weekWindow)
   ]);
 
   const clickChannelCounts = new Map<string, number>();
+  const pageViewChannelCounts = new Map<string, number>();
   const leadChannelCounts = new Map<string, number>();
   const clickListingCounts = new Map<string, number>();
+  const pageViewListingCounts = new Map<string, number>();
   const leadListingCounts = new Map<string, number>();
   const statusCounts = new Map<AnalyticsStatusCount["status"], number>(leadStatuses.map((status) => [status, 0]));
+  const pageViewVisitors = new Set<string>();
+  const pageViewRows = analyticsEventRows.filter((row) => row.event_name === "page_view");
+  const formStartRows = analyticsEventRows.filter((row) => row.event_name === "lead_form_start");
+  const leadSubmitSuccessRows = analyticsEventRows.filter((row) => row.event_name === "lead_submit_success");
 
   for (const row of clickRows) {
     increment(clickChannelCounts, getChannel(row.channel));
     if (row.listing_id) {
       increment(clickListingCounts, row.listing_id);
+    }
+  }
+
+  for (const row of pageViewRows) {
+    increment(pageViewChannelCounts, getChannel(row.channel));
+    if (row.listing_id) {
+      increment(pageViewListingCounts, row.listing_id);
+    }
+    if (row.visitor_id) {
+      pageViewVisitors.add(row.visitor_id);
     }
   }
 
@@ -250,27 +322,34 @@ export async function getBrokerAnalyticsSummary(
     }
   }
 
-  const channels = Array.from(new Set([...clickChannelCounts.keys(), ...leadChannelCounts.keys()]));
+  const channels = Array.from(
+    new Set([...clickChannelCounts.keys(), ...pageViewChannelCounts.keys(), ...leadChannelCounts.keys()])
+  );
   const channelPerformance: ChannelPerformance[] = sortPerformance(
     channels.map((channel) => {
       const clicks = clickChannelCounts.get(channel) ?? 0;
+      const pageViews = pageViewChannelCounts.get(channel) ?? 0;
       const leads = leadChannelCounts.get(channel) ?? 0;
 
       return {
         channel,
         clicks,
+        pageViews,
         leads,
-        conversionRate: getConversionRate(leads, clicks)
+        conversionRate: getRate(leads, pageViews || clicks)
       };
     })
   );
 
-  const listingIds = Array.from(new Set([...clickListingCounts.keys(), ...leadListingCounts.keys()]));
+  const listingIds = Array.from(
+    new Set([...clickListingCounts.keys(), ...pageViewListingCounts.keys(), ...leadListingCounts.keys()])
+  );
   const listingLookup = await getListingLookup(supabase, listingIds);
   const listingPerformance: ListingPerformance[] = sortPerformance(
     listingIds.map((listingId) => {
       const listing = listingLookup.get(listingId);
       const clicks = clickListingCounts.get(listingId) ?? 0;
+      const pageViews = pageViewListingCounts.get(listingId) ?? 0;
       const leads = leadListingCounts.get(listingId) ?? 0;
 
       return {
@@ -278,11 +357,59 @@ export async function getBrokerAnalyticsSummary(
         title: listing?.title || "Untitled listing",
         location: getListingLocation(listing),
         clicks,
+        pageViews,
         leads,
-        conversionRate: getConversionRate(leads, clicks)
+        conversionRate: getRate(leads, pageViews || clicks)
       };
     })
   );
+
+  const variantKeys = new Set<string>();
+  for (const row of analyticsEventRows) {
+    if (row.experiment_key && row.variant) {
+      variantKeys.add(`${row.experiment_key}::${row.variant}`);
+    }
+  }
+  for (const row of leadRows) {
+    if (row.experiment_key && row.variant) {
+      variantKeys.add(`${row.experiment_key}::${row.variant}`);
+    }
+  }
+
+  const variantPerformance: VariantPerformance[] = Array.from(variantKeys)
+    .map((key) => {
+      const [experimentKey, variant] = key.split("::");
+      const variantPageViews = pageViewRows.filter(
+        (row) => row.experiment_key === experimentKey && row.variant === variant
+      );
+      const variantVisitors = new Set(variantPageViews.map((row) => row.visitor_id).filter(Boolean));
+      const variantFormStarts = formStartRows.filter(
+        (row) => row.experiment_key === experimentKey && row.variant === variant
+      ).length;
+      const variantSubmissions = leadSubmitSuccessRows.filter(
+        (row) => row.experiment_key === experimentKey && row.variant === variant
+      ).length;
+      const variantLeads = leadRows.filter(
+        (row) => row.experiment_key === experimentKey && row.variant === variant
+      ).length;
+
+      return {
+        experimentKey,
+        variant,
+        pageViews: variantPageViews.length,
+        uniqueVisitors: variantVisitors.size,
+        formStarts: variantFormStarts,
+        submissions: variantSubmissions,
+        leads: variantLeads,
+        submitRate: getRate(variantSubmissions || variantLeads, variantVisitors.size || variantPageViews.length)
+      };
+    })
+    .sort((left, right) => {
+      if (right.leads !== left.leads) {
+        return right.leads - left.leads;
+      }
+      return right.pageViews - left.pageViews;
+    });
 
   const now = new Date();
   const todayTo = todayWindow.to ? new Date(todayWindow.to) : now;
@@ -317,11 +444,17 @@ export async function getBrokerAnalyticsSummary(
     rangeLabel: rangeWindow.label,
     totals: {
       clicks: clickRows.length,
+      pageViews: pageViewRows.length,
+      uniqueVisitors: pageViewVisitors.size,
+      formStarts: formStartRows.length,
+      leadSubmitSuccesses: leadSubmitSuccessRows.length,
       leads: leadRows.length,
       todayLeads,
       weekLeads,
       newLeads: openLeadRows.filter((lead) => lead.status === "new").length,
-      conversionRate: getConversionRate(leadRows.length, clickRows.length)
+      conversionRate: getConversionRate(leadRows.length, clickRows.length),
+      pageViewConversionRate: getRate(leadRows.length, pageViewRows.length),
+      formCompletionRate: getRate(leadSubmitSuccessRows.length || leadRows.length, formStartRows.length)
     },
     statusCounts: leadStatuses.map((status) => ({
       status,
@@ -329,6 +462,7 @@ export async function getBrokerAnalyticsSummary(
     })),
     channelPerformance,
     listingPerformance: listingPerformance.slice(0, 8),
+    variantPerformance: variantPerformance.slice(0, 8),
     followUpStats
   };
 }

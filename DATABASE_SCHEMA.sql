@@ -110,6 +110,43 @@ create table if not exists click_events (
   created_at timestamptz not null default now()
 );
 
+create table if not exists analytics_events (
+  id uuid primary key default uuid_generate_v4(),
+  auth_user_id uuid references auth.users(id) on delete set null,
+  broker_id uuid references broker_profiles(id) on delete set null,
+  listing_id uuid references listings(id) on delete set null,
+  campaign_link_id uuid references campaign_links(id) on delete set null,
+  event_name text not null check (
+    event_name in (
+      'page_view',
+      'lead_form_view',
+      'lead_form_start',
+      'lead_submit_attempt',
+      'lead_submit_success',
+      'whatsapp_opened',
+      'home_page_view',
+      'auth_modal_opened',
+      'auth_started',
+      'auth_succeeded',
+      'workspace_view',
+      'profile_completed',
+      'listing_created',
+      'lead_created'
+    )
+  ),
+  channel text,
+  visitor_id text,
+  session_id text,
+  experiment_key text,
+  variant text,
+  path text,
+  referrer text,
+  user_agent text,
+  ip_hash text,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists leads (
   id uuid primary key default uuid_generate_v4(),
   broker_id uuid not null references broker_profiles(id) on delete cascade,
@@ -130,6 +167,10 @@ create table if not exists leads (
   budget_max numeric(14, 2),
   interested_area text,
   interested_listing_id uuid references listings(id) on delete set null,
+  visitor_id text,
+  session_id text,
+  experiment_key text,
+  variant text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -242,6 +283,18 @@ create index if not exists chat_messages_conversation_id_idx on chat_messages(co
 create index if not exists listings_broker_id_status_idx on listings(broker_id, status);
 create index if not exists campaign_links_listing_id_idx on campaign_links(listing_id);
 create index if not exists click_events_campaign_link_id_idx on click_events(campaign_link_id);
+create index if not exists analytics_events_broker_created_idx on analytics_events(broker_id, created_at desc);
+create index if not exists analytics_events_auth_user_created_idx
+  on analytics_events(auth_user_id, created_at desc)
+  where auth_user_id is not null;
+create index if not exists analytics_events_campaign_event_idx on analytics_events(campaign_link_id, event_name, created_at desc);
+create index if not exists analytics_events_listing_event_idx on analytics_events(listing_id, event_name, created_at desc);
+create index if not exists analytics_events_experiment_variant_idx
+  on analytics_events(experiment_key, variant, created_at desc)
+  where experiment_key is not null;
+create index if not exists analytics_events_visitor_idx
+  on analytics_events(visitor_id, created_at desc)
+  where visitor_id is not null;
 create index if not exists leads_broker_id_status_idx on leads(broker_id, status);
 create index if not exists leads_broker_next_follow_up_idx on leads(broker_id, next_follow_up_at) where next_follow_up_at is not null;
 create index if not exists leads_broker_last_contacted_idx on leads(broker_id, last_contacted_at) where last_contacted_at is not null;

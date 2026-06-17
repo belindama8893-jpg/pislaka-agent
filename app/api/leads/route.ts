@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordProductAnalyticsEvent } from "@/lib/analytics/server-events";
 import { insertAgentChatMessage } from "@/lib/agent/conversations";
 import { generateLeadSummary } from "@/lib/agent/lead-summaries";
 import { requireCurrentBroker } from "@/lib/auth/current-user";
@@ -132,6 +133,17 @@ export async function POST(request: Request) {
         }
       });
 
+      await recordProductAnalyticsEvent(supabase, {
+        authUserId: broker.auth_user_id,
+        brokerId: broker.id,
+        eventName: "lead_created",
+        metadata: {
+          lead_id: lead.id,
+          source_channel: parsedManualLead.data.source_channel
+        },
+        request
+      });
+
       return NextResponse.json({ lead });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -187,7 +199,11 @@ export async function POST(request: Request) {
       message: parsed.data.message || null,
       ai_summary: aiSummary,
       urgency: "normal",
-      status: "new"
+      status: "new",
+      visitor_id: parsed.data.visitor_id ?? null,
+      session_id: parsed.data.session_id ?? null,
+      experiment_key: parsed.data.experiment_key || null,
+      variant: parsed.data.variant || null
     })
     .select("id")
     .single();

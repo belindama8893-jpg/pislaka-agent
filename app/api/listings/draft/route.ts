@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordProductAnalyticsEvent } from "@/lib/analytics/server-events";
 import { requireCurrentBroker } from "@/lib/auth/current-user";
 import type { ListingMediaRecord, ListingRecord } from "@/lib/listings/types";
 import { listingDraftInputSchema, listingDraftUpdateSchema } from "@/lib/listings/types";
@@ -100,6 +101,17 @@ export async function POST(request: Request) {
       metadata: {
         source: "api"
       }
+    });
+
+    await recordProductAnalyticsEvent(supabase, {
+      authUserId: broker.auth_user_id,
+      brokerId: broker.id,
+      eventName: "listing_created",
+      metadata: {
+        listing_id: listing.id,
+        status: listing.status
+      },
+      request
     });
 
     return NextResponse.json({ listing });

@@ -1,4 +1,5 @@
 import { AgentWorkspace } from "@/components/agent/AgentWorkspace";
+import { ProductAnalyticsTracker } from "@/components/analytics/ProductAnalyticsTracker";
 import { ProfileCompletionForm } from "@/components/profile/ProfileCompletionForm";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
 import { getAgentChatMessages } from "@/lib/agent/conversations";
@@ -173,6 +174,7 @@ export default async function Home({ searchParams }: HomeProps) {
 
     return (
       <WorkspaceShell active="agent" broker={guestProfile} initials="G" isGuest>
+        <ProductAnalyticsTracker eventName="home_page_view" metadata={{ state: "guest_agent" }} />
         <div className="workspace-agent-grid workspace-agent-only">
           <AgentWorkspace
             conversationId={undefined}
@@ -292,6 +294,12 @@ export default async function Home({ searchParams }: HomeProps) {
       initials={getInitials(broker)}
       leadsCount={newLeadsCount}
     >
+        <ProductAnalyticsTracker
+          eventName="workspace_view"
+          metadata={{
+            profile_complete: profileComplete
+          }}
+        />
         {!profileComplete ? <ProfileCompletionForm profile={broker} /> : null}
 
         <div className="workspace-agent-grid workspace-agent-only">

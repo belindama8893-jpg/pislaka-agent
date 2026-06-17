@@ -10,6 +10,7 @@ export type AnalyticsStatusCount = {
 export type ChannelPerformance = {
   channel: string;
   clicks: number;
+  pageViews: number;
   leads: number;
   conversionRate: number;
 };
@@ -19,8 +20,20 @@ export type ListingPerformance = {
   title: string;
   location: string | null;
   clicks: number;
+  pageViews: number;
   leads: number;
   conversionRate: number;
+};
+
+export type VariantPerformance = {
+  experimentKey: string;
+  variant: string;
+  pageViews: number;
+  uniqueVisitors: number;
+  formStarts: number;
+  submissions: number;
+  leads: number;
+  submitRate: number;
 };
 
 export type FollowUpStats = {
@@ -36,14 +49,21 @@ export type AnalyticsSummary = {
   rangeLabel: string;
   totals: {
     clicks: number;
+    pageViews: number;
+    uniqueVisitors: number;
+    formStarts: number;
+    leadSubmitSuccesses: number;
     leads: number;
     todayLeads: number;
     weekLeads: number;
     newLeads: number;
     conversionRate: number;
+    pageViewConversionRate: number;
+    formCompletionRate: number;
   };
   statusCounts: AnalyticsStatusCount[];
   channelPerformance: ChannelPerformance[];
   listingPerformance: ListingPerformance[];
+  variantPerformance: VariantPerformance[];
   followUpStats: FollowUpStats;
 };
