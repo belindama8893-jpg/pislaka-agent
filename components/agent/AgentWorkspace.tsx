@@ -148,6 +148,7 @@ const GUEST_CHAT_STORAGE_KEY = "pislaka_guest_chat_v1";
 const GUEST_CHAT_RESTORE_FLAG = "pislaka_restore_guest_chat";
 const GUEST_CHAT_IMPORT_SUCCESS_FLAG = "pislaka_guest_chat_import_success";
 const GUEST_CHAT_TTL_MS = 24 * 60 * 60 * 1000;
+const RESTORED_GUEST_MESSAGE_ID_PREFIX = "guest-restored";
 
 type AuthRequiredReason =
   | "chat_history"
@@ -575,6 +576,60 @@ function chatMessageFromRecord(record: AgentChatMessageRecord): ChatMessage {
     attachments: deserializeMediaAttachments(uiPayload.attachments),
     draftMedia: deserializeMediaAttachments(uiPayload.draftMedia)
   };
+}
+
+function guestStoredMessageToChatMessage(
+  message: GuestStoredMessage,
+  transcript: GuestStoredTranscript,
+  index: number
+): ChatMessage {
+  const uiPayload = getMessageUiPayload(message.structured_payload ?? null);
+  return {
+    id: `${RESTORED_GUEST_MESSAGE_ID_PREFIX}-${transcript.createdAt}-${index}`,
+    role: message.role,
+    content: message.content,
+    ...uiPayload,
+    attachments: deserializeMediaAttachments(uiPayload.attachments),
+    draftMedia: deserializeMediaAttachments(uiPayload.draftMedia)
+  };
+}
+
+function messageContentKey(message: Pick<ChatMessage, "role" | "content">) {
+  return `${message.role}\u0000${message.content}`;
+}
+
+function mergeRestoredGuestMessages(current: ChatMessage[], restoredMessages: ChatMessage[]) {
+  if (!restoredMessages.length) {
+    return current;
+  }
+
+  const existingIds = new Set(current.map((message) => message.id));
+  const existingContent = new Set(current.map(messageContentKey));
+  const missingMessages = restoredMessages.filter(
+    (message) => !existingIds.has(message.id) && !existingContent.has(messageContentKey(message))
+  );
+
+  return missingMessages.length ? [...current, ...missingMessages] : current;
+}
+
+function mergeServerMessages(current: ChatMessage[], serverMessages: ChatMessage[]) {
+  if (!serverMessages.length) {
+    return current;
+  }
+
+  const serverContent = new Set(serverMessages.map(messageContentKey));
+  const withoutImportedGuestDuplicates = current.filter(
+    (message) =>
+      !message.id.startsWith(`${RESTORED_GUEST_MESSAGE_ID_PREFIX}-`) || !serverContent.has(messageContentKey(message))
+  );
+  const existingIds = new Set(withoutImportedGuestDuplicates.map((message) => message.id));
+  const missingServerMessages = serverMessages.filter((message) => !existingIds.has(message.id));
+
+  if (withoutImportedGuestDuplicates.length === current.length && missingServerMessages.length === 0) {
+    return current;
+  }
+
+  return [...withoutImportedGuestDuplicates, ...missingServerMessages];
 }
 
 function detectLatestExplicitLanguagePreference(messages: AgentChatMessageRecord[]) {
@@ -5247,6 +5302,16 @@ export function AgentWorkspace({
       return;
     }
 
+    const serverMessages = initialMessages.map(chatMessageFromRecord);
+    setMessages((current) => mergeServerMessages(current, serverMessages));
+    setOldestMessageCreatedAt(initialMessages[0]?.created_at ?? null);
+  }, [initialMessages, isGuest]);
+
+  useEffect(() => {
+    if (isGuest) {
+      return;
+    }
+
     const transcript = readGuestTranscript();
     if (!transcript?.messages.length || window.localStorage.getItem(GUEST_CHAT_RESTORE_FLAG) !== "true") {
       return;
@@ -5254,6 +5319,11 @@ export function AgentWorkspace({
 
     let cancelled = false;
     const messagesToImport = transcript.messages;
+    const restoredMessages = messagesToImport.map((message, index) =>
+      guestStoredMessageToChatMessage(message, transcript, index)
+    );
+
+    setMessages((current) => mergeRestoredGuestMessages(current, restoredMessages));
 
     async function importGuestTranscript() {
       try {
