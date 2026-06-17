@@ -62,7 +62,7 @@ describe("image observation routing", () => {
     });
 
     expect(action.intent).toBe("create_listing_draft");
-    expect(action.requires_confirmation).toBe(true);
+    expect(action.requires_confirmation).toBe(false);
     expect(action.response).toContain("previous image");
     expect(action.response).toContain("Facebook promotion");
     expect(action.payload).toMatchObject({
@@ -95,13 +95,15 @@ describe("image observation routing", () => {
 
     expect(action.intent).toBe("generate_social_copy");
     expect(action.requires_confirmation).toBe(false);
-    expect(action.response).toContain("not trackable yet");
-    expect(action.response).toContain("continue to generate dedicated tracking links");
+    expect(action.response).toContain("copy options");
     expect(action.payload).toMatchObject({
       channels: ["facebook"]
     });
-    const cards = (action.payload.promotion as { cards: Array<Record<string, unknown>> }).cards;
-    expect(cards[0]).toMatchObject({ channel: "facebook", title: "Facebook promotion draft" });
+    const promotion = action.payload.promotion as { cards: Array<Record<string, unknown>>; summary: string };
+    expect(promotion.summary).toContain("tracking links");
+    const cards = promotion.cards;
+    expect(cards).toHaveLength(3);
+    expect(cards[0]).toMatchObject({ channel: "facebook", title: "Direct buyer Facebook draft" });
     expect(cards[0]).not.toHaveProperty("landing_url");
   });
 

@@ -5,7 +5,9 @@ import {
 } from "@/lib/agent/conversations";
 import { routeAgentMessage } from "@/lib/agent/deepseek";
 import { resolveAgentActionEntities } from "@/lib/agent/entity-resolution";
+import { classifyLocalIntent } from "@/lib/agent/intent-router";
 import { normalizePakistanLocationTerms } from "@/lib/agent/location-normalization";
+import { compileAgentMemoryContext } from "@/lib/agent/memory";
 import { agentMessageSchema } from "@/lib/agent/types";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -21,16 +23,27 @@ export async function POST(request: Request) {
   }
 
   try {
-    const locationContext = await normalizePakistanLocationTerms(parsed.data.message);
+    const localIntent = classifyLocalIntent(parsed.data.message);
+    const locationContext =
+      localIntent === "lead_create"
+        ? { enabled: false, verifiedLocations: [] }
+        : await normalizePakistanLocationTerms(parsed.data.message);
     const supabase = await createSupabaseServerClient();
     const {
       data: { user }
     } = await supabase.auth.getUser();
 
     if (!user) {
+      const memory = compileAgentMemoryContext({
+        locationContext,
+        recentMessages: parsed.data.context_messages,
+        timeZone: parsed.data.time_zone,
+        workflowState: parsed.data.workflow_state
+      });
       const action = await routeAgentMessage(parsed.data.message, {
         timeZone: parsed.data.time_zone,
         locationContext,
+        memory,
         recentMessages: parsed.data.context_messages
       });
       return NextResponse.json({ action, location_context: locationContext });
@@ -43,9 +56,16 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (!broker?.id) {
+      const memory = compileAgentMemoryContext({
+        locationContext,
+        recentMessages: parsed.data.context_messages,
+        timeZone: parsed.data.time_zone,
+        workflowState: parsed.data.workflow_state
+      });
       const action = await routeAgentMessage(parsed.data.message, {
         timeZone: parsed.data.time_zone,
         locationContext,
+        memory,
         recentMessages: parsed.data.context_messages
       });
       return NextResponse.json({ action, location_context: locationContext });
@@ -61,10 +81,20 @@ export async function POST(request: Request) {
       parsed.data.context_messages && parsed.data.context_messages.length
         ? parsed.data.context_messages
         : await getRecentAgentContextMessages(supabase, broker.id, 20);
+    const memory = compileAgentMemoryContext({
+      contextAttachments: parsed.data.context_attachments,
+      currentLeadId: parsed.data.current_lead_id,
+      currentListingId: parsed.data.current_listing_id,
+      locationContext,
+      recentMessages,
+      timeZone: parsed.data.time_zone,
+      workflowState: parsed.data.workflow_state
+    });
 
     const action = await routeAgentMessage(parsed.data.message, {
       timeZone: parsed.data.time_zone,
       locationContext,
+      memory,
       recentMessages
     });
     const resolvedAction = broker?.id

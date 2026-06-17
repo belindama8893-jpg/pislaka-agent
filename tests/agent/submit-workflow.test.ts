@@ -1,0 +1,246 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildDraftSocialCopyPromotion,
+  canHandlePendingActionConfirmation,
+  findLatestPendingPromotionAction,
+  findLatestPendingSocialCopyAction,
+  getBulkLeadWriteGuard,
+  getEmptyAgentTurnResponse,
+  isAgentConfirmationMessage
+} from "../../components/agent/agent-submit-workflow";
+
+type TestChannel = "whatsapp" | "facebook";
+
+type TestPromotion = {
+  cards: Array<{
+    channel: TestChannel;
+    landing_url?: string | null;
+  }>;
+};
+
+type TestMessage = {
+  content: string;
+  draft?: unknown;
+  id: string;
+  isProgress?: boolean;
+  listingSaved?: unknown;
+  promotion?: TestPromotion;
+  promotionChannels?: TestChannel[];
+  promotionInstruction?: string;
+  promotionTarget?: { id: string; title: string };
+  role: "user" | "assistant";
+  sourceMessage?: string;
+};
+
+describe("agent submit workflow", () => {
+  it("recognizes confirmation turns only when no new inputs are attached", () => {
+    expect(isAgentConfirmationMessage("确认")).toBe(true);
+    expect(isAgentConfirmationMessage("please confirm with Ahmed")).toBe(false);
+    expect(
+      canHandlePendingActionConfirmation({
+        message: "ok",
+        hasOutgoingContext: false,
+        hasOutgoingFiles: false,
+        hasOutgoingMedia: false
+      })
+    ).toBe(true);
+    expect(
+      canHandlePendingActionConfirmation({
+        message: "ok",
+        hasOutgoingContext: true,
+        hasOutgoingFiles: false,
+        hasOutgoingMedia: false
+      })
+    ).toBe(false);
+  });
+
+  it("finds the latest unconsumed pending promotion action", () => {
+    const messages: TestMessage[] = [
+      {
+        id: "old",
+        role: "assistant",
+        content: "Old pending",
+        promotionTarget: { id: "listing-old", title: "Old" },
+        promotionChannels: ["facebook"]
+      },
+      {
+        id: "progress",
+        role: "assistant",
+        content: "Still working",
+        isProgress: true
+      },
+      {
+        id: "new",
+        role: "assistant",
+        content: "Ready to promote?",
+        promotionTarget: { id: "listing-new", title: "New" },
+        promotionInstruction: "Promote the new listing"
+      }
+    ];
+
+    expect(findLatestPendingPromotionAction(messages, [], ["whatsapp"])).toEqual({
+      messageId: "new",
+      listing: { id: "listing-new", title: "New" },
+      instruction: "Promote the new listing",
+      channels: ["whatsapp"]
+    });
+  });
+
+  it("stops looking for pending promotion once a promotion already exists", () => {
+    const messages: TestMessage[] = [
+      {
+        id: "pending",
+        role: "assistant",
+        content: "Ready?",
+        promotionTarget: { id: "listing-1", title: "Listing" }
+      },
+      {
+        id: "done",
+        role: "assistant",
+        content: "Generated",
+        promotion: {
+          cards: [{ channel: "whatsapp", landing_url: "https://example.test" }]
+        }
+      }
+    ];
+
+    expect(findLatestPendingPromotionAction(messages, [], ["whatsapp"])).toBeNull();
+  });
+
+  it("finds social copy promotions that still need saving as a draft", () => {
+    const messages: TestMessage[] = [
+      {
+        id: "copy",
+        role: "assistant",
+        content: "Social copy",
+        sourceMessage: "Create copy",
+        promotion: {
+          cards: [
+            { channel: "whatsapp", landing_url: null },
+            { channel: "facebook" }
+          ]
+        }
+      }
+    ];
+
+    expect(findLatestPendingSocialCopyAction(messages, [])).toEqual({
+      messageId: "copy",
+      promotion: {
+        cards: [
+          { channel: "whatsapp", landing_url: null },
+          { channel: "facebook" }
+        ]
+      },
+      instruction: "Create copy",
+      channels: ["whatsapp", "facebook"]
+    });
+  });
+
+  it("builds no-login channel copy from a current listing draft without tracking links", () => {
+    const promotion = buildDraftSocialCopyPromotion(
+      {
+        title: "1 kanal House in DHA Phase 6",
+        city: "Lahore",
+        location_area: "DHA Phase 6",
+        property_type: "house",
+        listing_type: "sale",
+        price_amount: 85000000,
+        price_currency: "PKR",
+        area_value: 1,
+        area_unit: "kanal",
+        features: []
+      },
+      ["whatsapp"],
+      "Promote this listing on WhatsApp"
+    );
+
+    expect(promotion.cards).toHaveLength(3);
+    expect(promotion.cards[0]).toMatchObject({
+      channel: "whatsapp",
+      title: "Direct buyer WhatsApp draft",
+      cta: "Reply for details."
+    });
+    expect(promotion.cards[0].body).toContain("1 kanal house for sale in DHA Phase 6, Lahore");
+    expect(promotion.cards[0].body).toContain("Demand: PKR 8.5 Crore");
+    expect(promotion.cards.map((card) => card.title)).toEqual([
+      "Direct buyer WhatsApp draft",
+      "Premium WhatsApp draft",
+      "Short WhatsApp draft"
+    ]);
+    expect(promotion.cards[0].landing_url).toBeUndefined();
+    expect(promotion.summary).toContain("tracking links");
+  });
+
+  it("builds multiple style options for non-WhatsApp channels too", () => {
+    const promotion = buildDraftSocialCopyPromotion(
+      {
+        title: "1 kanal House in DHA Phase 6",
+        city: "Lahore",
+        location_area: "DHA Phase 6",
+        property_type: "house",
+        listing_type: "sale",
+        price_amount: 85000000,
+        price_currency: "PKR",
+        area_value: 1,
+        area_unit: "kanal",
+        features: []
+      },
+      ["facebook"],
+      "Promote this listing on Facebook"
+    );
+
+    expect(promotion.cards).toHaveLength(3);
+    expect(promotion.cards.map((card) => card.title)).toEqual([
+      "Direct buyer Facebook draft",
+      "Premium Facebook draft",
+      "Short Facebook draft"
+    ]);
+    expect(promotion.cards.every((card) => card.channel === "facebook")).toBe(true);
+    expect(promotion.cards.every((card) => !card.landing_url)).toBe(true);
+  });
+
+  it("classifies multi-lead write guards", () => {
+    const leads = [{ entity_id: "lead-1" }, { entity_id: "lead-2" }];
+
+    expect(getBulkLeadWriteGuard("mark them hot", leads)).toEqual({
+      kind: "status_update",
+      leadContexts: leads
+    });
+    expect(getBulkLeadWriteGuard("schedule follow up", leads)).toEqual({
+      kind: "unsupported_bulk_write",
+      leadContexts: leads
+    });
+    expect(getBulkLeadWriteGuard("show details", leads)).toEqual({
+      kind: "none",
+      leadContexts: leads
+    });
+  });
+
+  it("builds next-step guidance when the user submits only attachments or context", () => {
+    expect(
+      getEmptyAgentTurnResponse({
+        hasOutgoingMedia: false
+      })
+    ).toBe(
+      "I attached that context. Tell me what you want to do with it, for example edit it, draft a reply, promote it, or schedule a follow-up."
+    );
+
+    expect(
+      getEmptyAgentTurnResponse({
+        activeDraftId: "draft-1",
+        hasOutgoingMedia: true,
+        visionAnalysisError: "low resolution"
+      })
+    ).toBe(
+      "I added these media files to the current listing preview. They will upload when you confirm the listing. I could not analyze the images yet: low resolution"
+    );
+
+    expect(
+      getEmptyAgentTurnResponse({
+        hasOutgoingMedia: true
+      })
+    ).toBe(
+      "I can use these as listing media. Please add the property details, and I will draft the listing with these files attached."
+    );
+  });
+});

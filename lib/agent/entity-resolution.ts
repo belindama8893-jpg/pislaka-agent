@@ -14,6 +14,7 @@ import {
   listingUpdatePayloadSchema,
   scheduleEventActionPayloadSchema
 } from "@/lib/agent/types";
+import { getAgentIntentDefinition, type AgentCapabilityResolution } from "@/lib/agent/registry/intents";
 import type { BrokerEventDraftInput } from "@/lib/events/types";
 import { getRecentLeadsForBroker } from "@/lib/leads/queries";
 import type { LeadListItem } from "@/lib/leads/types";
@@ -137,7 +138,7 @@ function scoreLead(query: string, lead: LeadListItem) {
 }
 
 function leadQueryFromPayload(payload: Pick<LeadOperationPayload, "lead_name" | "query">) {
-  return [payload.lead_name, payload.query].filter(Boolean).join(" ").trim();
+  return payload.lead_name?.trim() || payload.query?.trim() || "";
 }
 
 function scheduleLeadQueryFromPayload(payload: BrokerEventDraftInput) {
@@ -232,11 +233,28 @@ function queryMentionsCurrentListing(query: string) {
   return /\b(this|current|latest confirmed|just confirmed)\b|这套|这个|刚才|刚刚/i.test(query);
 }
 
+function queryMentionsCurrentLead(query: string) {
+  return /\b(this|current|selected|attached|latest confirmed|just confirmed)\s+(?:lead|client|buyer|customer)?\b|这位|这个客户|这条线索|刚才|刚刚/i.test(query);
+}
+
 function queryMentionsLatestListing(query: string) {
   return /\b(latest|most recent|newest|last listing)\b|最新|最近/i.test(query);
 }
 
-function getSelectedContextId(options: ResolveAgentActionEntitiesOptions, type: AgentContextAttachment["type"]) {
+function getResolutionPolicy(intent: AgentAction["intent"]): AgentCapabilityResolution {
+  return getAgentIntentDefinition(intent).resolution;
+}
+
+function getSelectedContextId(
+  options: ResolveAgentActionEntitiesOptions,
+  type: AgentContextAttachment["type"],
+  policy: AgentCapabilityResolution,
+  query = ""
+) {
+  if (!policy.allowCurrentContext) {
+    return undefined;
+  }
+
   const matchingAttachment = [...(options.contextAttachments ?? [])]
     .reverse()
     .find((attachment) => attachment.type === type);
@@ -245,7 +263,15 @@ function getSelectedContextId(options: ResolveAgentActionEntitiesOptions, type: 
     return matchingAttachment.entity_id;
   }
 
-  return type === "lead" ? options.currentLeadId : undefined;
+  if (type === "lead" && options.currentLeadId && queryMentionsCurrentLead(query)) {
+    return options.currentLeadId;
+  }
+
+  if (type === "listing" && options.currentListingId && queryMentionsCurrentListing(query)) {
+    return options.currentListingId;
+  }
+
+  return undefined;
 }
 
 function listingSearchText(listing: ListingRecord) {
@@ -458,13 +484,19 @@ async function resolveScheduleEventEntities(
   }
 
   const payload = parsedPayload.data;
+  const policy = getResolutionPolicy(action.intent);
   const nextPayload: BrokerEventDraftInput = { ...payload };
   const sourcePayload = {
     ...(typeof payload.source_payload === "object" && payload.source_payload ? payload.source_payload : {})
   };
 
   const leads = await getRecentLeadsForBroker(supabase, brokerId, 100, { includeClosed: true });
-  const selectedLeadId = getSelectedContextId(options, "lead");
+  const selectedLeadId = getSelectedContextId(
+    options,
+    "lead",
+    policy,
+    [payload.lead_name, payload.title, payload.description, options.originalMessage].filter(Boolean).join(" ")
+  );
 
   if (payload.lead_id) {
     const matchedLead = leads.find((lead) => lead.id === payload.lead_id);
@@ -554,7 +586,7 @@ async function resolveScheduleEventEntities(
   const listings = await getListingsForResolution(supabase, brokerId);
   const listingQuery = scheduleListingQueryFromPayload(payload, options.originalMessage);
   const mentionsCurrentListing = queryMentionsCurrentListing(listingQuery);
-  const selectedListingId = getSelectedContextId(options, "listing");
+  const selectedListingId = getSelectedContextId(options, "listing", policy, listingQuery);
 
   if (payload.listing_id) {
     const matchedListing = listings.find((listing) => listing.id === payload.listing_id);
@@ -585,7 +617,7 @@ async function resolveScheduleEventEntities(
     nextPayload.listing_id = matchedListing.id;
     nextPayload.listing_reference = listingLabel(matchedListing);
     sourcePayload.resolved_listing = toListingResolutionCandidate(matchedListing);
-  } else if (options.currentListingId && mentionsCurrentListing) {
+  } else if (policy.allowCurrentContext && options.currentListingId && mentionsCurrentListing) {
     const matchedListing = listings.find((listing) => listing.id === options.currentListingId);
     if (!matchedListing) {
       return {
@@ -671,13 +703,20 @@ export async function resolveAgentActionEntities(
     return resolveScheduleEventEntities(action, supabase, brokerId, options);
   }
 
+  const policy = getResolutionPolicy(action.intent);
+
   if (action.intent === "create_lead") {
     const parsedPayload = leadCreatePayloadSchema.safeParse(action.payload);
     if (!parsedPayload.success) {
       return action;
     }
 
-    const selectedListingId = getSelectedContextId(options, "listing");
+    const selectedListingId = getSelectedContextId(
+      options,
+      "listing",
+      policy,
+      [parsedPayload.data.message, options.originalMessage].filter(Boolean).join(" ")
+    );
     if (!selectedListingId) {
       return action;
     }
@@ -712,7 +751,12 @@ export async function resolveAgentActionEntities(
     const leadResolution = resolveLeadFromPayload(
       parsedPayload.data,
       leads,
-      getSelectedContextId(options, "lead")
+      getSelectedContextId(
+        options,
+        "lead",
+        policy,
+        [leadQueryFromPayload(parsedPayload.data), options.originalMessage].filter(Boolean).join(" ")
+      )
     );
 
     if (leadResolution.ambiguous) {
@@ -759,7 +803,16 @@ export async function resolveAgentActionEntities(
 
     const payload = parsedPayload.data;
     const leads = await getRecentLeadsForBroker(supabase, brokerId, 100, { includeClosed: true });
-    const leadResolution = resolveLeadFromPayload(payload, leads, getSelectedContextId(options, "lead"));
+    const leadResolution = resolveLeadFromPayload(
+      payload,
+      leads,
+      getSelectedContextId(
+        options,
+        "lead",
+        policy,
+        [leadQueryFromPayload(payload), options.originalMessage].filter(Boolean).join(" ")
+      )
+    );
 
     if (leadResolution.ambiguous) {
       return {
@@ -786,7 +839,12 @@ export async function resolveAgentActionEntities(
     const listingResolution = resolveListingFromLeadListingPayload(
       payload,
       listings,
-      getSelectedContextId(options, "listing"),
+      getSelectedContextId(
+        options,
+        "listing",
+        policy,
+        [payload.listing_query, payload.query, options.originalMessage].filter(Boolean).join(" ")
+      ),
       options.originalMessage
     );
 
@@ -849,7 +907,7 @@ export async function resolveAgentActionEntities(
     const contextQuery = originalQuery || payloadQuery;
     const listings = await getListingsForResolution(supabase, brokerId);
     const payloadListingId = typeof payload.listing_id === "string" ? payload.listing_id : undefined;
-    const selectedListingId = getSelectedContextId(options, "listing");
+    const selectedListingId = getSelectedContextId(options, "listing", policy, contextQuery);
 
     if (selectedListingId || payloadListingId) {
       const targetListingId = selectedListingId ?? payloadListingId;
@@ -872,7 +930,7 @@ export async function resolveAgentActionEntities(
       };
     }
 
-    if (options.currentListingId && queryMentionsCurrentListing(contextQuery)) {
+    if (policy.allowCurrentContext && options.currentListingId && queryMentionsCurrentListing(contextQuery)) {
       const matchedListing = listings.find((listing) => listing.id === options.currentListingId);
 
       return {
@@ -892,7 +950,7 @@ export async function resolveAgentActionEntities(
       };
     }
 
-    if (queryMentionsLatestListing(contextQuery) && listings[0]) {
+    if (policy.allowLatestOnlyWhenExplicit && queryMentionsLatestListing(contextQuery) && listings[0]) {
       return {
         ...action,
         payload: {
@@ -966,7 +1024,12 @@ export async function resolveAgentActionEntities(
     payload = parsedPayload.data;
   }
   const leads = await getRecentLeadsForBroker(supabase, brokerId, 100, { includeClosed: true });
-  const selectedLeadId = getSelectedContextId(options, "lead");
+  const selectedLeadId = getSelectedContextId(
+    options,
+    "lead",
+    policy,
+    [leadQueryFromPayload(payload), options.originalMessage].filter(Boolean).join(" ")
+  );
 
   if (selectedLeadId || payload.lead_id) {
     const targetLeadId = selectedLeadId ?? payload.lead_id;

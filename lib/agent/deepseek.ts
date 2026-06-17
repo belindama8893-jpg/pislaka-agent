@@ -1,5 +1,5 @@
 import { env, requireServerEnv } from "@/lib/env";
-import { requiresConfirmationForAgentAction } from "@/lib/agent/confirmation-policy";
+import { applyAgentActionPolicy, requiresConfirmationForAgentAction } from "@/lib/agent/confirmation-policy";
 import {
   agentActionSchema,
   leadCreatePayloadSchema,
@@ -34,8 +34,25 @@ import {
 } from "@/lib/events/time";
 import { getListingImportUrl, importListingDraftFromUrl } from "@/lib/listings/import-from-url";
 import { formatScheduleQueryResponse, localizeAgentActionResponse } from "@/lib/agent/response-language";
+import {
+  formatRoutingRulesForPrompt,
+  formatSemanticRoutingRulesForPrompt,
+  formatSupportedIntentsForPrompt,
+  formatWorkflowRulesForPrompt
+} from "@/lib/agent/registry/prompt";
+import {
+  formatAgentMemoryForPrompt,
+  getAgentMemoryRecentMessages,
+  type AgentMemoryRuntimeContext
+} from "@/lib/agent/memory";
+import { applySemanticRouteConfidenceGate } from "@/lib/agent/semantic-routing";
+import { buildFallbackSocialCopyPromotion, generateSocialCopyPromotion } from "@/lib/agent/social-copy";
 
 const deepseekRequestTimeoutMs = 8000;
+const supportedIntentsPrompt = formatSupportedIntentsForPrompt();
+const routingRulesPrompt = formatRoutingRulesForPrompt();
+const semanticRoutingRulesPrompt = formatSemanticRoutingRulesForPrompt();
+const workflowRulesPrompt = formatWorkflowRulesForPrompt();
 
 const systemPrompt = `
 You are Pislaka Agent, an AI assistant for real estate brokers in Pakistan.
@@ -57,29 +74,29 @@ Your job:
 - If the broker message is unclear or does not contain enough evidence for a workflow, return general_reply with a short understanding of the input and one concise follow-up question. Do not force a schedule, listing, lead, or campaign card from weak evidence.
 
 Supported intents:
-- create_listing_draft
-- create_lead
-- update_listing_draft
-- generate_social_copy
-- create_campaign_links
-- list_today_followups
-- record_lead_followup
-- create_followup_from_chat
-- list_leads
-- draft_lead_reply
-- create_schedule_event
-- list_schedule_events
-- update_lead_status
-- update_lead_details
-- update_lead_listing
-- show_basic_attribution
-- general_reply
+${supportedIntentsPrompt}
 
 Routing rules:
-- If the broker asks only to write social media copy, captions, post text, or channel-specific wording, return generate_social_copy. This can use broker text, uploaded image evidence, or recent context and does not require a saved listing.
-- If the broker asks for trackable links, lead pages, campaign links, sharing links, attribution, or to promote a saved/current listing with links, return create_campaign_links. Trackable links require a confirmed saved asset/listing.
-- If the broker asks to share, post, publish, or send a listing to WhatsApp, Facebook, Instagram, portals, Zameen, OLX, or another external channel, return create_campaign_links. Pislaka generates channel copy and trackable lead-page links; it does not silently publish externally.
+${routingRulesPrompt}
 - Do not use publish_listing for external channels.
+
+Semantic routing output:
+${semanticRoutingRulesPrompt}
+
+Every output shape may include these routing metadata fields:
+{
+  "confidence": 0.92,
+  "alternative_intents": [
+    {
+      "intent": "generate_social_copy",
+      "confidence": 0.46,
+      "reason": "The broker mentioned a channel, but asked for promotion links rather than copy."
+    }
+  ],
+  "missing_slots": ["listing target"],
+  "is_follow_up_to_workflow": true,
+  "route_reason": "The broker said this listing and WhatsApp while the active workflow is awaiting listing promotion confirmation."
+}
 
 Listing output shape:
 {
@@ -206,23 +223,8 @@ Lead-listing relation update output shape:
   }
 }
 
-Lead rules:
-- Use create_lead when the user asks to add, create, record, or save a lead/customer/buyer.
-- Use update_lead_listing when the user asks to link, attach, associate, move, change, or assign a lead/customer/buyer to a listing/property.
-- Use list_leads when the user asks who/which leads/customers/buyers to follow up, new leads, hot leads, or today's leads.
-- Use list_today_followups when the user asks specifically who to follow up today, today's follow-ups, or simply says "follow up" as a standalone request.
-- Use record_lead_followup when the user says they sent a message, contacted a lead, the lead is interested/hot, or the lead is not interested.
-- Use draft_lead_reply when the user asks to reply to a lead/customer/buyer.
-- Use update_lead_status when the user asks to mark/change/update a lead status.
-- Use update_lead_details when the user asks to edit a lead's phone, email, name, or message.
-- Use show_basic_attribution when the broker asks for analytics, statistics, performance, clicks, conversion rate, channel attribution, top channels, top listings, or follow-up health. This is read-only and does not require confirmation.
-- If the user says hot lead, set status to qualified and urgency to high.
-- Never update a lead without confirmation.
-- Never update lead contact details without confirmation.
-- Open WhatsApp and reply draft do not mean sent. Only record message_sent when the broker says it was sent or clicks Sent.
-- Interested or hot maps to status qualified and urgency high. Not interested maps to status lost.
-- Use update_listing_draft when the user asks to change/edit/update/correct an existing listing or this/current listing.
-- Never save listing edits without confirmation.
+Workflow rules:
+${workflowRulesPrompt}
 
 Rules:
 - Return only one JSON object.
@@ -359,8 +361,11 @@ function parseLocalLeadListingUpdate(message: string): AgentAction {
 }
 
 function extractLeadDetailsUpdate(message: string) {
+  const leadTargetMatch = message.match(
+    /\b(?:lead|customer|client|buyer)\s+([\p{L}][\p{L} .'’-]{1,50}?)(?=\s+(?:phone|mobile|number|contact|email|mail|name|message|note)\b|$)/iu
+  );
   const payload: Record<string, unknown> = {
-    lead_name: extractLeadName(message),
+    lead_name: leadTargetMatch?.[1]?.trim() ?? extractLeadName(message),
     query: message
   };
   const emailMatch = extractEmail(message);
@@ -491,7 +496,17 @@ function isTrackableCampaignLinkRequest(message: string) {
 }
 
 function isSocialCopyRequest(message: string) {
+  const channelCopyCue =
+    /\b(?:promote|share|post|advertise)\b[\s\S]{0,80}\b(?:whats\s*app|whatsapp|wa|facebook|fb|instagram|insta|ig|portal)\b/i.test(
+      message
+    ) ||
+    /\b(?:whats\s*app|whatsapp|wa|facebook|fb|instagram|insta|ig|portal)\b[\s\S]{0,80}\b(?:promote|share|post|advertise)\b/i.test(
+      message
+    ) ||
+    /(?:推广|宣传|发布)[\s\S]{0,30}(?:WhatsApp|Facebook|Instagram|文案|帖子|内容)/iu.test(message);
+
   return (
+    (!isTrackableCampaignLinkRequest(message) && channelCopyCue) ||
     /\b(?:write|draft|create|generate|prepare|make)\b[\s\S]{0,60}\b(?:copy|caption|post|text|content|message)\b/i.test(
       message
     ) ||
@@ -502,28 +517,15 @@ function isSocialCopyRequest(message: string) {
   );
 }
 
-function readableChannelName(channel: string) {
-  if (channel === "whatsapp") {
-    return "WhatsApp";
-  }
-  if (channel === "facebook") {
-    return "Facebook";
-  }
-  if (channel === "instagram") {
-    return "Instagram";
-  }
-  return "portal";
-}
-
 function getLatestSocialCopyEvidenceContext(context?: AgentRoutingContext) {
-  const recentMessages = context?.recentMessages?.filter((item) => item.content.trim()).slice().reverse() ?? [];
+  const recentMessages = getRoutingRecentMessages(context).slice().reverse();
   const evidence = recentMessages.find(
     (item) =>
       item.role === "assistant" &&
       /(?:I can see:|Property details:|Location:|Floor plan|Map showing|房源信息|位置)/i.test(item.content)
   );
 
-  return evidence?.content;
+  return [context?.memory?.workflow?.summary, evidence?.content].filter(Boolean).join("\n");
 }
 
 function extractPromotionFacts(message: string, context?: AgentRoutingContext) {
@@ -545,7 +547,7 @@ function extractPromotionFacts(message: string, context?: AgentRoutingContext) {
     getInternalVisionLine(message, "listing type") ??
     (/\bfor[_\s-]?sale|sale|sell\b/i.test(combined) ? "sale" : /\brent|rental|lease\b/i.test(combined) ? "rent" : undefined);
   const listingType = rawListingType?.replace(/^for[_\s-]?/i, "").toLowerCase();
-  const price = getInternalVisionLine(message, "price");
+  const price = getInternalVisionLine(message, "price") ?? combined.match(/\bPKR\s*[\d,]+(?:\.\d+)?(?:\s*(?:crore|lakh))?\b/i)?.[0];
   const size = getInternalVisionLine(message, "size") ?? (combined.match(/\b(\d+(?:\.\d+)?)\s*(?:sqft|sq\.?\s*ft|square\s*feet|marla|kanal)\b/i)?.[0]);
   const bedrooms = getInternalVisionLine(message, "bedrooms") ?? combined.match(/\b(\d+)\s*(?:bed|beds|bedroom|bedrooms)\b/i)?.[1];
   const bathrooms = getInternalVisionLine(message, "bathrooms") ?? combined.match(/\b(\d+)\s*(?:bath|baths|bathroom|bathrooms)\b/i)?.[1];
@@ -590,91 +592,120 @@ function extractPromotionFacts(message: string, context?: AgentRoutingContext) {
 
 type PromotionFacts = ReturnType<typeof extractPromotionFacts>;
 
-function buildSocialCopyCard(channel: "whatsapp" | "facebook" | "instagram" | "portal", facts: PromotionFacts) {
-  const title = `${readableChannelName(channel)} promotion draft`;
-  const shortFacts = facts.text.replace(/\s+/g, " ").slice(0, 360);
-  const propertyLabel = [
-    facts.size,
-    facts.bedrooms ? `${facts.bedrooms}-bed` : "",
-    facts.propertyType ? facts.propertyType[0].toUpperCase() + facts.propertyType.slice(1) : "Property"
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const locationLine = facts.location ? `in ${facts.location}` : "in a convenient Lahore location";
-  const detailsLine = [
-    facts.bedrooms ? `${facts.bedrooms} bedrooms` : "",
-    facts.bathrooms ? `${facts.bathrooms} bathrooms` : "",
-    facts.features.length ? facts.features.join(", ") : ""
-  ]
-    .filter(Boolean)
-    .join(" | ");
-  const accessLine = facts.nearbyAreas.length
-    ? `with convenient access to ${facts.nearbyAreas.join(" and ")}`
-    : "with convenient access to the surrounding neighborhood";
-  const listingPhrase = facts.listingType === "rent" ? "for rent" : facts.listingType === "sale" ? "for sale" : "available";
-
-  if (channel === "facebook") {
-    return {
-      channel,
-      title,
-      body: `${propertyLabel} ${listingPhrase} ${locationLine}.\n\n${detailsLine ? `${detailsLine}\n\n` : ""}A compact, practical layout ${accessLine}. Ideal for buyers looking for a clear floor plan and a well-connected Johar Town address.\n\nPrice and final availability to be confirmed.`,
-      cta: "Message for details or a viewing.",
-      image_brief: "Use the clearest uploaded image or floor plan as the post visual."
-    };
+function parsePromotionPriceAmount(price: string | undefined) {
+  if (!price) {
+    return undefined;
   }
 
-  if (channel === "instagram") {
-    return {
-      channel,
-      title,
-      body: `${shortFacts}\n\nDM for details and viewing.\n#PakistanRealEstate #PropertyForSale #Pislaka`,
-      cta: "DM for details.",
-      image_brief: "Use the most visual uploaded image; keep text overlay minimal."
-    };
+  const amountMatch = price.match(/(?:PKR\s*)?([\d,]+(?:\.\d+)?)/i);
+  if (!amountMatch) {
+    return undefined;
   }
 
-  if (channel === "portal") {
-    return {
-      channel,
-      title,
-      body: `${propertyLabel} ${listingPhrase} ${locationLine}.\n\n${shortFacts}\n\nContact for verified price, location, and viewing schedule.`,
-      cta: "Contact for viewing.",
-      image_brief: "Use straightforward property media: floor plan or strongest listing image first."
-    };
+  const amount = Number(amountMatch[1].replace(/,/g, ""));
+  if (!Number.isFinite(amount)) {
+    return undefined;
   }
+
+  if (/\bcrore\b/i.test(price)) {
+    return amount * 10000000;
+  }
+
+  if (/\blakh\b/i.test(price)) {
+    return amount * 100000;
+  }
+
+  return amount;
+}
+
+function promotionFactsToSocialCopyInput(facts: PromotionFacts) {
+  const price = facts.text.match(/Price:\s*([^|]+)/i)?.[1]?.trim();
+  const normalizedPrice = formatPromotionPriceLabel(price);
+  const locationParts = facts.location?.split(",").map((part) => part.trim()).filter(Boolean) ?? [];
+  const city = locationParts.at(-1) ?? (facts.location ? undefined : "Lahore");
+  const locationArea = locationParts.length > 1 ? locationParts.slice(0, -1).join(", ") : facts.location;
+  const areaMatch = facts.size?.match(/^(\d+(?:\.\d+)?)\s*(kanal|marla|sqft|sqm)\b/i);
 
   return {
-    channel,
-    title,
-    body: `${shortFacts}\n\nInterested? Reply for details or a viewing slot.`,
-    cta: "Reply for details.",
-    image_brief: "Use the strongest uploaded property image or floor plan."
+    title: [facts.size, facts.propertyType, facts.location].filter(Boolean).join(" ") || undefined,
+    city,
+    location_area: locationArea,
+    property_type: facts.propertyType,
+    listing_type: facts.listingType,
+    price_amount: parsePromotionPriceAmount(price),
+    price_label: normalizedPrice,
+    price_currency: "PKR",
+    area_value: areaMatch ? Number(areaMatch[1]) : undefined,
+    area_unit: areaMatch ? areaMatch[2].toLowerCase() : undefined,
+    bedrooms: facts.bedrooms,
+    bathrooms: facts.bathrooms,
+    features: facts.features,
+    source_notes: facts.sourceNotes
   };
 }
 
-function parseLocalSocialCopyRequest(message: string, context?: AgentRoutingContext): AgentAction {
+function formatPromotionPriceLabel(price: string | undefined) {
+  if (!price) {
+    return undefined;
+  }
+
+  const numericMatch = price.match(/PKR\s*([\d,]+(?:\.\d+)?)/i);
+  if (!numericMatch) {
+    return price;
+  }
+
+  const amount = Number(numericMatch[1].replace(/,/g, ""));
+  if (!Number.isFinite(amount)) {
+    return price;
+  }
+
+  const crore = amount / 10000000;
+  if (crore >= 1) {
+    return `PKR ${Number(crore.toFixed(2)).toString()} Crore`;
+  }
+
+  const lakh = amount / 100000;
+  if (lakh >= 1) {
+    return `PKR ${Number(lakh.toFixed(2)).toString()} Lakh`;
+  }
+
+  return `PKR ${amount.toLocaleString("en-US")}`;
+}
+
+async function parseLocalSocialCopyRequest(message: string, context?: AgentRoutingContext): Promise<AgentAction> {
   const channels = extractPromotionChannelsFromMessage(message);
   const facts = extractPromotionFacts(message, context);
+  const promotion = await generateSocialCopyPromotion(promotionFactsToSocialCopyInput(facts), message, [...channels]);
+  const optionCount = promotion.cards.length;
 
   return {
     intent: "generate_social_copy",
     requires_confirmation: false,
-    response:
-      "I drafted social media copy from the available details. This draft is not trackable yet. Do you want to save this as a promotion asset/listing and continue to generate dedicated tracking links?",
+    response: `I drafted ${optionCount > 1 ? `${optionCount} copy options` : "social media copy"} from the available details.`,
     payload: {
       query: stripUploadedImageEvidence(message),
       channels,
-      promotion: {
-        summary: "Channel-specific copy draft. No tracking links have been generated.",
-        cards: channels.map((channel) => buildSocialCopyCard(channel, facts))
-      }
+      promotion
     }
   };
 }
 
 function parseLocalPromotionRequest(message: string, context?: AgentRoutingContext): AgentAction {
   if (isSocialCopyRequest(message) && !isTrackableCampaignLinkRequest(message)) {
-    return parseLocalSocialCopyRequest(message, context);
+    const channels = extractPromotionChannelsFromMessage(message);
+    const facts = extractPromotionFacts(message, context);
+    const promotion = buildFallbackSocialCopyPromotion(promotionFactsToSocialCopyInput(facts), [...channels], message);
+
+    return {
+      intent: "generate_social_copy",
+      requires_confirmation: false,
+      response: `I drafted ${promotion.cards.length > 1 ? `${promotion.cards.length} copy options` : "social media copy"} from the available details.`,
+      payload: {
+        query: stripUploadedImageEvidence(message),
+        channels,
+        promotion
+      }
+    };
   }
 
   return {
@@ -1222,7 +1253,10 @@ function isContextualListingDraftRequest(message: string) {
 
 function getLatestImageObservationContext(context?: AgentRoutingContext) {
   const recentAssistantMessages =
-    context?.recentMessages?.filter((item) => item.role === "assistant" && item.content.trim()).slice().reverse() ?? [];
+    getRoutingRecentMessages(context)
+      .filter((item) => item.role === "assistant")
+      .slice()
+      .reverse();
 
   return recentAssistantMessages.find(
     (item) =>
@@ -1562,6 +1596,12 @@ function stripInternalLocationContextFromAction(action: AgentAction): AgentActio
   };
 }
 
+function finalizeAgentActionResponse(action: AgentAction, sourceMessage: string): AgentAction {
+  return stripInternalLocationContextFromAction(
+    applyAgentActionPolicy(localizeAgentActionResponse(action, sourceMessage))
+  );
+}
+
 function parseLocalAgentAction(message: string, context?: AgentRoutingContext): AgentAction {
   const intent = hasVisionScheduleEvidence(message)
     ? "schedule_event"
@@ -1605,22 +1645,26 @@ function parseLocalAgentAction(message: string, context?: AgentRoutingContext): 
 type AgentRoutingContext = {
   timeZone?: string;
   locationContext?: PakistanLocationNormalizationResult;
+  memory?: AgentMemoryRuntimeContext;
   recentMessages?: Array<{
     role: "user" | "assistant";
     content: string;
   }>;
 };
 
-function formatRecentContext(context?: AgentRoutingContext) {
-  const recentMessages = context?.recentMessages?.filter((item) => item.content.trim()).slice(-20) ?? [];
+function getRoutingRecentMessages(context?: AgentRoutingContext) {
+  const memoryMessages = getAgentMemoryRecentMessages(context?.memory);
+  const recentMessages = memoryMessages.length ? memoryMessages : context?.recentMessages ?? [];
 
-  if (!recentMessages.length) {
-    return "No prior chat context.";
-  }
+  return recentMessages.filter((item) => item.content.trim()).slice(-20);
+}
 
-  return recentMessages
-    .map((item) => `${item.role === "user" ? "Broker" : "Assistant"}: ${item.content.slice(0, 500)}`)
-    .join("\n");
+function getRoutingTimeZone(context?: AgentRoutingContext) {
+  return context?.memory?.runtime.timeZone ?? context?.timeZone;
+}
+
+function getRoutingLocationContext(context?: AgentRoutingContext) {
+  return context?.memory?.runtime.locationContext ?? context?.locationContext;
 }
 
 export async function routeAgentMessage(message: string, context?: AgentRoutingContext): Promise<AgentAction> {
@@ -1630,14 +1674,14 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
       const draft = await importListingDraftFromUrl(listingImportUrl);
       const imageCount = draft.ai_extracted_payload.remote_images.length;
 
-      return {
+      return finalizeAgentActionResponse({
         intent: "create_listing_draft",
-        requires_confirmation: true,
+        requires_confirmation: false,
         response: `I imported the listing details from that link and found ${imageCount} image${imageCount === 1 ? "" : "s"}. Please review before adding it to your library.`,
         payload: draft
-      };
+      }, message);
     } catch {
-      return {
+      return finalizeAgentActionResponse({
         intent: "general_reply",
         requires_confirmation: false,
         response:
@@ -1645,64 +1689,54 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
         payload: {
           source_url: listingImportUrl
         }
-      };
+      }, message);
     }
   }
 
   const imageObservationReply = parseImageObservationReply(message);
   if (imageObservationReply) {
-    return stripInternalLocationContextFromAction(localizeAgentActionResponse(imageObservationReply, message));
+    return finalizeAgentActionResponse(imageObservationReply, message);
   }
 
   const contextualImageDraft = parseListingDraftFromImageObservation(message, context);
   if (contextualImageDraft) {
-    return stripInternalLocationContextFromAction(localizeAgentActionResponse(contextualImageDraft, message));
+    return finalizeAgentActionResponse(contextualImageDraft, message);
   }
 
   if (isSocialCopyRequest(message) && !isTrackableCampaignLinkRequest(message)) {
-    return stripInternalLocationContextFromAction(
-      localizeAgentActionResponse(parseLocalSocialCopyRequest(message, context), message)
-    );
+    return finalizeAgentActionResponse(await parseLocalSocialCopyRequest(message, context), message);
   }
 
-  const routingMessage = buildLocationEnhancedRoutingMessage(message, context?.locationContext);
+  const routingMessage = buildLocationEnhancedRoutingMessage(message, getRoutingLocationContext(context));
   const visionSuggestedSchedule = hasVisionScheduleEvidence(message);
   const localIntent = visionSuggestedSchedule ? "schedule_event" : classifyLocalIntent(message);
 
   if (localIntent === "today_followups") {
-    return stripInternalLocationContextFromAction(
-      localizeAgentActionResponse(parseLocalAgentAction(message, context), message)
-    );
+    return finalizeAgentActionResponse(parseLocalAgentAction(message, context), message);
   }
 
   if (localIntent === "analytics") {
-    return stripInternalLocationContextFromAction(
-      localizeAgentActionResponse(parseLocalAgentAction(message, context), message)
-    );
+    return finalizeAgentActionResponse(parseLocalAgentAction(message, context), message);
+  }
+
+  if (localIntent === "lead_create") {
+    return finalizeAgentActionResponse(parseLocalAgentAction(message, context), message);
   }
 
   if (localIntent === "schedule_event" || localIntent === "schedule_query") {
-    return stripInternalLocationContextFromAction(
-      localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
-    );
+    return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);
   }
 
   if (localIntent === "listing_draft" || localIntent === "listing_update" || localIntent === "lead_details_update") {
-    return stripInternalLocationContextFromAction(
-      localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
-    );
+    return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);
   }
 
   if (localIntent === "promotion" && isSocialCopyRequest(message) && !isTrackableCampaignLinkRequest(message)) {
-    return stripInternalLocationContextFromAction(
-      localizeAgentActionResponse(parseLocalSocialCopyRequest(message, context), message)
-    );
+    return finalizeAgentActionResponse(await parseLocalSocialCopyRequest(message, context), message);
   }
 
   if (!env.deepseekApiKey) {
-    return stripInternalLocationContextFromAction(
-      localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
-    );
+    return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);
   }
 
   const apiKey = requireServerEnv("deepseekApiKey");
@@ -1726,13 +1760,11 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
           { role: "system", content: systemPrompt },
           {
             role: "user",
-            content: `User time zone: ${getResolvedTimeZone(context?.timeZone)}\nCurrent date in user time zone: ${new Date().toLocaleDateString("en-CA", {
-              timeZone: getResolvedTimeZone(context?.timeZone)
+            content: `User time zone: ${getResolvedTimeZone(getRoutingTimeZone(context))}\nCurrent date in user time zone: ${new Date().toLocaleDateString("en-CA", {
+              timeZone: getResolvedTimeZone(getRoutingTimeZone(context))
             })}\n\nVerified Pakistan real estate location terms from the hierarchy API. Use these only to normalize location names and improve entity extraction; do not treat them as saved listings or leads:\n${formatLocationContextForPrompt(
-              context?.locationContext
-            )}\n\nRecent chat context for short-term reference only. Do not treat chat text as confirmed business facts unless the target is resolved through database-backed APIs:\n${formatRecentContext(
-              context
-            )}\n\nUser message: ${message}`
+              getRoutingLocationContext(context)
+            )}\n\nCompiled agent memory:\n${formatAgentMemoryForPrompt(context?.memory)}\n\nUser message: ${message}`
           }
         ]
       })
@@ -1740,40 +1772,35 @@ export async function routeAgentMessage(message: string, context?: AgentRoutingC
     clearTimeout(timeout);
 
     if (!response.ok) {
-      return stripInternalLocationContextFromAction(
-        localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
-      );
+      return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);
     }
 
     const json = await response.json();
     const content = json?.choices?.[0]?.message?.content;
 
     if (typeof content !== "string") {
-      return stripInternalLocationContextFromAction(
-        localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
-      );
+      return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);
     }
 
     const action = agentActionSchema.parse(JSON.parse(extractJsonObject(content)));
     const normalizedAction = normalizeAgentAction(action, routingMessage, context);
+    const gatedAction = applySemanticRouteConfidenceGate(normalizedAction);
+
+    if (gatedAction !== normalizedAction) {
+      return finalizeAgentActionResponse(gatedAction, message);
+    }
 
     if (normalizedAction.intent === "general_reply" && localIntent !== "general_reply") {
-      return stripInternalLocationContextFromAction(
-        localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
-      );
+      return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);
     }
 
     if (localIntent === "promotion" && normalizedAction.intent !== "create_campaign_links") {
-      return stripInternalLocationContextFromAction(
-        localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
-      );
+      return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);
     }
 
-    return stripInternalLocationContextFromAction(localizeAgentActionResponse(normalizedAction, message));
+    return finalizeAgentActionResponse(normalizedAction, message);
   } catch {
-    return stripInternalLocationContextFromAction(
-      localizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message)
-    );
+    return finalizeAgentActionResponse(parseLocalAgentAction(routingMessage, context), message);
   } finally {
     clearTimeout(timeout);
   }

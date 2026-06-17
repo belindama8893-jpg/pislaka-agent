@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { agentIntentRegistry } from "../../lib/agent/registry/intents";
+import {
+  agentIntentRegistry,
+  getAgentIntentDefinitionsForProduct,
+  type AgentIntentDefinition
+} from "../../lib/agent/registry/intents";
 import type { AgentAction } from "../../lib/agent/types";
 
 const expectedIntents = [
@@ -34,5 +38,87 @@ describe("agentIntentRegistry", () => {
       confirmation: "conditional",
       audit: "trace_confirm_and_write"
     });
+  });
+
+  it("keeps internal publish intent out of direct LLM routing", () => {
+    expect(agentIntentRegistry.publish_listing.routing.exposeToLlm).toBe(false);
+  });
+
+  it("separates ordinary promotion copy from dedicated campaign links", () => {
+    expect(agentIntentRegistry.generate_social_copy.routing.promptRule).toContain("ordinary channel copy");
+    expect(agentIntentRegistry.generate_social_copy.routing.promptRule).toContain("does not require a saved listing");
+    expect(agentIntentRegistry.generate_social_copy.routing.negativeExamples).toContain(
+      "Create campaign links for this listing"
+    );
+
+    expect(agentIntentRegistry.create_campaign_links.routing.promptRule).toContain("only when the broker explicitly asks");
+    expect(agentIntentRegistry.create_campaign_links.routing.promptRule).toContain("trackable links");
+    expect(agentIntentRegistry.create_campaign_links.routing.negativeExamples).toContain(
+      "Promote this listing on WhatsApp"
+    );
+  });
+
+  it("keeps every intent ready for configurable routing and guidance", () => {
+    (Object.values(agentIntentRegistry) as AgentIntentDefinition[]).forEach((definition) => {
+      expect(definition.availability).toBeDefined();
+      expect(definition.product).toEqual(
+        expect.objectContaining({
+          productScopes: expect.any(Array),
+          actorTypes: expect.any(Array)
+        })
+      );
+      expect(definition.product.productScopes.length).toBeGreaterThan(0);
+      expect(definition.product.actorTypes.length).toBeGreaterThan(0);
+      expect(definition.input.examples.length).toBeGreaterThan(0);
+      expect(definition.routing.priority).toEqual(expect.any(Number));
+      expect(definition.routing.channelBehavior).toMatch(/parameter|not_supported/);
+      expect(definition.policy.risk).toMatch(/read|draft|write|external/);
+      expect(definition.resolution).toEqual(
+        expect.objectContaining({
+          allowCurrentContext: expect.any(Boolean),
+          allowLatestOnlyWhenExplicit: expect.any(Boolean)
+        })
+      );
+      expect(definition.guidance).toEqual(
+        expect.objectContaining({
+          proactiveTriggers: expect.any(Array),
+          nextSteps: expect.any(Array)
+        })
+      );
+      if (definition.prompt?.workflowRules) {
+        expect(definition.prompt.workflowRules.length).toBeGreaterThan(0);
+      }
+    });
+  });
+
+  it("keeps policy risk, confirmation, and audit settings aligned", () => {
+    (Object.values(agentIntentRegistry) as AgentIntentDefinition[]).forEach((definition) => {
+      if (definition.policy.risk === "write" || definition.policy.risk === "external") {
+        expect(definition.confirmation, definition.intent).not.toBe("never");
+        expect(definition.audit, definition.intent).toBe("trace_confirm_and_write");
+      }
+
+      if (definition.policy.risk === "read" || definition.policy.risk === "draft") {
+        expect(definition.audit, definition.intent).not.toBe("trace_confirm_and_write");
+      }
+
+      if (definition.availability.requiresAuthForWrite) {
+        expect(["write", "external", "draft"], definition.intent).toContain(definition.policy.risk);
+      }
+    });
+  });
+
+  it("scopes current capabilities to the broker agent product", () => {
+    (Object.values(agentIntentRegistry) as AgentIntentDefinition[]).forEach((definition) => {
+      expect(definition.product.productScopes, definition.intent).toContain("broker_agent");
+      expect(definition.product.actorTypes, definition.intent).toContain("broker");
+    });
+  });
+
+  it("can filter capabilities by product scope and actor type", () => {
+    expect(getAgentIntentDefinitionsForProduct({ productScope: "broker_agent", actorType: "broker" })).toHaveLength(
+      expectedIntents.length
+    );
+    expect(getAgentIntentDefinitionsForProduct({ productScope: "buyer_advisor", actorType: "buyer" })).toHaveLength(0);
   });
 });

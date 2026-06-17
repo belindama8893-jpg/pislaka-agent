@@ -12,6 +12,48 @@ export const agentContextAttachmentSchema = z.object({
 
 export type AgentContextAttachment = z.infer<typeof agentContextAttachmentSchema>;
 
+export const agentIntentSchema = z.enum([
+  "create_listing_draft",
+  "create_lead",
+  "update_listing_draft",
+  "publish_listing",
+  "generate_social_copy",
+  "create_campaign_links",
+  "list_today_followups",
+  "record_lead_followup",
+  "create_followup_from_chat",
+  "list_leads",
+  "draft_lead_reply",
+  "create_schedule_event",
+  "list_schedule_events",
+  "update_lead_status",
+  "update_lead_details",
+  "update_lead_listing",
+  "show_basic_attribution",
+  "general_reply"
+]);
+
+export const agentWorkflowStateSchema = z.object({
+  stage: z.enum(["collecting_info", "awaiting_confirmation", "completed", "needs_selection"]),
+  active_intent: agentIntentSchema.optional(),
+  awaiting: z.enum(["details", "confirmation", "selection", "none"]).optional(),
+  pending_slots: z.array(z.string().min(1)).max(20).optional(),
+  related_entities: z
+    .array(
+      z.object({
+        type: z.enum(["lead", "listing", "schedule_event"]),
+        entity_id: z.string().uuid().optional(),
+        label: z.string().min(1).optional()
+      })
+    )
+    .max(10)
+    .optional(),
+  source_message: z.string().max(1000).optional(),
+  summary: z.string().max(500).optional()
+});
+
+export type AgentWorkflowStateInput = z.infer<typeof agentWorkflowStateSchema>;
+
 export const agentMessageSchema = z.object({
   conversationId: z.string().uuid().optional(),
   message: z.string().min(1),
@@ -24,11 +66,13 @@ export const agentMessageSchema = z.object({
     .array(
       z.object({
         role: z.enum(["user", "assistant"]),
-        content: z.string()
+        content: z.string(),
+        structured_payload: z.record(z.unknown()).optional()
       })
     )
     .max(20)
-    .optional()
+    .optional(),
+  workflow_state: agentWorkflowStateSchema.optional()
 });
 
 export const listingDraftPayloadSchema = z.object({
@@ -88,31 +132,23 @@ export const agentResolutionSchema = z.object({
   candidates: z.array(agentResolutionCandidateSchema).optional()
 });
 
+export const agentAlternativeIntentSchema = z.object({
+  intent: agentIntentSchema,
+  confidence: z.number().min(0).max(1).optional(),
+  reason: z.string().max(300).optional()
+});
+
 export const agentActionSchema = z.object({
-  intent: z.enum([
-    "create_listing_draft",
-    "create_lead",
-    "update_listing_draft",
-    "publish_listing",
-    "generate_social_copy",
-    "create_campaign_links",
-    "list_today_followups",
-    "record_lead_followup",
-    "create_followup_from_chat",
-    "list_leads",
-    "draft_lead_reply",
-    "create_schedule_event",
-    "list_schedule_events",
-    "update_lead_status",
-    "update_lead_details",
-    "update_lead_listing",
-    "show_basic_attribution",
-    "general_reply"
-  ]),
+  intent: agentIntentSchema,
   requires_confirmation: z.boolean().default(true),
   response: z.string(),
   payload: z.record(z.unknown()).default({}),
-  resolution: agentResolutionSchema.optional()
+  resolution: agentResolutionSchema.optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  alternative_intents: z.array(agentAlternativeIntentSchema).max(5).optional(),
+  missing_slots: z.array(z.string().min(1)).max(10).optional(),
+  is_follow_up_to_workflow: z.boolean().optional(),
+  route_reason: z.string().max(500).optional()
 });
 
 export type AgentAction = z.infer<typeof agentActionSchema>;

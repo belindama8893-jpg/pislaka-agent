@@ -143,6 +143,21 @@ describe("agent message route", () => {
     expect(mockedRouteAgentMessage).toHaveBeenCalledWith("Show new leads", {
       timeZone: "Asia/Karachi",
       locationContext,
+      memory: expect.objectContaining({
+        shortTerm: {
+          messages: [
+            expect.objectContaining({
+              role: "user",
+              content: "Recent context",
+              source: "chat",
+              trustLevel: "reference_only"
+            })
+          ]
+        },
+        workspace: expect.objectContaining({
+          attachments: []
+        })
+      }),
       recentMessages: [{ role: "user", content: "Recent context" }]
     });
     expect(mockedInsertAgentChatMessage).not.toHaveBeenCalled();
@@ -150,6 +165,30 @@ describe("agent message route", () => {
     expect(await response.json()).toEqual({
       action: routedAction,
       location_context: locationContext
+    });
+  });
+
+  it("skips location normalization for deterministic lead creation messages", async () => {
+    mockedCreateSupabaseServerClient.mockResolvedValue(makeSupabase({ user: null }) as never);
+
+    const message =
+      "Create a new lead named Ali Khan, phone 0300 1234567, interested in DHA Phase 6 house, mark as hot";
+    const response = await POST(makeRequest({ message }));
+    const emptyLocationContext = { enabled: false, verifiedLocations: [] };
+
+    expect(response.status).toBe(200);
+    expect(mockedNormalizePakistanLocationTerms).not.toHaveBeenCalled();
+    expect(mockedRouteAgentMessage).toHaveBeenCalledWith(message, {
+      timeZone: undefined,
+      locationContext: emptyLocationContext,
+      memory: expect.objectContaining({
+        shortTerm: { messages: [] }
+      }),
+      recentMessages: undefined
+    });
+    expect(await response.json()).toEqual({
+      action: routedAction,
+      location_context: emptyLocationContext
     });
   });
 
@@ -162,6 +201,12 @@ describe("agent message route", () => {
     expect(mockedRouteAgentMessage).toHaveBeenCalledWith("Show new leads", {
       timeZone: undefined,
       locationContext,
+      memory: expect.objectContaining({
+        shortTerm: { messages: [] },
+        workspace: expect.objectContaining({
+          attachments: []
+        })
+      }),
       recentMessages: undefined
     });
     expect(mockedInsertAgentChatMessage).not.toHaveBeenCalled();
@@ -200,6 +245,41 @@ describe("agent message route", () => {
     expect(mockedRouteAgentMessage).toHaveBeenCalledWith("Reply to Ahmed on WhatsApp", {
       timeZone: undefined,
       locationContext,
+      memory: expect.objectContaining({
+        shortTerm: {
+          messages: [
+            expect.objectContaining({
+              role: "user",
+              content: "Previous question",
+              trustLevel: "reference_only"
+            }),
+            expect.objectContaining({
+              role: "assistant",
+              content: "Previous answer",
+              trustLevel: "reference_only"
+            })
+          ]
+        },
+        workspace: expect.objectContaining({
+          currentLead: expect.objectContaining({
+            entityId: leadId,
+            source: "explicit_selection",
+            trustLevel: "confirmed"
+          }),
+          currentListing: expect.objectContaining({
+            entityId: listingId,
+            source: "explicit_selection",
+            trustLevel: "confirmed"
+          }),
+          attachments: [
+            expect.objectContaining({
+              entity_id: leadId,
+              source: "context_attachment",
+              trustLevel: "confirmed"
+            })
+          ]
+        })
+      }),
       recentMessages: [
         { role: "user", content: "Previous question" },
         { role: "assistant", content: "Previous answer" }
@@ -248,6 +328,17 @@ describe("agent message route", () => {
     expect(mockedRouteAgentMessage).toHaveBeenCalledWith("Show hot leads", {
       timeZone: undefined,
       locationContext,
+      memory: expect.objectContaining({
+        shortTerm: {
+          messages: [
+            expect.objectContaining({
+              role: "assistant",
+              content: "Known context",
+              trustLevel: "reference_only"
+            })
+          ]
+        }
+      }),
       recentMessages: [{ role: "assistant", content: "Known context" }]
     });
   });

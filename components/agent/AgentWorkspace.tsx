@@ -20,9 +20,47 @@ import {
   X,
   UserPlus
 } from "lucide-react";
-import { AgentComposer, type AgentComposerContextPreview } from "@/components/agent/AgentComposer";
 import { AnalyticsSummaryCard } from "@/components/analytics/AnalyticsDashboard";
+import { AgentComposer } from "@/components/agent/AgentComposer";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
+import {
+  createAgentActionResponseHandlers,
+  handleAgentActionResponse
+} from "@/components/agent/agent-action-response-handlers";
+import { createAgentAttachComposerActions } from "@/components/agent/agent-composer-attachments";
+import {
+  createAgentComposerContextPreviews,
+  type AgentComposerContextAttachment
+} from "@/components/agent/agent-composer-context";
+import {
+  formatAgentComposerFileSize,
+} from "@/components/agent/agent-composer-files";
+import { createAgentGuidanceComposerActions } from "@/components/agent/agent-guidance-actions";
+import {
+  buildAgentResolutionFailureUi,
+  formatAgentResolutionFailureMessage
+} from "@/components/agent/agent-resolution-ui";
+import {
+  buildAgentTurnContent,
+  createRecentAgentContextMessages,
+  getSelectedAgentContextEntityId,
+  inferAgentWorkflowState
+} from "@/components/agent/agent-submit-context";
+import {
+  canHandlePendingActionConfirmation,
+  buildDraftSocialCopyPromotion,
+  findLatestPendingPromotionAction,
+  findLatestPendingSocialCopyAction,
+  getBulkLeadWriteGuard,
+  getEmptyAgentTurnResponse,
+  type AgentPendingPromotionAction,
+  type AgentPendingSocialCopyAction
+} from "@/components/agent/agent-submit-workflow";
+import {
+  getWhatsAppImportTurn,
+  isWhatsAppChatFile,
+  type ChatImportRequestedAction
+} from "@/components/agent/agent-whatsapp-import-turn";
 import { AuthForm } from "@/components/auth/AuthForm";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -49,6 +87,11 @@ import type {
   ScheduleEventListPayload
 } from "@/lib/agent/types";
 import { isScheduleRequest } from "@/lib/agent/intent-router";
+import {
+  buildAgentGuidanceContext,
+  getAgentComposerPlaceholder,
+  getAgentGuidanceSuggestions
+} from "@/lib/agent/guidance";
 import {
   detectAgentResponseLanguage,
   formatScheduleQueryResponse,
@@ -201,19 +244,9 @@ type GuestStoredTranscript = {
   messages: GuestStoredMessage[];
 };
 
-type PendingPromotionAction = {
-  messageId: string;
-  listing: RecentListingSummary;
-  instruction: string;
-  channels: PromotionChannel[];
-};
+type PendingPromotionAction = AgentPendingPromotionAction<RecentListingSummary, PromotionChannel>;
 
-type PendingSocialCopyAction = {
-  messageId: string;
-  promotion: ListingPromotion;
-  instruction: string;
-  channels: PromotionChannel[];
-};
+type PendingSocialCopyAction = AgentPendingSocialCopyAction<ListingPromotion, PromotionChannel>;
 
 type ListingSavedPreview = {
   listingId: string;
@@ -353,7 +386,6 @@ type ChatLeadChoicePreview = {
 };
 
 type ChatFollowupNextAction = "note" | "reminder" | "status";
-type ChatImportRequestedAction = "reply" | "save_followup" | "set_reminder" | "update_status" | "analyze_only" | "unknown";
 
 type AgentResolution = NonNullable<AgentAction["resolution"]>;
 type AgentResolutionCandidate = NonNullable<AgentResolution["matched"]>;
@@ -401,15 +433,7 @@ type ChatMessageUiPayload = Partial<
   >
 >;
 
-type ChatContextAttachment = {
-  id: string;
-  type: "listing" | "lead";
-  entity_id: string;
-  label: string;
-  summary: string;
-  media?: ListingSavedMediaPreview[];
-  snapshot?: Record<string, unknown>;
-};
+type ChatContextAttachment = AgentComposerContextAttachment;
 
 function resolutionCandidateToListing(candidate: AgentResolutionCandidate): RecentListingSummary {
   return {
@@ -742,12 +766,6 @@ const promotionChannels: Array<{ channel: PromotionChannel; label: string }> = [
   { channel: "instagram", label: "Instagram" },
   { channel: "portal", label: "Portal" }
 ];
-
-function isConfirmationMessage(messageText: string) {
-  return /^(?:yes|y|ok|okay|confirm|confirmed|go ahead|do it|proceed|sure|haan|han|ji|是|对|确认|可以|好的)$/i.test(
-    messageText.trim()
-  );
-}
 
 function extractPromotionChannels(messageText: string): PromotionChannel[] {
   const normalized = messageText.toLowerCase();
@@ -1125,20 +1143,6 @@ function formatListingCurrency(amount: number | null | undefined, currency = "PK
   return `${currency} ${amount.toLocaleString("en-PK")}`;
 }
 
-function formatFileSize(bytes: number) {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-
-  const kilobytes = bytes / 1024;
-  if (kilobytes < 1024) {
-    return `${kilobytes.toFixed(kilobytes >= 100 ? 0 : 1)} KB`;
-  }
-
-  const megabytes = kilobytes / 1024;
-  return `${megabytes.toFixed(megabytes >= 100 ? 0 : 1)} MB`;
-}
-
 function formatChatImportBudget(summary: ChatFollowupSummary) {
   if (summary.budget.text) {
     return summary.budget.text;
@@ -1287,48 +1291,6 @@ function buildLeadCreateFollowUpFromChat(summary: ChatFollowupSummary): LeadCrea
   };
 }
 
-function looksLikeWhatsAppChatText(message: string) {
-  const trimmed = message.trim();
-
-  if (/\bSelected context:\s+(?:Lead|Listing)\b/i.test(trimmed)) {
-    return false;
-  }
-
-  return (
-    /whats\s*app|whatsapp|chat export|messages and calls are end-to-end encrypted/i.test(trimmed) ||
-    /^\[?\d{1,2}[/.:-]\d{1,2}[/.:-]\d{2,4},?\s+\d{1,2}:\d{2}/m.test(trimmed) ||
-    /^[\p{L}\p{N} ._+\-()]+:\s+.+$/mu.test(trimmed)
-  );
-}
-
-function detectChatImportRequestedAction(message: string): ChatImportRequestedAction {
-  const normalized = message.toLowerCase();
-
-  if (/回复|回他|回她|reply|respond|draft/i.test(message)) {
-    return "reply";
-  }
-  if (/提醒|remind|reminder|follow up later|跟进时间/i.test(message)) {
-    return "set_reminder";
-  }
-  if (/状态|更新.*客户|更新.*线索|qualified|interested|not interested|lost|status/i.test(message)) {
-    return "update_status";
-  }
-  if (/保存|记录|加入.*跟进|保存.*跟进|save|record|note/i.test(message)) {
-    return "save_followup";
-  }
-  if (/分析|总结|看看|summari[sz]e|analy[sz]e/i.test(message)) {
-    return "analyze_only";
-  }
-
-  return normalized.trim() ? "unknown" : "unknown";
-}
-
-function isWhatsAppChatFile(file: File) {
-  const name = file.name.toLowerCase();
-
-  return name.endsWith(".txt") || name.endsWith(".zip");
-}
-
 function listingToContextAttachment(listing: RecentListingSummary): ChatContextAttachment {
   const area = [listing.area_value, listing.area_unit].filter(Boolean).join(" ");
   const location = [listing.location_area, listing.city].filter(Boolean).join(", ");
@@ -1449,16 +1411,6 @@ function leadFromContextAttachment(attachment: ChatContextAttachment): LeadListI
     campaign_code: null,
     campaign_channel: typeof snapshot.campaign_channel === "string" ? snapshot.campaign_channel : null
   };
-}
-
-function summarizeFileAttachments(fileAttachments: PendingFileAttachment[]) {
-  if (!fileAttachments.length) {
-    return "";
-  }
-
-  return `Attached ${fileAttachments.length} file${fileAttachments.length === 1 ? "" : "s"}: ${fileAttachments
-    .map((item) => item.file.name)
-    .join(", ")}.`;
 }
 
 async function prepareImageForVision(file: File) {
@@ -1626,10 +1578,6 @@ function getProgressCopy(
   ];
 }
 
-function looksLikeBulkLeadWrite(message: string) {
-  return /reply|follow[-\s]?up|follow up|mark|status|schedule|hot|warm|contacted|qualified|phone|mobile|number|email|name|contact|话术|回复|跟进|标记|状态|安排|回访|电话|手机号|邮箱|名字/i.test(message);
-}
-
 function leadStatusFromMessage(message: string): Pick<LeadBatchStatusUpdatePreview, "status" | "urgency"> | null {
   if (/lost|无效|丢失/i.test(message)) {
     return { status: "lost" };
@@ -1652,10 +1600,6 @@ function leadStatusFromMessage(message: string): Pick<LeadBatchStatusUpdatePrevi
   }
 
   return null;
-}
-
-function looksLikeBulkLeadStatusUpdate(message: string) {
-  return /mark|status|hot|contacted|qualified|closed|lost|new|标记|状态|已联系|成交|丢失|无效|高意向/i.test(message);
 }
 
 function formatListingUpdateValue(value: unknown, field: string) {
@@ -2425,6 +2369,18 @@ function VoiceWaveform({
 function PromotionPack({ promotion, sourceMessage }: { promotion: ListingPromotion; sourceMessage?: string }) {
   const [copiedChannel, setCopiedChannel] = useState<string | null>(null);
   const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
+  const groupedCards = promotion.cards.reduce<Array<{ channel: PromotionChannel; cards: typeof promotion.cards }>>(
+    (groups, card) => {
+      const group = groups.find((item) => item.channel === card.channel);
+      if (group) {
+        group.cards.push(card);
+      } else {
+        groups.push({ channel: card.channel, cards: [card] });
+      }
+      return groups;
+    },
+    []
+  );
 
   async function handleCopy(channel: string, text: string) {
     await copyToClipboard(text);
@@ -2439,49 +2395,56 @@ function PromotionPack({ promotion, sourceMessage }: { promotion: ListingPromoti
       tone="promotion"
     >
       <div className="promotion-list">
-        {promotion.cards.map((card) => (
-          <article className="promotion-row" key={card.channel}>
+        {groupedCards.map((group) => (
+          <article className="promotion-channel-group" key={group.channel}>
             <div className="promotion-card-header">
               <div className="promotion-channel-title">
-                <ChannelLogo channel={card.channel} />
-                <span>{card.channel}</span>
+                <ChannelLogo channel={group.channel} />
+                <span>{group.channel}</span>
               </div>
-              <button
-                className="icon-button compact"
-                type="button"
-                aria-label={`${copy.buttons.copy} ${card.channel}`}
-                onClick={() => {
-                  const parts = [card.title, card.body];
-                  if (card.landing_url) parts.push(`Link: ${card.landing_url}`);
-                  if (card.cta) parts.push(card.cta);
-                  void handleCopy(card.channel, parts.join("\n\n"));
-                }}
-              >
-                <Copy size={14} />
-              </button>
             </div>
-            <strong>{card.title}</strong>
-            <div className="promotion-bubble-content">
-              <p>{card.body}</p>
-              {card.cta ? (
-                <span className="promotion-cta-text">{card.cta}</span>
-              ) : null}
-              {card.landing_url ? (
-                <a className="promotion-inline-link" href={card.landing_url} target="_blank" rel="noreferrer">
-                  <Globe2 size={13} />
-                  <span>{card.landing_url}</span>
-                </a>
-              ) : null}
+            <div className="promotion-options">
+              {group.cards.map((card, index) => {
+                const copyKey = `${card.channel}:${index}:${card.title}`;
+                return (
+                  <div className="promotion-option" key={copyKey}>
+                    <div className="promotion-option-header">
+                      <strong>{card.title}</strong>
+                      <button
+                        className="icon-button compact"
+                        type="button"
+                        aria-label={`${copy.buttons.copy} ${card.title}`}
+                        onClick={() => {
+                          const parts = [card.title, card.body];
+                          if (card.landing_url) parts.push(`Link: ${card.landing_url}`);
+                          if (card.cta) parts.push(card.cta);
+                          void handleCopy(copyKey, parts.join("\n\n"));
+                        }}
+                      >
+                        <Copy size={14} />
+                      </button>
+                    </div>
+                    <p>{card.body}</p>
+                    {card.cta ? <span className="promotion-cta-text">{card.cta}</span> : null}
+                    {card.landing_url ? (
+                      <a className="promotion-inline-link" href={card.landing_url} target="_blank" rel="noreferrer">
+                        <Globe2 size={13} />
+                        <span>{card.landing_url}</span>
+                      </a>
+                    ) : null}
+                    {copiedChannel === copyKey ? <small className="copied-hint">{copy.generic.copiedToClipboard}</small> : null}
+                    {card.whatsapp_share_url ? (
+                      <div className="promotion-actions">
+                        <a className="promotion-action-button secondary" href={card.whatsapp_share_url} target="_blank" rel="noreferrer">
+                          <MessageCircle size={15} />
+                          <span>{copy.buttons.shareToWhatsApp}</span>
+                        </a>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
-            {copiedChannel === card.channel ? <small className="copied-hint">{copy.generic.copiedToClipboard}</small> : null}
-            {card.whatsapp_share_url ? (
-              <div className="promotion-actions">
-                <a className="promotion-action-button secondary" href={card.whatsapp_share_url} target="_blank" rel="noreferrer">
-                  <MessageCircle size={15} />
-                  <span>{copy.buttons.shareToWhatsApp}</span>
-                </a>
-              </div>
-            ) : null}
           </article>
         ))}
       </div>
@@ -2939,9 +2902,31 @@ function LeadCreateConfirmCard({
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState<LeadCreatePayload>(() => ({
+    ...preview.payload,
+    full_name: preview.payload.full_name ?? "",
+    phone: preview.payload.phone ?? "",
+    email: preview.payload.email ?? "",
+    message: preview.payload.message ?? "",
+    status: preview.payload.status ?? "new",
+    urgency: preview.payload.urgency ?? "normal",
+    source_channel: preview.payload.source_channel ?? "manual"
+  }));
   const [status, setStatus] = useState<string | null>(null);
   const language = getCardLanguage(sourceMessage);
   const copy = getAgentCardCopy(language);
+
+  const draftToSave: LeadCreatePayload = {
+    ...draft,
+    full_name: draft.full_name?.trim() || undefined,
+    phone: draft.phone?.trim() || undefined,
+    email: draft.email?.trim() || undefined,
+    message: draft.message?.trim() || undefined,
+    source_channel: draft.source_channel?.trim() || "manual",
+    status: draft.status ?? "new",
+    urgency: draft.urgency ?? "normal"
+  };
 
   async function handleConfirm() {
     if (isSaving || isSaved) {
@@ -2960,7 +2945,7 @@ function LeadCreateConfirmCard({
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(preview.payload)
+      body: JSON.stringify(draftToSave)
     });
 
     if (!response.ok) {
@@ -3025,9 +3010,19 @@ function LeadCreateConfirmCard({
   return (
     <AgentOutputCard
       actions={
-        <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaved ? copy.buttons.saved : isSaving ? copy.buttons.saving : copy.buttons.confirmSave}
-        </button>
+        <>
+          <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
+            <CheckCircle2 size={15} /> {isSaved ? copy.buttons.saved : isSaving ? copy.buttons.saving : copy.buttons.confirmSave}
+          </button>
+          <button
+            className="outline-button small"
+            type="button"
+            disabled={isSaving || isSaved}
+            onClick={() => setIsEditing(!isEditing)}
+          >
+            <Pencil size={14} /> {isEditing ? copy.buttons.preview : copy.buttons.editCard}
+          </button>
+        </>
       }
       className="lead-chat-card"
       hint={copy.hints.confirmNewLead}
@@ -3036,24 +3031,97 @@ function LeadCreateConfirmCard({
       title={copy.generic.confirmNewLead}
       tone="lead"
     >
-      <div className="listing-update-list">
-        {[
-          [copy.generic.fieldName, preview.payload.full_name],
-          [copy.generic.fieldPhone, preview.payload.phone],
-          [copy.generic.fieldEmail, preview.payload.email],
-          [copy.generic.fieldStatus, formatLeadStatusForLanguage(preview.payload.status ?? "new", preview.payload.urgency ?? "normal", language)],
-          [copy.generic.fieldMessage, preview.payload.message]
-        ]
-          .filter(([, value]) => Boolean(value))
-          .map(([label, value]) => (
-            <div className="listing-update-row" key={label}>
-              <span>{label}</span>
-              <div>
-                <strong>{String(value)}</strong>
+      {isEditing ? (
+        <div className="agent-draft-form">
+          <div className="agent-draft-grid">
+            <label>
+              <span>{copy.generic.fieldName}</span>
+              <input
+                value={draft.full_name ?? ""}
+                onChange={(event) => setDraft({ ...draft, full_name: event.target.value })}
+              />
+            </label>
+            <label>
+              <span>{copy.generic.fieldPhone}</span>
+              <input
+                inputMode="tel"
+                value={draft.phone ?? ""}
+                onChange={(event) => setDraft({ ...draft, phone: event.target.value })}
+              />
+            </label>
+            <label>
+              <span>{copy.generic.fieldEmail}</span>
+              <input
+                inputMode="email"
+                value={draft.email ?? ""}
+                onChange={(event) => setDraft({ ...draft, email: event.target.value })}
+              />
+            </label>
+            <label>
+              <span>{copy.generic.fieldStatus}</span>
+              <select
+                value={draft.status ?? "new"}
+                onChange={(event) =>
+                  setDraft({ ...draft, status: event.target.value as LeadCreatePayload["status"] })
+                }
+              >
+                <option value="new">New</option>
+                <option value="contacted">Contacted</option>
+                <option value="qualified">Qualified</option>
+                <option value="closed">Closed</option>
+                <option value="lost">Lost</option>
+              </select>
+            </label>
+            <label>
+              <span>Urgency</span>
+              <select
+                value={draft.urgency ?? "normal"}
+                onChange={(event) =>
+                  setDraft({ ...draft, urgency: event.target.value as LeadCreatePayload["urgency"] })
+                }
+              >
+                <option value="low">Low</option>
+                <option value="normal">Normal</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label>
+              <span>Source</span>
+              <input
+                value={draft.source_channel ?? "manual"}
+                onChange={(event) => setDraft({ ...draft, source_channel: event.target.value })}
+              />
+            </label>
+          </div>
+          <label>
+            <span>{copy.generic.fieldMessage}</span>
+            <textarea
+              value={draft.message ?? ""}
+              onChange={(event) => setDraft({ ...draft, message: event.target.value })}
+            />
+          </label>
+        </div>
+      ) : (
+        <div className="listing-update-list">
+          {[
+            [copy.generic.fieldName, draftToSave.full_name],
+            [copy.generic.fieldPhone, draftToSave.phone],
+            [copy.generic.fieldEmail, draftToSave.email],
+            [copy.generic.fieldStatus, formatLeadStatusForLanguage(draftToSave.status ?? "new", draftToSave.urgency ?? "normal", language)],
+            ["Source", draftToSave.source_channel],
+            [copy.generic.fieldMessage, draftToSave.message]
+          ]
+            .filter(([, value]) => Boolean(value))
+            .map(([label, value]) => (
+              <div className="listing-update-row" key={label}>
+                <span>{label}</span>
+                <div>
+                  <strong>{String(value)}</strong>
+                </div>
               </div>
-            </div>
-          ))}
-      </div>
+            ))}
+        </div>
+      )}
       {preview.followUp ? (
         <div className="listing-update-list compact">
           <div className="listing-update-row">
@@ -5354,74 +5422,44 @@ export function AgentWorkspace({
     return () => window.removeEventListener("popstate", handlePopState);
   }, [shouldHandleHomeBackNavigation, welcomeMessageContent]);
 
-  const quickActions = [
-    {
-      icon: House,
-      label: "List from Link",
-      onClick: () =>
-        appendAssistantMessage({
-          content:
-            "I can help you create a property listing in seconds. Send me a property link, photos, details — or just tell me what you want to list."
-        })
+  const guidanceContext = useMemo(
+    () =>
+      buildAgentGuidanceContext({
+        leads: workspaceLeads,
+        listingCount: recentListings.length,
+        sessionListingCount: sessionSavedListings.length,
+        hasStarted,
+        isWhatsAppImportMode,
+        activeLeadId,
+        activeListingId,
+        timeZone: userTimeZone
+      }),
+    [
+      activeLeadId,
+      activeListingId,
+      hasStarted,
+      isWhatsAppImportMode,
+      recentListings.length,
+      sessionSavedListings.length,
+      userTimeZone,
+      workspaceLeads
+    ]
+  );
+  const quickActions = createAgentGuidanceComposerActions(
+    getAgentGuidanceSuggestions(guidanceContext, { surface: "home", limit: 4 }),
+    appendAssistantMessage
+  );
+  const composerPlaceholder = getAgentComposerPlaceholder(guidanceContext);
+  const attachActions = createAgentAttachComposerActions({
+    importWhatsAppChat: () => {
+      setIsWhatsAppImportMode(true);
+      whatsAppChatFileInputRef.current?.click();
     },
-    {
-      icon: Megaphone,
-      label: "Create Promo Post",
-      onClick: () =>
-        appendAssistantMessage({
-          content:
-            "I can help you promote a property on WhatsApp or Facebook. Send me a listing link, photos, details — or just tell me what kind of buyers you want to attract."
-        })
-    },
-    {
-      icon: MessageCircle,
-      label: "Import WhatsApp Leads",
-      onClick: () =>
-        appendAssistantMessage({
-          content:
-            "I can turn chats or messy customer lists into organized leads. Paste a WhatsApp chat, upload a screenshot/list — or just tell me about your customers."
-        })
-    },
-    {
-      icon: CalendarClock,
-      label: "Today's Follow-ups",
-      onClick: () =>
-        appendAssistantMessage({
-          content:
-            "I can help you decide who to follow up with today. Send recent chats, a lead list, screenshots — or just tell me who you’ve been talking to."
-        })
-    }
-  ];
-  const attachActions = [
-    {
-      icon: MessageCircle,
-      label: "Import WhatsApp chat",
-      onClick: () => {
-        setIsWhatsAppImportMode(true);
-        whatsAppChatFileInputRef.current?.click();
-      }
-    },
-    {
-      icon: ImageIcon,
-      label: "Upload photo/video",
-      onClick: openComposerMediaPicker
-    },
-    {
-      icon: FileText,
-      label: "Upload file",
-      onClick: openDocumentPicker
-    },
-    {
-      icon: House,
-      label: "Choose listing",
-      onClick: () => setContextPickerMode("listing" as const)
-    },
-    {
-      icon: MessageCircle,
-      label: "Choose lead",
-      onClick: () => setContextPickerMode("lead" as const)
-    }
-  ];
+    uploadMedia: openComposerMediaPicker,
+    uploadDocument: openDocumentPicker,
+    chooseListing: () => setContextPickerMode("listing" as const),
+    chooseLead: () => setContextPickerMode("lead" as const)
+  });
 
   useLayoutEffect(() => {
     const panelElement = chatPanelRef.current;
@@ -5604,16 +5642,6 @@ export function AgentWorkspace({
     };
   }, []);
 
-  function recentContextMessages() {
-    return messages
-      .filter((message) => message.content.trim())
-      .slice(-20)
-      .map((message) => ({
-        role: message.role,
-        content: message.content
-      }));
-  }
-
   function prepareGuestTranscriptRestore() {
     if (!isGuest) {
       return;
@@ -5626,61 +5654,11 @@ export function AgentWorkspace({
   }
 
   function latestPendingPromotionAction(): PendingPromotionAction | null {
-    for (const message of [...messages].reverse()) {
-      if (message.role !== "assistant") {
-        continue;
-      }
-
-      if (message.role === "assistant" && message.promotion) {
-        return null;
-      }
-
-      if (message.promotionTarget && !consumedPendingActionIds.includes(message.id)) {
-        return {
-          messageId: message.id,
-          listing: message.promotionTarget,
-          instruction: message.promotionInstruction ?? "",
-          channels: message.promotionChannels?.length ? message.promotionChannels : ["whatsapp"]
-        };
-      }
-
-      if (!message.isProgress) {
-        return null;
-      }
-    }
-
-    return null;
+    return findLatestPendingPromotionAction(messages, consumedPendingActionIds, ["whatsapp"]);
   }
 
   function latestPendingSocialCopyAction(): PendingSocialCopyAction | null {
-    for (const message of [...messages].reverse()) {
-      if (message.role !== "assistant") {
-        continue;
-      }
-
-      if (message.draft || message.promotionTarget || message.listingSaved) {
-        return null;
-      }
-
-      if (
-        message.promotion &&
-        !consumedPendingActionIds.includes(message.id) &&
-        message.promotion.cards.every((card) => !card.landing_url)
-      ) {
-        return {
-          messageId: message.id,
-          promotion: message.promotion,
-          instruction: message.sourceMessage ?? message.content,
-          channels: message.promotion.cards.map((card) => card.channel)
-        };
-      }
-
-      if (!message.isProgress) {
-        return null;
-      }
-    }
-
-    return null;
+    return findLatestPendingSocialCopyAction(messages, consumedPendingActionIds);
   }
 
   function uniquePendingMedia(media: PendingMedia[]) {
@@ -5711,6 +5689,17 @@ export function AgentWorkspace({
     }
 
     return uniquePendingMedia(media);
+  }
+
+  function getActiveDraftMessage() {
+    if (activeDraftId) {
+      const activeDraftMessage = messages.find((message) => message.id === activeDraftId && message.draft);
+      if (activeDraftMessage?.draft) {
+        return activeDraftMessage;
+      }
+    }
+
+    return [...messages].reverse().find((message) => message.role === "assistant" && message.draft);
   }
 
   function socialCopyToDraft(action: PendingSocialCopyAction): ListingDraftInput {
@@ -5845,12 +5834,8 @@ export function AgentWorkspace({
     });
   }
 
-  function selectedContextEntityId(type: ChatContextAttachment["type"]) {
-    return [...contextAttachments].reverse().find((item) => item.type === type)?.entity_id;
-  }
-
   function getActiveLead() {
-    const leadId = selectedContextEntityId("lead") ?? activeLeadId;
+    const leadId = getSelectedAgentContextEntityId(contextAttachments, "lead") ?? activeLeadId;
     if (!leadId) {
       return null;
     }
@@ -5897,16 +5882,6 @@ export function AgentWorkspace({
         ...updatedLead
       };
     });
-  }
-
-  function composerContextPreviews(): AgentComposerContextPreview[] {
-    return contextAttachments.map((item) => ({
-      id: item.id,
-      type: item.type,
-      label: item.label,
-      summary: item.summary,
-      media: item.media
-    }));
   }
 
   function addSavedListingContext(preview: ListingSavedPreview, mediaPreview: ListingSavedMediaPreview[] = []) {
@@ -6317,21 +6292,6 @@ export function AgentWorkspace({
     };
   }
 
-  function formatListingCandidates(candidates: ListingResolutionCandidate[]) {
-    return candidates
-      .map((candidate) =>
-        [
-          candidate.label,
-          [candidate.area_value, candidate.area_unit].filter(Boolean).join(" "),
-          candidate.location_area ?? candidate.listing_area
-        ]
-          .filter(Boolean)
-          .join(" · ")
-      )
-      .filter(Boolean)
-      .join(", ");
-  }
-
   function getPromotionTarget(messageText: string, resolution?: AgentResolution) {
     const availableListings = [...sessionSavedListings, ...recentListings.filter((listing) => !sessionSavedListings.some((saved) => saved.id === listing.id))];
 
@@ -6395,7 +6355,7 @@ export function AgentWorkspace({
     };
   }
 
-  function proposePromotionFromMessage(messageText: string, resolution?: AgentResolution) {
+  async function proposePromotionFromMessage(messageText: string, resolution?: AgentResolution) {
     const target = getPromotionTarget(messageText, resolution);
 
     if (target.ambiguous) {
@@ -6411,8 +6371,29 @@ export function AgentWorkspace({
     }
 
     if (!target.listing) {
+      const activeDraftMessage = messageMentionsCurrentListing(messageText) ? getActiveDraftMessage() : undefined;
+      if (activeDraftMessage?.draft) {
+        const draftTitle = activeDraftMessage.draft.title ?? "this listing draft";
+        const channels = extractPromotionChannels(messageText);
+        const selectedChannels = channels.length ? channels : (["whatsapp"] as PromotionChannel[]);
+        const promotion = await generateSocialCopyForDraft(activeDraftMessage.draft, messageText, selectedChannels);
+        appendAssistantMessage({
+          content: isGuest
+            ? `I drafted ${selectedChannels.join(", ")} copy for ${draftTitle}. You can use this now. Dedicated tracking links need a saved listing; sign in and confirm this draft when you want those links.`
+            : `I drafted ${selectedChannels.join(", ")} copy for ${draftTitle}. You can use this now. Dedicated tracking links need a saved listing; confirm this draft when you want those links.`,
+          promotion,
+          sourceMessage: messageText
+        });
+        return;
+      }
+
+      const failureUi = buildAgentResolutionFailureUi(resolution ?? { status: "needs_clarification", target_type: "listing" }, {
+        targetType: "listing"
+      });
       appendAssistantMessage({
-        content: "I need a confirmed listing before I can create a promotion pack. Describe a property first, confirm it, then ask me to promote it."
+        content: failureUi
+          ? formatAgentResolutionFailureMessage(failureUi)
+          : "I need a confirmed listing before I can create a promotion pack. Describe a property first, confirm it, then ask me to promote it."
       });
       return;
     }
@@ -6494,9 +6475,13 @@ export function AgentWorkspace({
     }
 
     if (!target.listing) {
+      const failureUi = buildAgentResolutionFailureUi(resolution ?? { status: "no_match", target_type: "listing" }, {
+        targetType: "listing"
+      });
       appendAssistantMessage({
-        content:
-          "I could not find the listing to update. Please add the exact title, area, size, bedrooms, or use the listing card before changing it."
+        content: failureUi
+          ? formatAgentResolutionFailureMessage(failureUi)
+          : "I could not find the listing to update. Please add the exact title, area, size, bedrooms, or use the listing card before changing it."
       });
       return;
     }
@@ -6567,7 +6552,7 @@ export function AgentWorkspace({
       };
     }
 
-    const query = [payload.lead_name, payload.query].filter(Boolean).join(" ");
+    const query = payload.lead_name?.trim() || payload.query?.trim() || "";
     const scoredLeads = workspaceLeads
       .map((lead) => ({ lead, score: scoreLeadMatch(query, lead) }))
       .filter((item) => item.score >= 4)
@@ -6785,12 +6770,52 @@ export function AgentWorkspace({
     });
   }
 
-  function formatResolutionCandidates(candidates: AgentResolutionCandidate[]) {
-    return candidates
-      .map((candidate) => [candidate.label, candidate.phone].filter(Boolean).join(" · "))
-      .filter(Boolean)
-      .join(", ");
+  async function showGeneratedSocialCopy(
+    actionResponse: string,
+    promotion: ListingPromotion | undefined,
+    sourceMessage: string
+  ) {
+    const activeDraftMessage = messageMentionsCurrentListing(sourceMessage) ? getActiveDraftMessage() : undefined;
+
+    if (activeDraftMessage?.draft) {
+      const draftTitle = activeDraftMessage.draft.title ?? "this listing draft";
+      const channels = extractPromotionChannels(sourceMessage);
+      const selectedChannels = channels.length ? channels : (["whatsapp"] as PromotionChannel[]);
+      const draftPromotion = await generateSocialCopyForDraft(activeDraftMessage.draft, sourceMessage, selectedChannels);
+
+      appendAssistantMessage({
+        content: `I drafted ${selectedChannels.join(", ")} copy for ${draftTitle}. You can use this now. Dedicated tracking links need a saved listing; confirm this draft when you want those links.`,
+        promotion: draftPromotion,
+        sourceMessage
+      });
+      return;
+    }
+
+    appendAssistantMessage({
+      content: actionResponse,
+      promotion,
+      sourceMessage
+    });
   }
+
+  const agentActionResponseHandlers = createAgentActionResponseHandlers({
+    appendAssistantMessage,
+    draftReplyForLead,
+    looksLikeExternalChannelPromotion,
+    proposeLeadCreate,
+    proposeLeadDetailsUpdate,
+    proposeLeadFollowUpRecord,
+    proposeLeadListingUpdate,
+    proposeLeadStatusUpdate,
+    proposeListingUpdateFromMessage,
+    proposePromotionFromMessage,
+    showGeneratedSocialCopy,
+    showAnalyticsSummary,
+    showLeadResults,
+    showScheduleResolutionMessage,
+    showScheduleResults,
+    showTodayFollowUps
+  });
 
   function appendEntitySelectionMessage({
     targetType,
@@ -6800,9 +6825,19 @@ export function AgentWorkspace({
     originalMessage,
     payload
   }: EntitySelectionPreview) {
+    const failureUi = buildAgentResolutionFailureUi(
+      {
+        status: "ambiguous",
+        target_type: targetType,
+        candidates
+      },
+      { targetType }
+    );
+
     appendAssistantMessage({
-      content:
-        targetType === "listing"
+      content: failureUi
+        ? formatAgentResolutionFailureMessage(failureUi)
+        : targetType === "listing"
           ? "I found multiple matching listings. Choose the exact property before I continue."
           : "I found multiple matching leads. Choose the exact buyer before I continue.",
       entitySelection: {
@@ -6838,22 +6873,15 @@ export function AgentWorkspace({
       return true;
     }
 
-    const candidateText = isListingTarget
-      ? formatListingCandidates(resolution.candidates ?? [])
-      : formatResolutionCandidates(resolution.candidates ?? []);
+    const failureUi = buildAgentResolutionFailureUi(resolution, {
+      targetType: resolution.target_type
+    });
 
-    const content =
-      resolution.status === "ambiguous"
-        ? candidateText
-          ? `I found more than one matching ${isListingTarget ? "listing" : "lead"}: ${candidateText}. Please add one more detail before I schedule it.`
-          : `I found more than one matching ${isListingTarget ? "listing" : "lead"}. Please add one more detail before I schedule it.`
-        : resolution.status === "needs_clarification"
-          ? isListingTarget
-            ? "I need to know which listing this schedule item is for before I can prepare it."
-            : "I need to know which lead or client this schedule item is for before I can prepare it."
-          : isListingTarget
-            ? "I could not find the listing for this schedule item. Please add the exact area, title, size, or use the listing card."
-            : "I could not find the lead for this schedule item. Please add the buyer name, phone number, or open Leads to choose the exact record.";
+    const content = failureUi
+      ? formatAgentResolutionFailureMessage(failureUi)
+      : isListingTarget
+        ? "I could not resolve the listing for this schedule item. Please add one more detail."
+        : "I could not resolve the lead for this schedule item. Please add one more detail.";
 
     appendAssistantMessage({ content });
 
@@ -6880,9 +6908,14 @@ export function AgentWorkspace({
     }
 
     if (!target.lead) {
-      const requestedLead = payload.lead_name ? ` "${payload.lead_name}"` : "";
+      const failureUi = buildAgentResolutionFailureUi(resolution ?? { status: "no_match", target_type: "lead" }, {
+        requestedLabel: payload.lead_name,
+        targetType: "lead"
+      });
       appendAssistantMessage({
-        content: `I could not find a matching recent lead${requestedLead}. Please check the buyer name, phone number, or open Leads to choose the exact record.`
+        content: failureUi
+          ? formatAgentResolutionFailureMessage(failureUi)
+          : "I could not find a matching recent lead. Please check the buyer name, phone number, or open Leads to choose the exact record."
       });
       return;
     }
@@ -6919,9 +6952,14 @@ export function AgentWorkspace({
     }
 
     if (!target.lead) {
-      const requestedLead = payload.lead_name ? ` "${payload.lead_name}"` : "";
+      const failureUi = buildAgentResolutionFailureUi(resolution ?? { status: "no_match", target_type: "lead" }, {
+        requestedLabel: payload.lead_name,
+        targetType: "lead"
+      });
       appendAssistantMessage({
-        content: `I could not find a matching recent lead${requestedLead}. Please check the buyer name, phone number, or open Leads to choose the exact record.`
+        content: failureUi
+          ? formatAgentResolutionFailureMessage(failureUi)
+          : "I could not find a matching recent lead. Please check the buyer name, phone number, or open Leads to choose the exact record."
       });
       return;
     }
@@ -6967,9 +7005,14 @@ export function AgentWorkspace({
     }
 
     if (!target.lead) {
-      const requestedLead = payload.lead_name ? ` "${payload.lead_name}"` : "";
+      const failureUi = buildAgentResolutionFailureUi(resolution ?? { status: "no_match", target_type: "lead" }, {
+        requestedLabel: payload.lead_name,
+        targetType: "lead"
+      });
       appendAssistantMessage({
-        content: `I could not find a matching recent lead${requestedLead}. Please check the buyer name, phone number, or open Leads to choose the exact record.`
+        content: failureUi
+          ? formatAgentResolutionFailureMessage(failureUi)
+          : "I could not find a matching recent lead. Please check the buyer name, phone number, or open Leads to choose the exact record."
       });
       return;
     }
@@ -7048,8 +7091,13 @@ export function AgentWorkspace({
     }
 
     if (resolution?.target_type === "listing" && resolution.status !== "matched") {
+      const failureUi = buildAgentResolutionFailureUi(resolution, {
+        targetType: "listing"
+      });
       appendAssistantMessage({
-        content: "I need a confirmed listing before I can change this lead's primary listing. Select a listing card or add more property details."
+        content: failureUi
+          ? formatAgentResolutionFailureMessage(failureUi)
+          : "I need a confirmed listing before I can change this lead's primary listing. Select a listing card or add more property details."
       });
       return;
     }
@@ -7068,7 +7116,12 @@ export function AgentWorkspace({
 
     if (!target.lead) {
       appendAssistantMessage({
-        content: "I need a confirmed lead before I can change the primary listing. Select a lead card or add the buyer name or phone."
+        content:
+          formatAgentResolutionFailureMessage(
+            buildAgentResolutionFailureUi(resolution ?? { status: "needs_clarification", target_type: "lead" }, {
+              targetType: "lead"
+            })!
+          )
       });
       return;
     }
@@ -7079,7 +7132,12 @@ export function AgentWorkspace({
 
     if (!listing) {
       appendAssistantMessage({
-        content: "I need a confirmed listing before I can change this lead's primary listing. Select a listing card or add more property details."
+        content:
+          formatAgentResolutionFailureMessage(
+            buildAgentResolutionFailureUi({ status: "needs_clarification", target_type: "listing" }, {
+              targetType: "listing"
+            })!
+          )
       });
       return;
     }
@@ -7113,9 +7171,14 @@ export function AgentWorkspace({
     }
 
     if (!target.lead) {
-      const requestedLead = payload.lead_name ? ` "${payload.lead_name}"` : "";
+      const failureUi = buildAgentResolutionFailureUi(resolution ?? { status: "no_match", target_type: "lead" }, {
+        requestedLabel: payload.lead_name,
+        targetType: "lead"
+      });
       appendAssistantMessage({
-        content: `I could not find a matching recent lead${requestedLead} to reply to. Please check the buyer name, phone number, or open Leads to choose the exact record.`
+        content: failureUi
+          ? formatAgentResolutionFailureMessage(failureUi)
+          : "I could not find a matching recent lead to reply to. Please check the buyer name, phone number, or open Leads to choose the exact record."
       });
       return;
     }
@@ -7539,6 +7602,38 @@ export function AgentWorkspace({
     }
   }
 
+  async function generateSocialCopyForDraft(
+    draft: ListingDraftInput,
+    instruction: string,
+    channels: PromotionChannel[]
+  ): Promise<ListingPromotion> {
+    const selectedChannels = channels.length ? channels : (["whatsapp"] as PromotionChannel[]);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 20000);
+
+    try {
+      const response = await fetch("/api/agent/social-copy", {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ draft, instruction, channels: selectedChannels })
+      });
+
+      if (!response.ok) {
+        return buildDraftSocialCopyPromotion(draft, selectedChannels, instruction);
+      }
+
+      const payload = (await response.json()) as { promotion?: ListingPromotion };
+      return payload.promotion ?? buildDraftSocialCopyPromotion(draft, selectedChannels, instruction);
+    } catch {
+      return buildDraftSocialCopyPromotion(draft, selectedChannels, instruction);
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
   async function submitMessage(messageText: string) {
     const trimmed = messageText.trim();
     const outgoingMedia = composerMedia;
@@ -7552,21 +7647,23 @@ export function AgentWorkspace({
       return;
     }
 
-    const mediaSummary = hasOutgoingMedia
-      ? `Attached ${outgoingMedia.length} listing media file${outgoingMedia.length === 1 ? "" : "s"}.`
-      : "";
-    const fileSummary = summarizeFileAttachments(outgoingFiles);
-    const userMessageContent = trimmed || mediaSummary;
-    const visibleUserMessageContent = [userMessageContent, fileSummary].filter(Boolean).join("\n\n");
-    let agentMessageContent = [trimmed, mediaSummary, fileSummary].filter(Boolean).join("\n\n");
-    const currentListingId = selectedContextEntityId("listing") ?? activeListingId ?? undefined;
-    const currentLeadId = selectedContextEntityId("lead") ?? activeLeadId ?? undefined;
+    const { agentMessageContent: initialAgentMessageContent, mediaSummary, visibleUserMessageContent } =
+      buildAgentTurnContent({
+        message: trimmed,
+        mediaCount: outgoingMedia.length,
+        fileAttachments: outgoingFiles
+      });
+    let agentMessageContent = initialAgentMessageContent;
+    const currentListingId = getSelectedAgentContextEntityId(outgoingContext, "listing") ?? activeListingId ?? undefined;
+    const currentLeadId = getSelectedAgentContextEntityId(outgoingContext, "lead") ?? activeLeadId ?? undefined;
     const outgoingLeadId = outgoingContext.find((item) => item.type === "lead")?.entity_id ?? activeLeadId ?? null;
-    const hasWhatsAppChatFile = outgoingFiles.some((item) => item.kind === "whatsapp_chat" || isWhatsAppChatFile(item.file));
-    const shouldImportWhatsAppChat =
-      isWhatsAppImportMode ||
-      hasWhatsAppChatFile ||
-      (!hasOutgoingMedia && !hasOutgoingFiles && !isScheduleRequest(trimmed) && looksLikeWhatsAppChatText(trimmed));
+    const whatsAppImportTurn = getWhatsAppImportTurn({
+      message: trimmed,
+      files: outgoingFiles,
+      hasOutgoingMedia,
+      isScheduleRequest: isScheduleRequest(trimmed),
+      isWhatsAppImportMode
+    });
     const explicitUiLanguage = detectExplicitResponseLanguage(trimmed);
     const turnUiLanguage = await detectTurnUiLanguage(trimmed, outgoingFiles, explicitUiLanguage ?? preferredUiLanguage);
     if (explicitUiLanguage) {
@@ -7635,7 +7732,7 @@ export function AgentWorkspace({
       }
     }
 
-    if (shouldImportWhatsAppChat && (trimmed || hasWhatsAppChatFile)) {
+    if (whatsAppImportTurn.shouldHandle) {
       const progressCopy = getWhatsAppImportProgressCopy(turnUiLanguage);
       const progressMessageId = appendProgressMessage(progressCopy[0]);
       const progressTimers = [
@@ -7649,7 +7746,7 @@ export function AgentWorkspace({
           trimmed,
           outgoingFiles,
           outgoingLeadId,
-          detectChatImportRequestedAction(trimmed),
+          whatsAppImportTurn.requestedAction,
           turnUiLanguage
         );
       } catch (error) {
@@ -7670,15 +7767,11 @@ export function AgentWorkspace({
     if (!trimmed && !visionAnalysisContext) {
       appendAssistantMessage({
         uiLanguage: turnUiLanguage,
-        content: hasOutgoingMedia
-          ? activeDraftId
-            ? `I added these media files to the current listing preview. They will upload when you confirm the listing.${
-                visionAnalysisError ? ` I could not analyze the images yet: ${visionAnalysisError}` : ""
-              }`
-            : `I can use these as listing media. Please add the property details, and I will draft the listing with these files attached.${
-                visionAnalysisError ? ` I could not analyze the images yet: ${visionAnalysisError}` : ""
-              }`
-          : "I attached that context. Tell me what you want to do with it, for example edit it, draft a reply, promote it, or schedule a follow-up."
+        content: getEmptyAgentTurnResponse({
+          activeDraftId,
+          hasOutgoingMedia,
+          visionAnalysisError
+        })
       });
       setIsSubmitting(false);
       return;
@@ -7687,10 +7780,12 @@ export function AgentWorkspace({
     const pendingPromotionAction = latestPendingPromotionAction();
     if (
       pendingPromotionAction &&
-      isConfirmationMessage(trimmed) &&
-      !hasOutgoingMedia &&
-      !hasOutgoingFiles &&
-      !hasOutgoingContext
+      canHandlePendingActionConfirmation({
+        message: trimmed,
+        hasOutgoingMedia,
+        hasOutgoingFiles,
+        hasOutgoingContext
+      })
     ) {
       setConsumedPendingActionIds((current) => [...current, pendingPromotionAction.messageId]);
       const generated = await generatePromotionForListing(
@@ -7712,10 +7807,12 @@ export function AgentWorkspace({
     const pendingSocialCopyAction = latestPendingSocialCopyAction();
     if (
       pendingSocialCopyAction &&
-      isConfirmationMessage(trimmed) &&
-      !hasOutgoingMedia &&
-      !hasOutgoingFiles &&
-      !hasOutgoingContext
+      canHandlePendingActionConfirmation({
+        message: trimmed,
+        hasOutgoingMedia,
+        hasOutgoingFiles,
+        hasOutgoingContext
+      })
     ) {
       setConsumedPendingActionIds((current) => [...current, pendingSocialCopyAction.messageId]);
       const assistantMessageId = createId();
@@ -7743,9 +7840,10 @@ export function AgentWorkspace({
     }
 
     const selectedLeadContexts = outgoingContext.filter((item) => item.type === "lead");
-    if (selectedLeadContexts.length > 1 && looksLikeBulkLeadWrite(trimmed)) {
-      if (looksLikeBulkLeadStatusUpdate(trimmed)) {
-        proposeBatchLeadStatusUpdate(trimmed, selectedLeadContexts);
+    const bulkLeadWriteGuard = getBulkLeadWriteGuard(trimmed, selectedLeadContexts);
+    if (bulkLeadWriteGuard.kind !== "none") {
+      if (bulkLeadWriteGuard.kind === "status_update") {
+        proposeBatchLeadStatusUpdate(trimmed, bulkLeadWriteGuard.leadContexts);
         setIsSubmitting(false);
         return;
       }
@@ -7792,7 +7890,8 @@ export function AgentWorkspace({
           current_lead_id: currentLeadId,
           time_zone: userTimeZone,
           context_attachments: outgoingContext,
-          context_messages: recentContextMessages()
+          context_messages: createRecentAgentContextMessages(messages),
+          workflow_state: inferAgentWorkflowState(messages)
         })
       });
       clearTimeout(timeout);
@@ -7820,6 +7919,10 @@ export function AgentWorkspace({
         setConversationId(payload.conversationId);
       }
 
+      if (await handleAgentActionResponse(agentActionResponseHandlers, payload.action, agentMessageContent)) {
+        return;
+      }
+
       const draft =
         payload.action.intent === "create_listing_draft"
           ? (payload.action.payload as ListingDraftInput)
@@ -7828,113 +7931,6 @@ export function AgentWorkspace({
         payload.action.intent === "create_schedule_event"
           ? (payload.action.payload as BrokerEventDraftInput)
           : undefined;
-      const leadPayload = payload.action.payload as LeadOperationPayload | undefined;
-
-      if (payload.action.intent === "create_lead") {
-        proposeLeadCreate(payload.action.payload as LeadCreatePayload);
-        return;
-      }
-
-      if (payload.action.intent === "list_leads" && leadPayload) {
-        showLeadResults(payload.action.response, leadPayload, agentMessageContent);
-        return;
-      }
-
-      if (payload.action.intent === "list_today_followups") {
-        await showTodayFollowUps(payload.action.response);
-        return;
-      }
-
-      if (payload.action.intent === "list_schedule_events") {
-        await showScheduleResults(
-          payload.action.response,
-          payload.action.payload as ScheduleEventListPayload,
-          agentMessageContent
-        );
-        return;
-      }
-
-      if (payload.action.intent === "show_basic_attribution") {
-        await showAnalyticsSummary(payload.action.response, payload.action.payload, agentMessageContent);
-        return;
-      }
-
-      if (payload.action.intent === "update_lead_status" && leadPayload) {
-        proposeLeadStatusUpdate(payload.action.response, leadPayload, payload.action.resolution);
-        return;
-      }
-
-      if (payload.action.intent === "record_lead_followup" && leadPayload) {
-        proposeLeadFollowUpRecord(payload.action.response, leadPayload, payload.action.resolution);
-        return;
-      }
-
-      if (payload.action.intent === "update_lead_details") {
-        proposeLeadDetailsUpdate(
-          payload.action.response,
-          payload.action.payload as LeadDetailsUpdatePayload,
-          payload.action.resolution
-        );
-        return;
-      }
-
-      if (payload.action.intent === "update_lead_listing") {
-        proposeLeadListingUpdate(
-          payload.action.response,
-          payload.action.payload as LeadListingUpdatePayload,
-          payload.action.resolution
-        );
-        return;
-      }
-
-      if (payload.action.intent === "draft_lead_reply" && leadPayload) {
-        await draftReplyForLead(payload.action.response, leadPayload, payload.action.resolution);
-        return;
-      }
-
-      if (payload.action.intent === "generate_social_copy") {
-        const socialCopyPayload = payload.action.payload as { promotion?: ListingPromotion };
-        appendAssistantMessage({
-          content: payload.action.response,
-          promotion: socialCopyPayload.promotion
-        });
-        return;
-      }
-
-      if (payload.action.intent === "create_campaign_links") {
-        proposePromotionFromMessage(agentMessageContent, payload.action.resolution);
-        return;
-      }
-
-      if (
-        payload.action.intent === "publish_listing" &&
-        looksLikeExternalChannelPromotion(agentMessageContent)
-      ) {
-        proposePromotionFromMessage(agentMessageContent, payload.action.resolution);
-        return;
-      }
-
-      if (payload.action.intent === "update_listing_draft") {
-        proposeListingUpdateFromMessage(
-          payload.action.response,
-          agentMessageContent,
-          payload.action.payload as ListingUpdatePayload,
-          payload.action.resolution
-        );
-        return;
-      }
-
-      if (
-        payload.action.intent === "create_schedule_event" &&
-        showScheduleResolutionMessage(
-          payload.action.response,
-          payload.action.payload as BrokerEventDraftInput,
-          payload.action.resolution
-        )
-      ) {
-        return;
-      }
-
       const assistantMessageId = createId();
 
       if (draft) {
@@ -8749,7 +8745,12 @@ export function AgentWorkspace({
                     }}
                   />
                 ) : null}
-                {message.promotion ? <PromotionPack promotion={message.promotion} sourceMessage={message.uiLanguage ?? message.sourceMessage} /> : null}
+                {message.promotion ? (
+                  <>
+                    <PromotionPack promotion={message.promotion} sourceMessage={message.uiLanguage ?? message.sourceMessage} />
+                    {message.promotion.summary ? <p>{message.promotion.summary}</p> : null}
+                  </>
+                ) : null}
                 {message.promotionTarget ? (
                   <PromotionConfirmCard
                     initialChannels={message.promotionChannels}
@@ -8862,12 +8863,12 @@ export function AgentWorkspace({
         actions={!hasStarted ? quickActions : undefined}
         attachActions={attachActions}
         className="workspace-agent-composer"
-        contextAttachments={composerContextPreviews()}
+        contextAttachments={createAgentComposerContextPreviews(contextAttachments)}
         files={composerFiles.map((item) => ({
           id: item.id,
           label: item.kind === "whatsapp_chat" ? "WhatsApp chat" : "File",
           name: item.file.name,
-          sizeLabel: formatFileSize(item.file.size)
+          sizeLabel: formatAgentComposerFileSize(item.file.size)
         }))}
         isListening={isListening}
         isTranscribing={isTranscribing}
@@ -8886,11 +8887,7 @@ export function AgentWorkspace({
         onRemoveMedia={removeComposerMedia}
         onSubmit={handleSubmit}
         onVoice={handleVoiceInput}
-        placeholder={
-          isWhatsAppImportMode
-            ? "Paste WhatsApp chat or drop a .txt/.zip export..."
-            : "Paste a listing link, WhatsApp chat, or ask anything..."
-        }
+        placeholder={composerPlaceholder}
         sendDisabled={isSubmitting || isListening || isTranscribing}
         topSlot={
           isFollowUpNudgeVisible ? (
