@@ -20,6 +20,23 @@ function makeWhatsAppShareUrl(card: PromotionCard, landingUrl: string) {
   return `https://wa.me/?text=${encodeURIComponent(text)}`;
 }
 
+function getPublicAppUrl() {
+  let appUrl: URL;
+
+  try {
+    appUrl = new URL(env.appUrl);
+  } catch {
+    throw new Error("NEXT_PUBLIC_APP_URL must be a valid public HTTPS URL before generating promotion links.");
+  }
+
+  const localHosts = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1"]);
+  if (appUrl.protocol !== "https:" || localHosts.has(appUrl.hostname)) {
+    throw new Error("Promotion links need a public HTTPS NEXT_PUBLIC_APP_URL. Localhost links are not clickable in WhatsApp.");
+  }
+
+  return appUrl.origin;
+}
+
 export async function POST(request: Request) {
   const body = await request.json();
   const parsed = promoteListingRequestSchema.safeParse(body);
@@ -32,6 +49,7 @@ export async function POST(request: Request) {
   }
 
   try {
+    const appUrl = getPublicAppUrl();
     const { supabase, broker } = await requireCurrentBroker();
     const { data: listing, error } = await supabase
       .from("listings")
@@ -60,7 +78,7 @@ export async function POST(request: Request) {
     const enrichedCards = await Promise.all(
       promotion.cards.map(async (card) => {
         const code = makeCampaignCode(card.channel);
-        const landingUrl = `${env.appUrl}/p/${code}`;
+        const landingUrl = `${appUrl}/p/${code}`;
         const generatedCopy = `${card.title}\n\n${card.body}\n\n${card.cta}`;
         const { data: campaignLink, error: campaignError } = await supabase
           .from("campaign_links")

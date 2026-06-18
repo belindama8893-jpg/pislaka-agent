@@ -11,6 +11,7 @@ import {
   ImageIcon,
   ImagePlus,
   LoaderCircle,
+  Megaphone,
   MessageCircle,
   Phone,
   Pencil,
@@ -635,7 +636,10 @@ function mergeServerMessages(current: ChatMessage[], serverMessages: ChatMessage
       !message.id.startsWith(`${RESTORED_GUEST_MESSAGE_ID_PREFIX}-`) || !serverContent.has(messageContentKey(message))
   );
   const existingIds = new Set(withoutImportedGuestDuplicates.map((message) => message.id));
-  const missingServerMessages = serverMessages.filter((message) => !existingIds.has(message.id));
+  const existingContent = new Set(withoutImportedGuestDuplicates.map(messageContentKey));
+  const missingServerMessages = serverMessages.filter(
+    (message) => !existingIds.has(message.id) && !existingContent.has(messageContentKey(message))
+  );
 
   if (withoutImportedGuestDuplicates.length === current.length && missingServerMessages.length === 0) {
     return current;
@@ -5158,11 +5162,13 @@ function DraftPreviewCard({
 function ListingSavedCard({
   mediaPreview = [],
   onAskAgent,
+  onPromote,
   preview,
   sourceMessage
 }: {
   mediaPreview?: ListingSavedMediaPreview[];
   onAskAgent?: (preview: ListingSavedPreview, mediaPreview: ListingSavedMediaPreview[]) => void;
+  onPromote?: (preview: ListingSavedPreview) => void;
   preview: ListingSavedPreview;
   sourceMessage?: string;
 }) {
@@ -5176,6 +5182,9 @@ function ListingSavedCard({
           <a className="primary-button small" href={preview.libraryHref}>
             <House size={14} /> {copy.buttons.openListing}
           </a>
+          <button className="outline-button small" type="button" onClick={() => onPromote?.(preview)}>
+            <Megaphone size={14} /> {copy.buttons.promoteListing}
+          </button>
           <button className="outline-button small" type="button" onClick={() => onAskAgent?.(preview, mediaPreview)}>
             <MessageCircle size={14} /> {copy.buttons.askAgent}
           </button>
@@ -6263,6 +6272,45 @@ export function AgentWorkspace({
       ...current.filter((item) => !(item.type === "listing" && item.entity_id === preview.listingId)),
       nextAttachment
     ]);
+  }
+
+  function listingFromSavedPreview(preview: ListingSavedPreview): RecentListingSummary {
+    const existingListing =
+      sessionSavedListings.find((listing) => listing.id === preview.listingId) ??
+      recentListings.find((listing) => listing.id === preview.listingId);
+
+    if (existingListing) {
+      return existingListing;
+    }
+
+    const [locationArea, ...cityParts] = (preview.location ?? "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    return {
+      id: preview.listingId,
+      status: "draft",
+      title: preview.title,
+      location_area: locationArea ?? null,
+      city: cityParts.join(", ") || null,
+      property_type: null,
+      area_value: null,
+      area_unit: null,
+      bedrooms: null
+    };
+  }
+
+  function promoteSavedListing(preview: ListingSavedPreview) {
+    const listing = listingFromSavedPreview(preview);
+
+    setActiveListingId(preview.listingId);
+    appendAssistantMessage({
+      content: `Let's promote ${listing.title || "this listing"}. Choose the channels, then confirm and I will generate the tracking links.`,
+      promotionTarget: listing,
+      promotionInstruction: "Promote this listing and generate trackable campaign links.",
+      sourceMessage: "Promote this listing for me."
+    });
   }
 
   async function persistAssistantMessage(message: ChatMessage) {
@@ -8773,6 +8821,7 @@ export function AgentWorkspace({
                   <ListingSavedCard
                     mediaPreview={message.listingSavedMedia}
                     onAskAgent={addSavedListingContext}
+                    onPromote={promoteSavedListing}
                     preview={message.listingSaved}
                     sourceMessage={message.uiLanguage ?? message.sourceMessage}
                   />
