@@ -17,6 +17,41 @@ describe("current listing draft routing context", () => {
     expect(action.requires_confirmation).toBe(true);
   });
 
+  it("does not mistake lead pages for manual lead creation", async () => {
+    const action = await routeAgentMessage(
+      "I want to promote a 10 marla house in DHA Phase 5 Lahore. It has 4 bedrooms, 5 bathrooms, demand is 4.35 crore, near park, renovated kitchen, ready possession, suitable for a family buyer. Create WhatsApp and Facebook promotion copy, tracking links, and a lead page."
+    );
+
+    expect(action.intent).toBe("create_listing_draft");
+  });
+
+  it("extracts absolute reminder dates into reminder_at", async () => {
+    const action = await routeAgentMessage("Remind me on June 22, 2026 at 10 AM to reply to Omar.", {
+      timeZone: "Asia/Karachi"
+    });
+
+    expect(action.intent).toBe("create_schedule_event");
+    expect(action.payload).toMatchObject({
+      event_category: "reminder",
+      event_type: "follow_up",
+      reminder_at: expect.any(String)
+    });
+    expect(action.payload.start_at).toBeUndefined();
+  });
+
+  it("keeps follow-up reminder times when normalizing from start_at", async () => {
+    const action = await routeAgentMessage("Remind me next Monday at 10 AM to reply to Omar.", {
+      timeZone: "Asia/Karachi"
+    });
+
+    expect(action.intent).toBe("create_schedule_event");
+    expect(action.payload).toMatchObject({
+      event_category: "reminder",
+      event_type: "follow_up",
+      reminder_at: expect.any(String)
+    });
+  });
+
   it("uses the current draft workflow summary for social copy follow-ups", async () => {
     const memory = compileAgentMemoryContext({
       workflowState: {

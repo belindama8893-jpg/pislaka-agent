@@ -17,6 +17,7 @@ import {
   extractLeadName,
   extractLeadStatus,
   extractLeadStatusFilter,
+  isListingDraftRequest,
   isTodayFollowUpsRequest,
   isPromotionRequest
 } from "@/lib/agent/intent-router";
@@ -236,6 +237,20 @@ function getUserTimeZoneDate(offsetDays: number, hour = 10, timeZone?: string | 
   const range = getBrokerDayRange(offsetDays, 0, timeZone);
   const date = toBrokerDatetimeLocal(range.from, timeZone).slice(0, 10);
   return fromBrokerDatetimeLocal(`${date}T${String(hour).padStart(2, "0")}:00`, timeZone);
+}
+
+function getUserTimeZoneDateFromParts(
+  year: number,
+  month: number,
+  day: number,
+  hour = 10,
+  minute = 0,
+  timeZone?: string | null
+) {
+  return fromBrokerDatetimeLocal(
+    `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+    timeZone
+  );
 }
 
 function addHours(isoDate: string, hours: number) {
@@ -708,6 +723,28 @@ function parseLocalPromotionRequest(message: string, context?: AgentRoutingConte
     };
   }
 
+  if (
+    isTrackableCampaignLinkRequest(message) &&
+    isListingDraftRequest(message) &&
+    !/\b(?:this|current|selected|saved|existing)\s+(?:listing|property|house|home|villa|apartment)\b/i.test(message)
+  ) {
+    const draftAction = parseLocalListingDraft(message);
+
+    return {
+      ...draftAction,
+      response:
+        "I drafted a property promotion asset from your details. Save it first, then I can generate WhatsApp/Facebook tracking links and the lead page for this property.",
+      payload: {
+        ...draftAction.payload,
+        ai_extracted_payload: {
+          source: "promotion_request_requires_saved_listing",
+          requested_channels: extractPromotionChannelsFromMessage(message),
+          requested_tracking_links: true
+        }
+      }
+    };
+  }
+
   return {
     intent: "create_campaign_links",
     requires_confirmation: true,
@@ -814,9 +851,11 @@ function extractScheduleTime(message: string, timeZone?: string | null) {
     lower.match(/\b(?:at|around|by)\s+(\d{1,2})(?::(\d{2}))?\b/) ??
     message.match(/(\d{1,2})(?::(\d{2}))?\s*(点|時|时)/u);
   let hour = 10;
+  let minute = 0;
 
   if (timeMatch) {
     hour = Number(timeMatch[1]);
+    minute = timeMatch[2] ? Number(timeMatch[2]) : 0;
     const meridiem = timeMatch[3]?.replace(/\./g, "");
     if (meridiem === "pm" && hour < 12) {
       hour += 12;
@@ -830,19 +869,104 @@ function extractScheduleTime(message: string, timeZone?: string | null) {
     hour = 19;
   }
 
+  const isoDateMatch = lower.match(/\b(\d{4})[/-](\d{1,2})[/-](\d{1,2})\b/);
+  if (isoDateMatch) {
+    return getUserTimeZoneDateFromParts(
+      Number(isoDateMatch[1]),
+      Number(isoDateMatch[2]),
+      Number(isoDateMatch[3]),
+      hour,
+      minute,
+      timeZone
+    );
+  }
+
+  const monthNames: Record<string, number> = {
+    jan: 1,
+    january: 1,
+    feb: 2,
+    february: 2,
+    mar: 3,
+    march: 3,
+    apr: 4,
+    april: 4,
+    may: 5,
+    jun: 6,
+    june: 6,
+    jul: 7,
+    july: 7,
+    aug: 8,
+    august: 8,
+    sep: 9,
+    sept: 9,
+    september: 9,
+    oct: 10,
+    october: 10,
+    nov: 11,
+    november: 11,
+    dec: 12,
+    december: 12
+  };
+  const monthDateMatch = lower.match(
+    /\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,\s*|\s+)(\d{4})\b/
+  );
+  if (monthDateMatch) {
+    return getUserTimeZoneDateFromParts(
+      Number(monthDateMatch[3]),
+      monthNames[monthDateMatch[1]],
+      Number(monthDateMatch[2]),
+      hour,
+      minute,
+      timeZone
+    );
+  }
+
+  const weekdayMatch = lower.match(/\b(?:(next|this)\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/);
+  if (weekdayMatch) {
+    const targetWeekday = weekdayMatch[2];
+    const qualifier = weekdayMatch[1];
+    const resolvedTimeZone = getResolvedTimeZone(timeZone);
+
+    for (let offset = qualifier === "next" ? 1 : 0; offset <= 14; offset += 1) {
+      const candidate = getUserTimeZoneDate(offset, hour, resolvedTimeZone);
+      if (!candidate) {
+        continue;
+      }
+      const weekday = new Intl.DateTimeFormat("en-US", {
+        timeZone: resolvedTimeZone,
+        weekday: "long"
+      }).format(new Date(candidate)).toLowerCase();
+
+      if (weekday === targetWeekday) {
+        return fromBrokerDatetimeLocal(
+          `${toBrokerDatetimeLocal(candidate, resolvedTimeZone).slice(0, 10)}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+          resolvedTimeZone
+        );
+      }
+    }
+  }
+
   if (/tomorrow|明天/i.test(message)) {
-    return getUserTimeZoneDate(1, hour, timeZone);
+    return getUserTimeZoneDateFromPartsFromOffset(1, hour, minute, timeZone);
   }
 
   if (/next week|下周/i.test(message)) {
-    return getUserTimeZoneDate(7, hour, timeZone);
+    return getUserTimeZoneDateFromPartsFromOffset(7, hour, minute, timeZone);
   }
 
   if (/today|tonight|今天|今晚/i.test(message)) {
-    return getUserTimeZoneDate(0, hour, timeZone);
+    return getUserTimeZoneDateFromPartsFromOffset(0, hour, minute, timeZone);
   }
 
   return undefined;
+}
+
+function getUserTimeZoneDateFromPartsFromOffset(offsetDays: number, hour = 10, minute = 0, timeZone?: string | null) {
+  const base = getUserTimeZoneDate(offsetDays, hour, timeZone);
+  return fromBrokerDatetimeLocal(
+    `${toBrokerDatetimeLocal(base, timeZone).slice(0, 10)}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+    timeZone
+  );
 }
 
 function stripUploadedImageEvidence(message: string) {
@@ -1380,6 +1504,40 @@ function shouldNormalizeScheduleAsFollowUp(message: string) {
   return hasCommunicationCue && !hasAppointmentCue;
 }
 
+function normalizeScheduleEventPayload(
+  message: string,
+  payload: Record<string, unknown>,
+  timeZone?: string | null
+) {
+  const localStartAt = extractScheduleTime(message, timeZone);
+  const sourceStartAt = typeof payload.start_at === "string" ? payload.start_at : undefined;
+  const sourceReminderAt = typeof payload.reminder_at === "string" ? payload.reminder_at : undefined;
+  const normalizedPayload = { ...payload };
+
+  if (shouldNormalizeScheduleAsFollowUp(message)) {
+    const reminderAt = sourceReminderAt ?? sourceStartAt ?? localStartAt;
+
+    normalizedPayload.event_category = "reminder";
+    normalizedPayload.event_type = "follow_up";
+    normalizedPayload.start_at = undefined;
+    normalizedPayload.end_at = undefined;
+    normalizedPayload.reminder_at = reminderAt;
+
+    return normalizedPayload;
+  }
+
+  if (!sourceStartAt && !sourceReminderAt && localStartAt) {
+    if (payload.event_category === "appointment") {
+      normalizedPayload.start_at = localStartAt;
+      normalizedPayload.end_at = typeof payload.end_at === "string" ? payload.end_at : addHours(localStartAt, 1);
+    } else {
+      normalizedPayload.reminder_at = localStartAt;
+    }
+  }
+
+  return normalizedPayload;
+}
+
 function shouldNormalizeExternalPublishAsPromotion(message: string) {
   const hasExternalActionVerb = /\b(?:share|post|publish|send)\b|发布|分享|发送/iu.test(message);
   const hasExternalChannel =
@@ -1419,15 +1577,7 @@ function normalizeAgentAction(action: AgentAction, message: string, context?: Ag
     if (!parsedPayload.success) {
       return parseLocalScheduleEvent(message, context?.timeZone);
     }
-    const normalizedPayload = shouldNormalizeScheduleAsFollowUp(message)
-      ? {
-          ...parsedPayload.data,
-          event_category: "reminder" as const,
-          event_type: "follow_up" as const,
-          start_at: undefined,
-          end_at: undefined
-        }
-      : parsedPayload.data;
+    const normalizedPayload = normalizeScheduleEventPayload(message, parsedPayload.data, context?.timeZone);
 
     return {
       ...action,

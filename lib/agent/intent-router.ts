@@ -70,7 +70,12 @@ export function isLeadCreateRequest(message: string) {
   const hasReadVerb = /\b(show|list|view|check|find|search|which|who|what|any)\b|查看|显示|列出|搜索|哪些|哪个/iu.test(
     message
   );
-  return hasCreateVerb && !hasReadVerb && isLeadQueryRequest(message);
+  const hasPromotionAssetCue =
+    /\b(?:lead\s*page|landing\s*page|tracking\s+links?|campaign\s+links?|promotion\s+copy|promot(?:e|ion)|advertis(?:e|ing))\b|推广|宣传|落地页|追踪链接/iu.test(
+      message
+    );
+
+  return hasCreateVerb && !hasReadVerb && !hasPromotionAssetCue && isLeadQueryRequest(message);
 }
 
 export function isLeadStatusRequest(message: string) {
@@ -189,12 +194,12 @@ export function classifyLocalIntent(message: string): LocalIntentKind {
     return "today_followups";
   }
 
-  if (isLeadCreateRequest(message)) {
-    return "lead_create";
+  if (isPromotionRequest(message)) {
+    return "promotion";
   }
 
-  if (isLeadReplyRequest(message)) {
-    return "lead_reply";
+  if (isLeadCreateRequest(message)) {
+    return "lead_create";
   }
 
   if (isLeadDetailsUpdateRequest(message)) {
@@ -221,8 +226,8 @@ export function classifyLocalIntent(message: string): LocalIntentKind {
     return "schedule_event";
   }
 
-  if (isPromotionRequest(message)) {
-    return "promotion";
+  if (isLeadReplyRequest(message)) {
+    return "lead_reply";
   }
 
   if (isLeadQueryRequest(message)) {

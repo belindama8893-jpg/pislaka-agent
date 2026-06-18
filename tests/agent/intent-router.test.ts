@@ -18,6 +18,11 @@ describe("classifyLocalIntent", () => {
       intent: "promotion"
     },
     {
+      message:
+        "I want to promote a 10 marla house in DHA Phase 5 Lahore. Create WhatsApp and Facebook promotion copy, tracking links, and a lead page.",
+      intent: "promotion"
+    },
+    {
       message: "Share this listing to Facebook",
       intent: "promotion"
     },
