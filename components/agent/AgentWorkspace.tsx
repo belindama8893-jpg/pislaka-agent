@@ -11,7 +11,6 @@ import {
   ImageIcon,
   ImagePlus,
   LoaderCircle,
-  Megaphone,
   MessageCircle,
   Phone,
   Pencil,
@@ -20,9 +19,21 @@ import {
   X,
   UserPlus
 } from "lucide-react";
-import { AnalyticsSummaryCard } from "@/components/analytics/AnalyticsDashboard";
 import { AgentComposer } from "@/components/agent/AgentComposer";
+import { AgentActionGroup, AgentFieldList, AgentInfoGrid, AgentObjectSummary } from "@/components/agent/AgentCardPrimitives";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
+import { AnalyticsInsightCard } from "@/components/agent/cards/AnalyticsInsightCard";
+import { LeadCreateCard } from "@/components/agent/cards/LeadCreateCard";
+import { LeadFollowupCard as LeadFollowupAgentCard } from "@/components/agent/cards/LeadFollowupCard";
+import { LeadListCard } from "@/components/agent/cards/LeadListCard";
+import { LeadReplyCard as LeadReplyAgentCard } from "@/components/agent/cards/LeadReplyCard";
+import { LeadUpdateCard, type LeadUpdateChangeItem } from "@/components/agent/cards/LeadUpdateCard";
+import { ListingDraftCard } from "@/components/agent/cards/ListingDraftCard";
+import { ListingUpdateCard, type ListingUpdateChangeItem } from "@/components/agent/cards/ListingUpdateCard";
+import { PromotionPackCard } from "@/components/agent/cards/PromotionPackCard";
+import { PromotionTargetCard } from "@/components/agent/cards/PromotionTargetCard";
+import { ScheduleEventCard } from "@/components/agent/cards/ScheduleEventCard";
+import { ScheduleListCard } from "@/components/agent/cards/ScheduleListCard";
 import {
   createAgentActionResponseHandlers,
   handleAgentActionResponse
@@ -1094,6 +1105,20 @@ function getLeadValue(lead: LeadListItem, field: keyof LeadDetailsUpdateChanges)
   return lead[field];
 }
 
+function createLeadDetailsUpdateFormState(changes: LeadDetailsUpdateChanges) {
+  return Object.fromEntries(
+    Object.entries(changes)
+      .filter(([, value]) => value !== undefined)
+      .map(([field, value]) => [field, stringifyListingUpdateFormValue(value)])
+  );
+}
+
+function parseLeadDetailsUpdateFormState(form: Record<string, string>) {
+  return Object.fromEntries(
+    Object.entries(form).map(([field, value]) => [field, value.trim() || undefined])
+  ) as LeadDetailsUpdateChanges;
+}
+
 function eventToFormState(event: BrokerEventDraftInput, timeZone?: string | null): EventFormState {
   return {
     event_category: event.event_category,
@@ -1672,6 +1697,48 @@ function formatListingUpdateValue(value: unknown, field: string) {
   }
 
   return String(value);
+}
+
+function stringifyListingUpdateFormValue(value: unknown) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  if (Array.isArray(value)) {
+    return value.join(", ");
+  }
+
+  return String(value);
+}
+
+function createListingUpdateFormState(changes: ListingUpdateChanges) {
+  return Object.fromEntries(
+    Object.entries(changes)
+      .filter(([, value]) => value !== undefined)
+      .map(([field, value]) => [field, stringifyListingUpdateFormValue(value)])
+  );
+}
+
+function parseListingUpdateFormValue(field: string, value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (field === "price_amount" || field === "area_value" || field === "bedrooms" || field === "bathrooms") {
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  if (field === "features") {
+    return trimmed
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return trimmed;
 }
 
 function getListingValue(listing: RecentListingSummary, field: keyof ListingUpdateChanges) {
@@ -2444,72 +2511,110 @@ function PromotionPack({ promotion, sourceMessage }: { promotion: ListingPromoti
   }
 
   return (
-    <AgentOutputCard
-      className="chat-promotion-pack"
-      icon={<Megaphone size={16} />}
+    <PromotionPackCard
+      channels={groupedCards.map((group) => ({
+        copies: group.cards.map((card, index) => {
+          const copyKey = `${card.channel}:${index}:${card.title}`;
+          const copyText = [card.title, card.body, card.landing_url ? `Link: ${card.landing_url}` : null, card.cta]
+            .filter(Boolean)
+            .join("\n\n");
+
+          return {
+            actions: (
+              <>
+                <button
+                  className="icon-button compact"
+                  type="button"
+                  aria-label={`${copy.buttons.copy} ${card.title}`}
+                  onClick={() => void handleCopy(copyKey, copyText)}
+                >
+                  <Copy size={14} />
+                </button>
+                {card.whatsapp_share_url ? (
+                  <a className="icon-button compact" href={card.whatsapp_share_url} target="_blank" rel="noreferrer" aria-label={copy.buttons.shareToWhatsApp}>
+                    <MessageCircle size={14} />
+                  </a>
+                ) : null}
+              </>
+            ),
+            body: card.body,
+            copiedHint: copiedChannel === copyKey ? copy.generic.copiedToClipboard : undefined,
+            cta: card.cta,
+            landingUrl: card.landing_url ? (
+              <a href={card.landing_url} target="_blank" rel="noreferrer">
+                <Globe2 size={13} />
+                <span>{card.landing_url}</span>
+              </a>
+            ) : null,
+            title: card.title
+          };
+        }),
+        icon: <ChannelLogo channel={group.channel} />,
+        id: group.channel,
+        label: group.channel,
+        meta: group.cards.length > 1 ? `${group.cards.length} drafts` : "Draft"
+      }))}
+      subtitle={promotion.summary || "Channel copy is ready. External sharing still requires your action."}
       title={copy.generic.promotionPack}
-      tone="promotion"
-    >
-      <div className="promotion-list">
-        {groupedCards.map((group) => (
-          <article className="promotion-channel-group" key={group.channel}>
-            <div className="promotion-card-header">
-              <div className="promotion-channel-title">
-                <ChannelLogo channel={group.channel} />
-                <span>{group.channel}</span>
-              </div>
-            </div>
-            <div className="promotion-options">
-              {group.cards.map((card, index) => {
-                const copyKey = `${card.channel}:${index}:${card.title}`;
-                return (
-                  <div className="promotion-option" key={copyKey}>
-                    <div className="promotion-option-header">
-                      <strong>{card.title}</strong>
-                      <button
-                        className="icon-button compact"
-                        type="button"
-                        aria-label={`${copy.buttons.copy} ${card.title}`}
-                        onClick={() => {
-                          const parts = [card.title, card.body];
-                          if (card.landing_url) parts.push(`Link: ${card.landing_url}`);
-                          if (card.cta) parts.push(card.cta);
-                          void handleCopy(copyKey, parts.join("\n\n"));
-                        }}
-                      >
-                        <Copy size={14} />
-                      </button>
-                    </div>
-                    <p>{card.body}</p>
-                    {card.cta ? <span className="promotion-cta-text">{card.cta}</span> : null}
-                    {card.landing_url ? (
-                      <a className="promotion-inline-link" href={card.landing_url} target="_blank" rel="noreferrer">
-                        <Globe2 size={13} />
-                        <span>{card.landing_url}</span>
-                      </a>
-                    ) : null}
-                    {copiedChannel === copyKey ? <small className="copied-hint">{copy.generic.copiedToClipboard}</small> : null}
-                    {card.whatsapp_share_url ? (
-                      <div className="promotion-actions">
-                        <a className="promotion-action-button secondary" href={card.whatsapp_share_url} target="_blank" rel="noreferrer">
-                          <MessageCircle size={15} />
-                          <span>{copy.buttons.shareToWhatsApp}</span>
-                        </a>
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          </article>
-        ))}
-      </div>
-    </AgentOutputCard>
+    />
   );
 }
 
+function formatAnalyticsNumber(value: number | null | undefined) {
+  return (value ?? 0).toLocaleString("en-PK");
+}
+
+function formatAnalyticsPercent(value: number | null | undefined) {
+  const safeValue = value ?? 0;
+  return `${safeValue.toFixed(safeValue % 1 === 0 ? 0 : 1)}%`;
+}
+
+function formatAnalyticsChannelLabel(channel: string | undefined) {
+  const labels: Record<string, string> = {
+    direct: "Direct",
+    facebook: "Facebook",
+    instagram: "Instagram",
+    portal: "Portal",
+    unknown: "Unknown",
+    whatsapp: "WhatsApp"
+  };
+
+  return channel ? labels[channel] ?? channel : "Not enough data";
+}
+
 function AnalyticsChatCard({ summary }: { summary: AnalyticsSummary }) {
-  return <AnalyticsSummaryCard compact summary={summary} />;
+  const topChannel = summary.channelPerformance?.[0];
+  const topListing = summary.listingPerformance?.[0];
+  const followUpStats = summary.followUpStats;
+
+  return (
+    <AnalyticsInsightCard
+      fields={[
+        { label: "Leads", value: formatAnalyticsNumber(summary.totals?.leads) },
+        { label: "Top channel", value: formatAnalyticsChannelLabel(topChannel?.channel) },
+        { label: "Top listing", value: topListing?.title || "Not enough data" },
+        { label: "Conversion", value: formatAnalyticsPercent(summary.totals?.pageViewConversionRate) }
+      ]}
+      insights={[
+        {
+          title: topChannel
+            ? `${formatAnalyticsChannelLabel(topChannel.channel)} is leading with ${formatAnalyticsNumber(topChannel.leads)} leads`
+            : "No channel has enough activity yet",
+          meta: topChannel ? `${formatAnalyticsPercent(topChannel.conversionRate)} conversion` : "Generate campaign links to start attribution."
+        },
+        {
+          title: followUpStats?.hotLeads
+            ? `${formatAnalyticsNumber(followUpStats.hotLeads)} hot leads need fast follow-up`
+            : "Follow-up queue is clear",
+          meta: followUpStats?.dueToday
+            ? `${formatAnalyticsNumber(followUpStats.dueToday)} due today · ${formatAnalyticsNumber(followUpStats.overdue)} overdue`
+            : "No urgent follow-up pressure in this range."
+        }
+      ]}
+      subtitle={summary.rangeLabel}
+      title="Performance summary"
+    />
+  );
 }
 
 function PromotionConfirmCard({
@@ -2544,7 +2649,7 @@ function PromotionConfirmCard({
   }
 
   return (
-    <AgentOutputCard
+    <PromotionTargetCard
       actions={
         <button
           className="primary-button small"
@@ -2564,35 +2669,31 @@ function PromotionConfirmCard({
           {hasGenerated ? copy.buttons.generated : isGenerating ? copy.buttons.generating : copy.buttons.generatePromotionPack}
         </button>
       }
-      className="promotion-confirm-card"
-      hint={copy.hints.chooseChannels}
-      icon={<Megaphone size={16} />}
-      summary={copy.hints.chooseChannels}
-      title={copy.generic.promotionTarget}
-      tone="promotion"
-    >
-      <div className="promotion-target-card">
-        <strong>{listing.title || copy.generic.untitledListing}</strong>
-        <span>
+      channels={promotionChannels.map((item) => ({
+        checked: selectedChannels.includes(item.channel),
+        disabled: isGenerating || hasGenerated,
+        icon: <ChannelLogo channel={item.channel} />,
+        id: item.channel,
+        label: item.label,
+        onToggle: () => toggleChannel(item.channel)
+      }))}
+      fields={[
+        { label: copy.generic.fieldArea, value: [listing.area_value, listing.area_unit].filter(Boolean).join(" ") || copy.generic.areaNotSet },
+        { label: "Location", value: [listing.location_area, listing.city].filter(Boolean).join(", ") || copy.generic.locationNotSet },
+        { label: "Output", value: "Copy + trackable links" },
+        { label: "Posting", value: "Manual only" }
+      ]}
+      hint="Campaign links are generated after confirmation. Nothing is posted automatically."
+      subtitle={copy.hints.chooseChannels}
+      targetMeta={
+        <>
           {[listing.area_value, listing.area_unit].filter(Boolean).join(" ") || copy.generic.areaNotSet} ·{" "}
           {[listing.location_area, listing.city].filter(Boolean).join(", ") || copy.generic.locationNotSet}
-        </span>
-      </div>
-      <div className="channel-selector">
-        {promotionChannels.map((item) => (
-          <label key={item.channel} className={selectedChannels.includes(item.channel) ? "selected" : ""}>
-            <input
-              checked={selectedChannels.includes(item.channel)}
-              disabled={isGenerating || hasGenerated}
-              type="checkbox"
-              onChange={() => toggleChannel(item.channel)}
-            />
-            <ChannelLogo channel={item.channel} />
-            <span>{item.label}</span>
-          </label>
-        ))}
-      </div>
-    </AgentOutputCard>
+        </>
+      }
+      targetTitle={listing.title || copy.generic.untitledListing}
+      title={copy.generic.promotionTarget}
+    />
   );
 }
 
@@ -2608,88 +2709,69 @@ function LeadResultsCard({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const language = detectAgentResponseLanguage(sourceMessage ?? "");
   const copy = getLeadCardCopy(language);
+  const visibleLeads = leads.slice(0, 5);
 
   return (
-    <AgentOutputCard
-      className="lead-chat-card"
-      icon={<MessageCircle size={16} />}
-      title={copy.title}
-      tone="lead"
-    >
-      {leads.length ? (
-        <div className="lead-chat-list">
-          {leads.slice(0, 5).map((lead) => {
-            const followUpRecommendation = isTodayFollowUpLead(lead) ? lead : null;
+    <LeadListCard
+      emptyText={copy.empty}
+      intent={onSelect ? "select" : "read"}
+      items={visibleLeads.map((lead) => {
+        const followUpRecommendation = isTodayFollowUpLead(lead) ? lead : null;
 
-            return (
-              <div className="lead-chat-row" key={lead.id}>
-                <div>
-                  <div className="lead-chat-row-title">
-                    <strong>{lead.full_name || copy.unnamedBuyer}</strong>
-                    <span className={getLeadStatusClassName(lead.status, lead.urgency)}>
-                      {formatLeadStatusForLanguage(lead.status, lead.urgency, language)}
-                    </span>
-                  </div>
-                  <div className="lead-chat-detail-list">
-                    <p>
-                      <span>Time</span>
-                      {getLeadContactTimeLabel(lead)}
-                    </p>
-                    <p>
-                      <span>Listing</span>
-                      {lead.listing_id ? (
-                        <Link
-                          className="lead-chat-listing-link"
-                          href={`/listings/${lead.listing_id}`}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          {getLeadListingLabel(lead)}
-                        </Link>
-                      ) : (
-                        getLeadListingLabel(lead)
-                      )}
-                    </p>
-                    <p>
-                      <span>Channel</span>
-                      {getLeadChannelLabel(lead)}
-                    </p>
-                    <p>
-                      <span>Content</span>
-                      {getLeadContentSummary(lead)}
-                    </p>
-                    {followUpRecommendation ? (
-                      <p>
-                        <span>Suggested reply</span>
-                        {followUpRecommendation.recommended_action}
-                      </p>
-                    ) : null}
-                  </div>
-                  <small>{lead.phone || copy.noPhone}</small>
-                </div>
-                <div className="lead-chat-row-action">
-                  {onSelect ? (
-                    <button
-                      className="outline-button small"
-                      type="button"
-                      disabled={selectedId === lead.id}
-                      onClick={() => {
-                        setSelectedId(lead.id);
-                        onSelect(lead);
-                      }}
-                    >
-                      {selectedId === lead.id ? copy.selected : copy.select}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <p className="agent-draft-status">{copy.empty}</p>
-      )}
-    </AgentOutputCard>
+        return {
+          action: onSelect ? (
+            <button
+              className="outline-button small"
+              type="button"
+              disabled={selectedId === lead.id}
+              onClick={() => {
+                setSelectedId(lead.id);
+                onSelect(lead);
+              }}
+            >
+              {selectedId === lead.id ? copy.selected : copy.select}
+            </button>
+          ) : null,
+          badge: (
+            <span className={getLeadStatusClassName(lead.status, lead.urgency)}>
+              {formatLeadStatusForLanguage(lead.status, lead.urgency, language)}
+            </span>
+          ),
+          details: [
+            { label: "Time", value: getLeadContactTimeLabel(lead) },
+            {
+              label: "Listing",
+              value: lead.listing_id ? (
+                <Link
+                  className="lead-chat-listing-link"
+                  href={`/listings/${lead.listing_id}`}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  {getLeadListingLabel(lead)}
+                </Link>
+              ) : (
+                getLeadListingLabel(lead)
+              )
+            },
+            { label: "Channel", value: getLeadChannelLabel(lead) },
+            { label: "Content", value: getLeadContentSummary(lead) },
+            ...(followUpRecommendation
+              ? [{ label: "Suggested reply", value: followUpRecommendation.recommended_action }]
+              : [])
+          ],
+          key: lead.id,
+          meta: lead.phone || copy.noPhone,
+          title: lead.full_name || copy.unnamedBuyer
+        };
+      })}
+      subtitle={
+        leads.length
+          ? `${Math.min(leads.length, 5)} lead${Math.min(leads.length, 5) === 1 ? "" : "s"} shown`
+          : copy.empty
+      }
+      title={copy.title}
+    />
   );
 }
 
@@ -2713,7 +2795,10 @@ function LeadLatestOfferCard({ onConfirm, sourceMessage }: { onConfirm: () => vo
         </button>
       }
       className="lead-chat-card"
+      domain="Lead"
       icon={<MessageCircle size={16} />}
+      intent="confirm"
+      summary="Show the latest lead only after confirmation."
       title={copy.lead.title}
       tone="lead"
     >
@@ -2742,9 +2827,40 @@ function LeadStatusConfirmCard({
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [form, setForm] = useState(() => ({
+    status: preview.status ?? "",
+    urgency: preview.urgency ?? ""
+  }));
   const [status, setStatus] = useState<string | null>(null);
   const language = getCardLanguage(sourceMessage);
   const copy = getAgentCardCopy(language);
+  const nextStatus = (form.status || undefined) as LeadRecord["status"] | undefined;
+  const nextUrgency = (form.urgency || undefined) as LeadRecord["urgency"] | undefined;
+  const leadTitle = preview.lead.full_name || copy.lead.unnamedBuyer;
+  const nextStatusLabel = nextStatus
+    ? formatLeadStatusForLanguage(nextStatus, nextUrgency, language)
+    : formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language);
+  const changes: LeadUpdateChangeItem[] = [
+    {
+      hidden: !nextStatus,
+      highlight: true,
+      label: copy.generic.fieldStatus,
+      previousValue: formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language),
+      value: nextStatusLabel
+    },
+    {
+      hidden: !nextUrgency,
+      label: "Urgency",
+      previousValue: preview.lead.urgency ?? "normal",
+      value: nextUrgency
+    },
+    {
+      hidden: !preview.summary,
+      label: copy.generic.followUpRecord,
+      value: preview.summary
+    }
+  ];
 
   async function handleConfirm() {
     if (isSaving || isSaved) {
@@ -2770,14 +2886,14 @@ function LeadStatusConfirmCard({
               activity_type: preview.activityType,
               channel: "whatsapp",
               summary: preview.summary,
-              new_status: preview.status,
-              urgency: preview.urgency ?? undefined,
+              new_status: nextStatus,
+              urgency: nextUrgency,
               source_type: "agent_chat"
             }
           : {
               id: preview.lead.id,
-              status: preview.status,
-              urgency: preview.urgency ?? undefined
+              status: nextStatus,
+              urgency: nextUrgency
             }
       )
     });
@@ -2802,34 +2918,62 @@ function LeadStatusConfirmCard({
   }
 
   return (
-    <AgentOutputCard
+    <LeadUpdateCard
       actions={
-        <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmUpdate}
-        </button>
+        <>
+          <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
+            <CheckCircle2 size={15} /> {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmUpdate}
+          </button>
+          <button
+            className="outline-button small"
+            type="button"
+            disabled={isSaving || isSaved}
+            onClick={() => setIsEditing(!isEditing)}
+          >
+            <Pencil size={14} /> {isEditing ? copy.buttons.preview : copy.buttons.editCard}
+          </button>
+        </>
       }
-      className="lead-chat-card"
-      hint={copy.hints.confirmLeadUpdate}
-      icon={<CheckCircle2 size={16} />}
-      status={status}
-      summary={preview.urgency ? `Urgency: ${preview.urgency}` : undefined}
-      title={copy.generic.confirmLeadUpdate}
-      tone="lead"
-    >
-      <div className="lead-chat-row standalone">
-        <div>
-          <strong>{preview.lead.full_name || copy.lead.unnamedBuyer}</strong>
-          <p>{getLeadInterestLine(preview.lead, language)}</p>
-          <small>
-            {formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language)} {preview.status ? `→ ${formatLeadStatusForLanguage(preview.status, preview.urgency, language)}` : ""} ·{" "}
-            {preview.lead.phone || copy.lead.noPhone}
-          </small>
+      changes={changes}
+      editForm={
+        <div className="agent-draft-form listing-update-edit-form">
+          <label>
+            <span>{copy.generic.fieldStatus}</span>
+            <select value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}>
+              <option value="">No status change</option>
+              <option value="new">{formatLeadStatusForLanguage("new", undefined, language)}</option>
+              <option value="contacted">{formatLeadStatusForLanguage("contacted", undefined, language)}</option>
+              <option value="qualified">{formatLeadStatusForLanguage("qualified", undefined, language)}</option>
+              <option value="lost">{formatLeadStatusForLanguage("lost", undefined, language)}</option>
+              <option value="closed">{formatLeadStatusForLanguage("closed", undefined, language)}</option>
+            </select>
+          </label>
+          <label>
+            <span>Urgency</span>
+            <select value={form.urgency} onChange={(event) => setForm((current) => ({ ...current, urgency: event.target.value }))}>
+              <option value="">No urgency change</option>
+              <option value="low">low</option>
+              <option value="normal">normal</option>
+              <option value="high">high</option>
+            </select>
+          </label>
         </div>
-        <span className={getLeadStatusClassName(preview.status ?? preview.lead.status, preview.urgency ?? preview.lead.urgency)}>
-          {formatLeadStatusForLanguage(preview.status ?? preview.lead.status, preview.urgency ?? preview.lead.urgency, language)}
-        </span>
-      </div>
-    </AgentOutputCard>
+      }
+      hint={copy.hints.confirmLeadUpdate}
+      isEditing={isEditing}
+      status={status}
+      subtitle={preview.urgency ? `Urgency: ${preview.urgency}` : undefined}
+      target={{
+        badge: <span className={getLeadStatusClassName(nextStatus ?? preview.lead.status, nextUrgency ?? preview.lead.urgency)}>{nextStatusLabel}</span>,
+        meta: (
+          <>
+            {formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language)} · {preview.lead.phone || copy.lead.noPhone}
+          </>
+        ),
+        title: leadTitle
+      }}
+      title={copy.generic.confirmLeadUpdate}
+    />
   );
 }
 
@@ -2856,12 +3000,21 @@ function LeadDetailsConfirmCard({
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [form, setForm] = useState(() => createLeadDetailsUpdateFormState(preview.changes));
   const [status, setStatus] = useState<string | null>(null);
   const language = getCardLanguage(sourceMessage);
   const copy = getAgentCardCopy(language);
   const entries = Object.entries(preview.changes).filter(([, value]) => value !== undefined) as Array<
     [keyof LeadDetailsUpdateChanges, string | null]
   >;
+  const editedChanges = parseLeadDetailsUpdateFormState(form);
+  const leadTitle = preview.lead.full_name || copy.lead.unnamedBuyer;
+  const changes: LeadUpdateChangeItem[] = entries.map(([field, nextValue]) => ({
+    label: leadDetailsFieldLabels[field],
+    previousValue: formatListingUpdateValue(getLeadValue(preview.lead, field), field),
+    value: formatListingUpdateValue(editedChanges[field] ?? nextValue, field)
+  }));
 
   async function handleConfirm() {
     if (isSaving || isSaved) {
@@ -2882,7 +3035,7 @@ function LeadDetailsConfirmCard({
       },
       body: JSON.stringify({
         id: preview.lead.id,
-        ...preview.changes
+        ...editedChanges
       })
     });
 
@@ -2906,39 +3059,67 @@ function LeadDetailsConfirmCard({
   }
 
   return (
-    <AgentOutputCard
+    <LeadUpdateCard
       actions={
-        <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmUpdate}
-        </button>
+        <>
+          <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
+            <CheckCircle2 size={15} /> {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmUpdate}
+          </button>
+          <button
+            className="outline-button small"
+            type="button"
+            disabled={isSaving || isSaved}
+            onClick={() => setIsEditing(!isEditing)}
+          >
+            <Pencil size={14} /> {isEditing ? copy.buttons.preview : copy.buttons.editCard}
+          </button>
+        </>
       }
-      className="lead-chat-card"
-      hint={copy.hints.reviewLeadFields}
-      icon={<Pencil size={16} />}
-      status={status}
-      title={copy.generic.confirmLeadDetails}
-      tone="lead"
-    >
-      <div className="lead-chat-row standalone">
-        <div>
-          <strong>{preview.lead.full_name || copy.lead.unnamedBuyer}</strong>
-          <p>{getLeadInterestLine(preview.lead, language)}</p>
-          <small>{preview.lead.phone || copy.lead.noPhone}</small>
+      changes={changes}
+      editForm={
+        <div className="agent-draft-form listing-update-edit-form">
+          {entries.map(([field]) => {
+            const label = leadDetailsFieldLabels[field];
+            const value = form[field] ?? "";
+            const updateValue = (nextValue: string) => setForm((current) => ({ ...current, [field]: nextValue }));
+
+            if (field === "message") {
+              return (
+                <label key={field}>
+                  <span>{label}</span>
+                  <textarea value={value} onChange={(event) => updateValue(event.target.value)} />
+                </label>
+              );
+            }
+
+            return (
+              <label key={field}>
+                <span>{label}</span>
+                <input
+                  inputMode={field === "phone" ? "tel" : field === "email" ? "email" : undefined}
+                  value={value}
+                  onChange={(event) => updateValue(event.target.value)}
+                />
+              </label>
+            );
+          })}
         </div>
-        <span className={getLeadStatusClassName(preview.lead.status, preview.lead.urgency)}>{formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language)}</span>
-      </div>
-      <div className="listing-update-list">
-        {entries.map(([field, nextValue]) => (
-          <div className="listing-update-row" key={field}>
-            <span>{leadDetailsFieldLabels[field]}</span>
-            <div>
-              <small>{formatListingUpdateValue(getLeadValue(preview.lead, field), field)}</small>
-              <strong>{formatListingUpdateValue(nextValue, field)}</strong>
-            </div>
-          </div>
-        ))}
-      </div>
-    </AgentOutputCard>
+      }
+      hint={copy.hints.reviewLeadFields}
+      isEditing={isEditing}
+      status={status}
+      subtitle={preview.lead.phone || copy.lead.noPhone}
+      target={{
+        badge: (
+          <span className={getLeadStatusClassName(preview.lead.status, preview.lead.urgency)}>
+            {formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language)}
+          </span>
+        ),
+        meta: getLeadInterestLine(preview.lead, language),
+        title: leadTitle
+      }}
+      title={copy.generic.confirmLeadDetails}
+    />
   );
 }
 
@@ -3063,8 +3244,11 @@ function LeadCreateConfirmCard({
     setIsSaving(false);
   }
 
+  const targetTitle = draftToSave.full_name || draftToSave.phone || copy.lead.unnamedBuyer;
+  const targetMeta = [draftToSave.phone, draftToSave.email, draftToSave.source_channel].filter(Boolean).join(" · ");
+
   return (
-    <AgentOutputCard
+    <LeadCreateCard
       actions={
         <>
           <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
@@ -3080,14 +3264,7 @@ function LeadCreateConfirmCard({
           </button>
         </>
       }
-      className="lead-chat-card"
-      hint={copy.hints.confirmNewLead}
-      icon={<UserPlus size={16} />}
-      status={status}
-      title={copy.generic.confirmNewLead}
-      tone="lead"
-    >
-      {isEditing ? (
+      editForm={
         <div className="agent-draft-form">
           <div className="agent-draft-grid">
             <label>
@@ -3157,38 +3334,27 @@ function LeadCreateConfirmCard({
             />
           </label>
         </div>
-      ) : (
-        <div className="listing-update-list">
-          {[
-            [copy.generic.fieldName, draftToSave.full_name],
-            [copy.generic.fieldPhone, draftToSave.phone],
-            [copy.generic.fieldEmail, draftToSave.email],
-            [copy.generic.fieldStatus, formatLeadStatusForLanguage(draftToSave.status ?? "new", draftToSave.urgency ?? "normal", language)],
-            ["Source", draftToSave.source_channel],
-            [copy.generic.fieldMessage, draftToSave.message]
-          ]
-            .filter(([, value]) => Boolean(value))
-            .map(([label, value]) => (
-              <div className="listing-update-row" key={label}>
-                <span>{label}</span>
-                <div>
-                  <strong>{String(value)}</strong>
-                </div>
-              </div>
-            ))}
-        </div>
-      )}
-      {preview.followUp ? (
-        <div className="listing-update-list compact">
-          <div className="listing-update-row">
-            <span>{copy.generic.followUpRecord}</span>
-            <div>
-              <strong>{preview.followUp.summary}</strong>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </AgentOutputCard>
+      }
+      fields={[
+        {
+          label: copy.generic.fieldStatus,
+          value: formatLeadStatusForLanguage(draftToSave.status ?? "new", draftToSave.urgency ?? "normal", language)
+        },
+        { hidden: !draftToSave.message, label: copy.generic.fieldMessage, value: draftToSave.message },
+        { label: "Source", value: draftToSave.source_channel }
+      ]}
+      followUp={preview.followUp?.summary}
+      followUpLabel={copy.generic.followUpRecord}
+      hint={copy.hints.confirmNewLead}
+      isEditing={isEditing}
+      status={status}
+      subtitle={copy.hints.confirmNewLead}
+      target={{
+        meta: targetMeta,
+        title: targetTitle
+      }}
+      title={copy.generic.confirmNewLead}
+    />
   );
 }
 
@@ -3391,27 +3557,31 @@ function LeadListingConfirmCard({
       title={copy.generic.confirmLeadListing}
       tone="lead"
     >
-      <div className="lead-chat-row standalone">
-        <div>
-          <strong>{preview.lead.full_name || preview.lead.phone || copy.lead.unnamedBuyer}</strong>
-          <p>{getLeadInterestLine(preview.lead, language)}</p>
-          <small>{preview.lead.phone || copy.lead.noPhone}</small>
-        </div>
-        <span className={getLeadStatusClassName(preview.lead.status, preview.lead.urgency)}>{formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language)}</span>
-      </div>
-      <div className="listing-update-list">
-        <div className="listing-update-row">
-          <span>{copy.generic.primaryListing}</span>
-          <div>
-            <small>{currentListingLabel}</small>
-            <strong>
-              {nextListingLabel} ·{" "}
-              {[preview.listing.location_area, preview.listing.city].filter(Boolean).join(", ") ||
-                copy.generic.locationNotSet}
-            </strong>
-          </div>
-        </div>
-      </div>
+      <AgentObjectSummary
+        badge={
+          <span className={getLeadStatusClassName(preview.lead.status, preview.lead.urgency)}>
+            {formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language)}
+          </span>
+        }
+        description={getLeadInterestLine(preview.lead, language)}
+        meta={preview.lead.phone || copy.lead.noPhone}
+        title={preview.lead.full_name || preview.lead.phone || copy.lead.unnamedBuyer}
+      />
+      <AgentFieldList
+        fields={[
+          {
+            label: copy.generic.primaryListing,
+            previousValue: currentListingLabel,
+            value: (
+              <>
+                {nextListingLabel} ·{" "}
+                {[preview.listing.location_area, preview.listing.city].filter(Boolean).join(", ") ||
+                  copy.generic.locationNotSet}
+              </>
+            )
+          }
+        ]}
+      />
     </AgentOutputCard>
   );
 }
@@ -3449,9 +3619,29 @@ function ListingUpdateConfirmCard({
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [form, setForm] = useState(() => createListingUpdateFormState(preview.changes));
   const [status, setStatus] = useState<string | null>(null);
   const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
   const entries = Object.entries(preview.changes).filter(([, value]) => value !== undefined);
+  const editedChanges = Object.fromEntries(
+    entries.map(([field]) => [field, parseListingUpdateFormValue(field, form[field] ?? "")])
+  ) as ListingUpdateChanges;
+  const listingLocation =
+    [preview.listing.location_area, preview.listing.city].filter(Boolean).join(", ") || copy.generic.locationNotSet;
+  const listingShape = [
+    preview.listing.bedrooms ? `${preview.listing.bedrooms}BHK` : null,
+    preview.listing.property_type
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const targetMeta = [preview.listing.status, listingLocation, listingShape].filter(Boolean).join(" · ");
+  const changes: ListingUpdateChangeItem[] = entries.map(([field, nextValue]) => ({
+    highlight: field === "price_amount",
+    label: listingUpdateFieldLabels[field] ?? field,
+    previousValue: formatListingUpdateValue(getListingValue(preview.listing, field as keyof ListingUpdateChanges), field),
+    value: formatListingUpdateValue(editedChanges[field as keyof ListingUpdateChanges] ?? nextValue, field)
+  }));
 
   async function handleConfirm() {
     if (isSaving || isSaved) {
@@ -3472,7 +3662,7 @@ function ListingUpdateConfirmCard({
       },
       body: JSON.stringify({
         id: preview.listing.id,
-        ...preview.changes
+        ...editedChanges
       })
     });
 
@@ -3497,38 +3687,107 @@ function ListingUpdateConfirmCard({
   }
 
   return (
-    <AgentOutputCard
+    <ListingUpdateCard
       actions={
-        <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmUpdate}
-        </button>
+        <>
+          <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
+            <CheckCircle2 size={15} /> {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmUpdate}
+          </button>
+          <button
+            className="outline-button small"
+            type="button"
+            disabled={isSaving || isSaved}
+            onClick={() => setIsEditing(!isEditing)}
+          >
+            <Pencil size={14} /> {isEditing ? copy.buttons.preview : copy.buttons.editCard}
+          </button>
+        </>
       }
-      className="listing-update-card"
-      hint={copy.hints.listingUpdate}
-      icon={<Pencil size={16} />}
+      changes={changes}
+      editForm={
+        <div className="agent-draft-form listing-update-edit-form">
+          {entries.map(([field]) => {
+            const label = listingUpdateFieldLabels[field] ?? field;
+            const value = form[field] ?? "";
+            const updateValue = (nextValue: string) => setForm((current) => ({ ...current, [field]: nextValue }));
+
+            if (field === "description") {
+              return (
+                <label key={field}>
+                  <span>{label}</span>
+                  <textarea value={value} onChange={(event) => updateValue(event.target.value)} />
+                </label>
+              );
+            }
+
+            if (field === "listing_type") {
+              return (
+                <label key={field}>
+                  <span>{label}</span>
+                  <select value={value} onChange={(event) => updateValue(event.target.value)}>
+                    <option value="">Not set</option>
+                    <option value="sale">sale</option>
+                    <option value="rent">rent</option>
+                  </select>
+                </label>
+              );
+            }
+
+            if (field === "status") {
+              return (
+                <label key={field}>
+                  <span>{label}</span>
+                  <select value={value} onChange={(event) => updateValue(event.target.value)}>
+                    <option value="">Not set</option>
+                    <option value="draft">draft</option>
+                    <option value="published">published</option>
+                    <option value="archived">archived</option>
+                  </select>
+                </label>
+              );
+            }
+
+            if (field === "area_unit") {
+              return (
+                <label key={field}>
+                  <span>{label}</span>
+                  <select value={value} onChange={(event) => updateValue(event.target.value)}>
+                    <option value="">Not set</option>
+                    <option value="kanal">kanal</option>
+                    <option value="marla">marla</option>
+                    <option value="sqft">sqft</option>
+                    <option value="sqm">sqm</option>
+                  </select>
+                </label>
+              );
+            }
+
+            return (
+              <label key={field}>
+                <span>{label}</span>
+                <input
+                  inputMode={
+                    field === "price_amount" || field === "area_value" || field === "bedrooms" || field === "bathrooms"
+                      ? "decimal"
+                      : undefined
+                  }
+                  value={value}
+                  onChange={(event) => updateValue(event.target.value)}
+                />
+              </label>
+            );
+          })}
+        </div>
+      }
+      isEditing={isEditing}
       status={status}
+      subtitle={copy.hints.listingUpdate}
+      target={{
+        meta: targetMeta,
+        title: preview.listing.title || copy.generic.untitledListing
+      }}
       title={copy.generic.confirmListingUpdate}
-      tone="listing"
-    >
-      <div className="promotion-target-card">
-        <strong>{preview.listing.title || copy.generic.untitledListing}</strong>
-        <span>
-          {[preview.listing.area_value, preview.listing.area_unit].filter(Boolean).join(" ") || copy.generic.areaNotSet} ·{" "}
-          {[preview.listing.location_area, preview.listing.city].filter(Boolean).join(", ") || copy.generic.locationNotSet}
-        </span>
-      </div>
-      <div className="listing-update-list">
-        {entries.map(([field, nextValue]) => (
-          <div className="listing-update-row" key={field}>
-            <span>{listingUpdateFieldLabels[field] ?? field}</span>
-            <div>
-              <small>{formatListingUpdateValue(getListingValue(preview.listing, field as keyof ListingUpdateChanges), field)}</small>
-              <strong>{formatListingUpdateValue(nextValue, field)}</strong>
-            </div>
-          </div>
-        ))}
-      </div>
-    </AgentOutputCard>
+    />
   );
 }
 
@@ -3547,8 +3806,9 @@ function ListingUpdateSelectionCard({
   return (
     <AgentOutputCard
       className="listing-update-card"
-      hint={copy.hints.selectListing}
+      domain="Listing · Select"
       icon={<House size={16} />}
+      intent="select"
       summary={copy.hints.selectListing}
       title={copy.generic.chooseListingToUpdate}
       tone="listing"
@@ -3624,8 +3884,9 @@ function EntitySelectionCard({
         ) : null
       }
       className={isListingTarget ? "listing-update-card" : "lead-chat-card"}
-      hint={copy.hints.selectRecord}
+      domain={isListingTarget ? "Selection · Listing" : "Selection · Lead"}
       icon={isListingTarget ? <House size={16} /> : <MessageCircle size={16} />}
+      intent="select"
       summary={helper}
       title={title}
       tone={isListingTarget ? "listing" : "lead"}
@@ -3706,7 +3967,8 @@ function LeadReplyCard({
 }) {
   const [copied, setCopied] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
-  const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
+  const language = getCardLanguage(sourceMessage);
+  const copy = getAgentCardCopy(language);
 
   async function handleCopy() {
     await copyToClipboard(draft.reply_text);
@@ -3752,7 +4014,7 @@ function LeadReplyCard({
   }
 
   return (
-    <AgentOutputCard
+    <LeadReplyAgentCard
       actions={
         <>
           <button className="outline-button small" type="button" onClick={() => void handleCopy()}>
@@ -3763,15 +4025,15 @@ function LeadReplyCard({
           </button>
         </>
       }
-      className="lead-chat-card"
-      icon={<MessageCircle size={16} />}
-      summary={draft.next_step}
+      fields={[
+        { label: "Channel", value: "WhatsApp" },
+        { label: "Next step", value: draft.next_step }
+      ]}
+      replyText={draft.reply_text}
       status={status}
+      subtitle="WhatsApp reply draft · not sent"
       title={copy.generic.whatsappReplyDraft}
-      tone="lead"
-    >
-      <p className="lead-chat-reply">{draft.reply_text}</p>
-    </AgentOutputCard>
+    />
   );
 }
 
@@ -3857,11 +4119,15 @@ function ChatFollowupSummaryCard({
   }
 
   return (
-    <div className="chat-import-card">
-      <div className="card-title">
-        <FileText size={16} /> WhatsApp chat follow-up
-      </div>
-
+    <AgentOutputCard
+      className="chat-followup-summary-card"
+      domain="Follow-up"
+      icon={<FileText size={16} />}
+      intent={summary ? "read" : "select"}
+      summary={summary ? `${sourceLabel} · ${targetLead ? matchedLeadLabel : copy.generic.notMatched}` : "Choose the WhatsApp text to summarize."}
+      title="WhatsApp chat follow-up"
+      tone="lead"
+    >
       {preview.zipCandidates?.length && !summary ? (
         <div className="zip-candidate-list" role="group" aria-label={copy.buttons.select}>
           <span>{copy.buttons.select}</span>
@@ -3901,32 +4167,22 @@ function ChatFollowupSummaryCard({
               ))}
             </div>
           ) : null}
-          <div className="chat-import-fields">
-            <div>
-              <span>{copy.generic.chooseLead}</span>
-              <strong>{targetLead ? matchedLeadLabel : copy.generic.notMatched}</strong>
-            </div>
-            <div>
-              <span>{copy.generic.fieldPhone}</span>
-              <strong>{targetLead?.phone || summary.detected_phone || copy.generic.notDetected}</strong>
-            </div>
-            <div>
-              <span>{copy.generic.fieldStatus}</span>
-              <strong>{targetLead ? formatLeadStatusForLanguage(targetLead.status, targetLead.urgency, language) : copy.lead.empty}</strong>
-            </div>
-            <div>
-              <span>{copy.generic.fieldName}</span>
-              <strong>{summary.detected_customer_name || targetLead?.full_name || copy.generic.notDetected}</strong>
-            </div>
-            <div>
-              <span>Source</span>
-              <strong>{sourceLabel}</strong>
-            </div>
-          </div>
+          <AgentInfoGrid
+            fields={[
+              { label: copy.generic.chooseLead, value: targetLead ? matchedLeadLabel : copy.generic.notMatched },
+              { label: copy.generic.fieldPhone, value: targetLead?.phone || summary.detected_phone || copy.generic.notDetected },
+              {
+                label: copy.generic.fieldStatus,
+                value: targetLead ? formatLeadStatusForLanguage(targetLead.status, targetLead.urgency, language) : copy.lead.empty
+              },
+              { label: copy.generic.fieldName, value: summary.detected_customer_name || targetLead?.full_name || copy.generic.notDetected },
+              { label: "Source", value: sourceLabel }
+            ]}
+          />
 
           <div className="chat-next-actions" aria-label={copy.buttons.select}>
             <span>{copy.buttons.select}</span>
-            <div className="card-actions">
+            <AgentActionGroup label={copy.buttons.select}>
               <button
                 className={activeAction === "reply" ? "primary-button small" : "outline-button small"}
                 type="button"
@@ -3978,42 +4234,13 @@ function ChatFollowupSummaryCard({
                   </button>
                 </>
               )}
-            </div>
+            </AgentActionGroup>
           </div>
           {activeAction ? <p className="agent-draft-status">{copy.buttons.selected}</p> : null}
         </>
       ) : null}
       {status ? <p className="agent-draft-status">{status}</p> : null}
-    </div>
-  );
-}
-
-function LeadMiniCard({ lead, sourceMessage }: { lead: LeadListItem; sourceMessage?: string }) {
-  const language = getCardLanguage(sourceMessage);
-  const copy = getAgentCardCopy(language);
-  return (
-    <div className="chat-lead-mini-card">
-      <div>
-        <span>{copy.generic.chooseLead}</span>
-        <strong>{lead.full_name || lead.phone || copy.lead.unnamedBuyer}</strong>
-      </div>
-      <div>
-        <span>{copy.generic.fieldStatus}</span>
-        <strong>{formatLeadStatusForLanguage(lead.status, lead.urgency, language)}</strong>
-      </div>
-      {lead.phone ? (
-        <div>
-          <span>{copy.generic.fieldPhone}</span>
-          <strong>{lead.phone}</strong>
-        </div>
-      ) : null}
-      {lead.listing_title ? (
-        <div>
-          <span>{copy.generic.primaryListing}</span>
-          <strong>{lead.listing_title}</strong>
-        </div>
-      ) : null}
-    </div>
+    </AgentOutputCard>
   );
 }
 
@@ -4034,7 +4261,15 @@ function ChatReplyActionCard({ preview, sourceMessage }: { preview: ChatReplyAct
   }
 
   return (
-    <div className="chat-reply-card" aria-label={copy.generic.whatsappReplyDraft}>
+    <AgentOutputCard
+      className="chat-reply-action-card"
+      domain="Lead · Reply"
+      icon={<MessageCircle size={16} />}
+      intent="read"
+      summary={lead?.full_name || lead?.phone || copy.lead.unnamedBuyer}
+      title={copy.generic.whatsappReplyDraft}
+      tone="lead"
+    >
       <button className="icon-button subtle" type="button" aria-label={copy.buttons.copy} title={copy.buttons.copy} onClick={() => void copyReply()}>
         {isCopied ? <CheckCircle2 size={16} /> : <Copy size={16} />}
       </button>
@@ -4042,7 +4277,7 @@ function ChatReplyActionCard({ preview, sourceMessage }: { preview: ChatReplyAct
         {summary.reply_draft.reply_text}
       </div>
       {status ? <p className="agent-draft-status">{status}</p> : null}
-    </div>
+    </AgentOutputCard>
   );
 }
 
@@ -4052,7 +4287,6 @@ function ChatFollowupManageCard({
   preview,
   onSaved,
   onNeedsReminder,
-  onDeclined,
   sourceMessage
 }: {
   isGuest?: boolean;
@@ -4060,10 +4294,9 @@ function ChatFollowupManageCard({
   preview: ChatFollowupManagePreview;
   onSaved: (message: string, updatedLead?: LeadRecord | null) => void;
   onNeedsReminder: (preview: ChatFollowupManagePreview) => void;
-  onDeclined: () => void;
   sourceMessage?: string;
 }) {
-  const [decision, setDecision] = useState<"yes" | "no" | null>(null);
+  const [decision, setDecision] = useState<"yes" | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [isWorking, setIsWorking] = useState(false);
   const [followUpTime] = useState(() => new Date());
@@ -4077,6 +4310,12 @@ function ChatFollowupManageCard({
       : action === "reminder"
         ? copy.generic.schedulePreview
         : copy.generic.followUpRecord;
+  const primaryActionLabel =
+    action === "status"
+      ? copy.buttons.confirmUpdate
+      : action === "reminder"
+        ? copy.buttons.confirmSchedule
+        : copy.buttons.confirmSave;
   const followUpTimeLabel = followUpTime.toLocaleString("en-PK", {
     year: "numeric",
     month: "short",
@@ -4136,66 +4375,69 @@ function ChatFollowupManageCard({
     }
   }
 
-  function declineSuggestion() {
-    if (decision || isWorking) {
-      return;
-    }
-
-    setDecision("no");
-    setStatus("No changes made.");
-    onDeclined();
-  }
-
   if (!action) {
     return null;
   }
 
+  const targetTitle = preview.lead.full_name || preview.lead.phone || copy.lead.unnamedBuyer;
+  const targetMeta = [
+    preview.lead.phone,
+    preview.lead.listing_title || preview.lead.listing_area,
+    formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language)
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const fields =
+    action === "status"
+      ? [
+          {
+            label: copy.generic.fieldStatus,
+            previousValue: formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language),
+            value: formatLeadStatusForLanguage(suggestedStatus.status, suggestedStatus.urgency, language)
+          }
+        ]
+      : action === "reminder"
+        ? [
+            {
+              label: "Next step",
+              value: preview.summary.next_action_suggestion || "Follow up on this WhatsApp chat."
+            }
+          ]
+        : [
+            {
+              label: copy.generic.fieldIntent,
+              value: preview.summary.next_action_suggestion || preview.summary.chat_summary
+            }
+          ];
+
   return (
-    <div className="chat-import-card">
-      <div className="card-title">
-        <FileText size={16} /> {title}
-      </div>
-      {action === "status" ? (
-        <div className="chat-status-change" aria-label="Suggested status change">
-          <span>{preview.lead.full_name || preview.lead.phone || copy.lead.unnamedBuyer}</span>
-          <div className="chat-status-change-row">
-            <strong className={getLeadStatusClassName(preview.lead.status, preview.lead.urgency)}>{formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language)}</strong>
-            <span className="chat-status-arrow">→</span>
-            <strong className={getLeadStatusClassName(suggestedStatus.status, suggestedStatus.urgency, "target")}>
-              {formatLeadStatusForLanguage(suggestedStatus.status, suggestedStatus.urgency, language)}
-            </strong>
-          </div>
-        </div>
-      ) : (
-        <div className="chat-compact-lead-line">
-          <span>{preview.lead.full_name || preview.lead.phone || copy.lead.unnamedBuyer}</span>
-        </div>
-      )}
-      <div className="chat-followup-record">
-        <div className="chat-followup-record-header">
-          <span>{copy.generic.followUpRecord}</span>
-          <small>{followUpTimeLabel}</small>
-        </div>
-        <p>{preview.summary.chat_summary}</p>
-      </div>
-      {action === "reminder" ? (
-        <div className="chat-import-fields single">
-          <div>
-            <span>{copy.generic.fieldMessage}</span>
-            <strong>{preview.summary.next_action_suggestion || "Follow up on this WhatsApp chat."}</strong>
-          </div>
-        </div>
-      ) : null}
-      <div className="card-actions">
-        <button className="primary-button small" type="button" disabled={Boolean(decision) || isWorking} onClick={() => void acceptSuggestion()}>
-          <CheckCircle2 size={15} /> Yes
-        </button>
-        <button className="outline-button small" type="button" disabled={Boolean(decision) || isWorking} onClick={declineSuggestion}>
-          <X size={15} /> No
-        </button>
-      </div>
-      {status ? <p className="agent-draft-status">{status}</p> : null}
-    </div>
+    <LeadFollowupAgentCard
+      actions={
+        <>
+          <button className="primary-button small" type="button" disabled={Boolean(decision) || isWorking} onClick={() => void acceptSuggestion()}>
+            {action === "reminder" ? <CalendarClock size={15} /> : <CheckCircle2 size={15} />} {primaryActionLabel}
+          </button>
+        </>
+      }
+      fields={fields}
+      record={{
+        body: preview.summary.chat_summary,
+        label: copy.generic.followUpRecord,
+        meta: followUpTimeLabel
+      }}
+      status={status}
+      steps={[
+        action === "status" ? "Status suggested" : action === "reminder" ? "Reminder suggested" : "Note suggested",
+        "Matched lead",
+        "Review before saving"
+      ]}
+      subtitle={targetTitle}
+      target={{
+        meta: targetMeta,
+        title: targetTitle
+      }}
+      title={title}
+    />
   );
 }
 
@@ -4233,20 +4475,21 @@ function ChatLeadChoiceCard({
   }
 
   return (
-    <div className="chat-import-card">
-      <div className="card-title">
-        <UserPlus size={16} /> {copy.generic.chooseLead}
-      </div>
-      <div className="chat-import-fields">
-        <div>
-          <span>{copy.generic.fieldName}</span>
-          <strong>{preview.summary.detected_customer_name || copy.generic.notDetected}</strong>
-        </div>
-        <div>
-          <span>{copy.generic.fieldPhone}</span>
-          <strong>{preview.summary.detected_phone || copy.generic.notDetected}</strong>
-        </div>
-      </div>
+    <AgentOutputCard
+      className="chat-lead-choice-card"
+      domain="Selection · Lead"
+      icon={<UserPlus size={16} />}
+      intent="select"
+      summary={hasDetectedIdentity ? "Match the WhatsApp chat to an existing lead." : copy.lead.empty}
+      title={copy.generic.chooseLead}
+      tone="lead"
+    >
+      <AgentInfoGrid
+        fields={[
+          { label: copy.generic.fieldName, value: preview.summary.detected_customer_name || copy.generic.notDetected },
+          { label: copy.generic.fieldPhone, value: preview.summary.detected_phone || copy.generic.notDetected }
+        ]}
+      />
       {candidates.length ? (
         <div className="lead-candidate-list" role="group" aria-label={copy.generic.chooseLead}>
           <span>{copy.generic.chooseLead}</span>
@@ -4269,15 +4512,15 @@ function ChatLeadChoiceCard({
         <p className="agent-draft-status">{copy.lead.empty}</p>
       )}
       {hasDetectedIdentity ? (
-        <div className="card-actions">
+        <AgentActionGroup label={copy.generic.chooseLead}>
           <button className="outline-button small" type="button" disabled={Boolean(selectedLeadId) || created} onClick={createLead}>
             <UserPlus size={14} /> {copy.generic.confirmNewLead}
           </button>
-        </div>
+        </AgentActionGroup>
       ) : null}
       {selectedLeadId ? <p className="agent-draft-status">{copy.buttons.selected}</p> : null}
       {created ? <p className="agent-draft-status">{copy.generic.confirmNewLead}</p> : null}
-    </div>
+    </AgentOutputCard>
   );
 }
 
@@ -4324,24 +4567,33 @@ function ChatFollowupNoteCard({
   }
 
   return (
-    <div className="chat-import-card">
-      <div className="card-title">
-        <FileText size={16} /> {copy.generic.followUpRecord}
-      </div>
-      <LeadMiniCard lead={preview.lead} sourceMessage={sourceMessage} />
-      <div className="chat-import-fields single">
-        <div>
-          <span>{copy.generic.fieldMessage}</span>
-          <strong>{preview.summary.chat_summary}</strong>
-        </div>
-      </div>
-      <div className="card-actions">
-        <button className="primary-button small" type="button" disabled={isSaved || isWorking} onClick={() => void saveNote()}>
-          <CheckCircle2 size={15} /> {copy.buttons.confirmSave}
-        </button>
-      </div>
-      {status ? <p className="agent-draft-status">{status}</p> : null}
-    </div>
+    <LeadFollowupAgentCard
+      actions={
+        <>
+          <button className="primary-button small" type="button" disabled={isSaved || isWorking} onClick={() => void saveNote()}>
+            <CheckCircle2 size={15} /> {copy.buttons.confirmSave}
+          </button>
+        </>
+      }
+      record={{
+        body: preview.summary.chat_summary,
+        label: copy.generic.followUpRecord
+      }}
+      status={status}
+      steps={["Note suggested", "Matched lead", "Review before saving"]}
+      subtitle={preview.lead.full_name || preview.lead.phone || copy.lead.unnamedBuyer}
+      target={{
+        meta: [
+          preview.lead.phone,
+          preview.lead.listing_title || preview.lead.listing_area,
+          formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, getCardLanguage(sourceMessage))
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        title: preview.lead.full_name || preview.lead.phone || copy.lead.unnamedBuyer
+      }}
+      title={copy.generic.followUpRecord}
+    />
   );
 }
 
@@ -4401,11 +4653,33 @@ function ChatReminderCard({
   }
 
   return (
-    <div className="chat-import-card">
-      <div className="card-title">
-        <CalendarClock size={16} /> {copy.generic.schedulePreview}
-      </div>
-      <LeadMiniCard lead={preview.lead} sourceMessage={sourceMessage} />
+    <LeadFollowupAgentCard
+      actions={
+        <>
+          <button className="primary-button small" type="button" disabled={isSaved || isWorking} onClick={() => void saveReminder()}>
+            <CalendarClock size={15} /> {copy.buttons.confirmSchedule}
+          </button>
+        </>
+      }
+      record={{
+        body: preview.summary.chat_summary,
+        label: copy.generic.followUpRecord
+      }}
+      status={status}
+      steps={["Reminder suggested", "Matched lead", "Review before saving"]}
+      subtitle={preview.lead.full_name || preview.lead.phone || copy.lead.unnamedBuyer}
+      target={{
+        meta: [
+          preview.lead.phone,
+          preview.lead.listing_title || preview.lead.listing_area,
+          formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, getCardLanguage(sourceMessage))
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        title: preview.lead.full_name || preview.lead.phone || copy.lead.unnamedBuyer
+      }}
+      title={copy.generic.schedulePreview}
+    >
       <div className="chat-action-nested">
         <label>
           <span>{copy.generic.schedulePreview}</span>
@@ -4416,13 +4690,7 @@ function ChatReminderCard({
           <input value={note} disabled={isSaved} onChange={(event) => setNote(event.target.value)} />
         </label>
       </div>
-      <div className="card-actions">
-        <button className="primary-button small" type="button" disabled={isSaved || isWorking} onClick={() => void saveReminder()}>
-          <CalendarClock size={15} /> {copy.buttons.confirmSchedule}
-        </button>
-      </div>
-      {status ? <p className="agent-draft-status">{status}</p> : null}
-    </div>
+    </LeadFollowupAgentCard>
   );
 }
 
@@ -4476,30 +4744,41 @@ function ChatStatusCard({
   }
 
   return (
-    <div className="chat-import-card">
-      <div className="card-title">
-        <CheckCircle2 size={16} /> {copy.generic.confirmLeadUpdate}
-      </div>
-      <LeadMiniCard lead={preview.lead} sourceMessage={sourceMessage} />
-      <div className="chat-import-fields single">
-        <div>
-          <span>{copy.generic.fieldStatus}</span>
-          <strong>{formatLeadStatusForLanguage(preview.summary.status_suggestion, preview.summary.urgency_suggestion, language)}</strong>
-        </div>
-      </div>
-      <div className="card-actions">
-        <button className="primary-button small" type="button" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("qualified", "high")}>
-          <CheckCircle2 size={15} /> {formatLeadStatusForLanguage("qualified", "high", language)}
-        </button>
-        <button className="outline-button small" type="button" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("contacted")}>
-          <CheckCircle2 size={15} /> {formatLeadStatusForLanguage("contacted", undefined, language)}
-        </button>
-        <button className="outline-button small" type="button" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("lost")}>
-          <X size={15} /> {formatLeadStatusForLanguage("lost", undefined, language)}
-        </button>
-      </div>
-      {status ? <p className="agent-draft-status">{status}</p> : null}
-    </div>
+    <LeadUpdateCard
+      actions={
+        <>
+          <button className="primary-button small" type="button" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("qualified", "high")}>
+            <CheckCircle2 size={15} /> {formatLeadStatusForLanguage("qualified", "high", language)}
+          </button>
+          <button className="outline-button small" type="button" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("contacted")}>
+            <CheckCircle2 size={15} /> {formatLeadStatusForLanguage("contacted", undefined, language)}
+          </button>
+          <button className="outline-button small" type="button" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("lost")}>
+            <X size={15} /> {formatLeadStatusForLanguage("lost", undefined, language)}
+          </button>
+        </>
+      }
+      changes={[
+        {
+          label: copy.generic.fieldStatus,
+          previousValue: formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language),
+          value: formatLeadStatusForLanguage(preview.summary.status_suggestion, preview.summary.urgency_suggestion, language)
+        }
+      ]}
+      status={status}
+      subtitle={preview.lead.full_name || preview.lead.phone || copy.lead.unnamedBuyer}
+      target={{
+        meta: [
+          preview.lead.phone,
+          preview.lead.listing_title || preview.lead.listing_area,
+          formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language)
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        title: preview.lead.full_name || preview.lead.phone || copy.lead.unnamedBuyer
+      }}
+      title={copy.generic.confirmLeadUpdate}
+    />
   );
 }
 
@@ -4538,6 +4817,15 @@ function DraftPreviewCard({
   const copy = getAgentCardCopy(getCardLanguage(sourceMessage));
   const previewDraft = useMemo(() => formStateToDraft(form), [form]);
   const remoteImages = useMemo(() => getDraftRemoteImages(draft), [draft]);
+  const listingLocation =
+    [previewDraft.location_area, previewDraft.city].filter(Boolean).join(", ") || copy.generic.locationNotSet;
+  const listingAreaAndType = [
+    [previewDraft.area_value, previewDraft.area_unit].filter(Boolean).join(" ") || copy.generic.areaNotSet,
+    previewDraft.property_type || copy.generic.fieldPropertyType
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const listingBedsAndBaths = `${previewDraft.bedrooms ?? "-"} · ${previewDraft.bathrooms ?? "-"}`;
 
   async function handleConfirm() {
     if (isSaving || isSaved) {
@@ -4643,7 +4931,7 @@ function DraftPreviewCard({
   }
 
   return (
-    <AgentOutputCard
+    <ListingDraftCard
       actions={
         <>
           <button className="primary-button small" type="button" onClick={handleConfirm} disabled={isSaving || isSaved}>
@@ -4659,15 +4947,14 @@ function DraftPreviewCard({
           </button>
         </>
       }
-      className="agent-draft-card"
-      icon={<Sparkles size={16} />}
-      status={status}
-      summary={isEditing ? copy.hints.reviewListing : copy.hints.reviewListing}
-      title={copy.generic.listingPreview}
-      tone="listing"
-    >
-
-      {isEditing ? (
+      addMediaButton={
+        <button className="agent-media-add tile" type="button" disabled={isSaving || isSaved} onClick={onAttachMedia}>
+          {pendingMedia.length || remoteImages.length ? <Upload size={15} /> : <ImagePlus size={16} />}
+          <span>{pendingMedia.length || remoteImages.length ? copy.buttons.addMore : copy.buttons.addMedia}</span>
+        </button>
+      }
+      description={previewDraft.description}
+      editForm={
         <div className="agent-draft-form">
           <label>
             <span>{copy.generic.fieldTitle}</span>
@@ -4775,26 +5062,18 @@ function DraftPreviewCard({
             />
           </label>
         </div>
-      ) : (
-        <div className="agent-draft-preview">
-          <h3>{previewDraft.title}</h3>
-          <p>{previewDraft.description}</p>
-          <div className="agent-draft-facts">
-            <span>{formatPrice(form.price_amount)}</span>
-            <span>{[previewDraft.location_area, previewDraft.city].filter(Boolean).join(", ")}</span>
-            <span>
-              {[previewDraft.area_value, previewDraft.area_unit].filter(Boolean).join(" ") || copy.generic.areaNotSet}
-            </span>
-            <span>
-              {previewDraft.bedrooms ?? "-"} {copy.generic.beds} / {previewDraft.bathrooms ?? "-"} {copy.generic.baths}
-            </span>
-          </div>
-        </div>
-      )}
-
-      <div className="agent-media-panel" aria-label="Listing photos and video">
-        {pendingMedia.length || remoteImages.length ? (
-          <div className="agent-media-preview">
+      }
+      fields={[
+        { label: copy.generic.fieldPrice, value: formatPrice(form.price_amount) },
+        { label: "Location", value: listingLocation },
+        { label: `${copy.generic.fieldAreaSize} · ${copy.generic.fieldPropertyType}`, value: listingAreaAndType },
+        { label: `${copy.generic.fieldBeds} · ${copy.generic.fieldBaths}`, value: listingBedsAndBaths },
+        { hidden: !previewDraft.features?.length, label: copy.generic.fieldFeatures, value: previewDraft.features?.join(", ") }
+      ]}
+      isEditing={isEditing}
+      media={
+        pendingMedia.length || remoteImages.length ? (
+          <>
             {remoteImages.map((item, index) => {
               const uploadStatus = mediaUploadStatus[`remote-${index}`] ?? "pending";
               const isUploading = uploadStatus === "uploading";
@@ -4861,17 +5140,13 @@ function DraftPreviewCard({
                 </div>
               );
             })}
-            <button className="agent-media-add" type="button" disabled={isSaving || isSaved} onClick={onAttachMedia}>
-              <Upload size={14} /> {copy.buttons.addMore}
-            </button>
-          </div>
-        ) : (
-          <button className="agent-media-add empty" type="button" disabled={isSaving || isSaved} onClick={onAttachMedia}>
-            <ImagePlus size={16} /> {copy.buttons.addMedia}
-          </button>
-        )}
-      </div>
-    </AgentOutputCard>
+          </>
+        ) : null
+      }
+      status={status}
+      subtitle={copy.hints.reviewListing}
+      title={previewDraft.title || copy.generic.untitledListing}
+    />
   );
 }
 
@@ -4902,7 +5177,14 @@ function ListingSavedCard({
         </>
       }
       className="listing-saved-card"
+      domain="Listing"
       icon={<CheckCircle2 size={16} />}
+      intent="saved"
+      summary={
+        preview.uploadedCount
+          ? `${preview.uploadedCount} media file${preview.uploadedCount === 1 ? "" : "s"} saved`
+          : copy.generic.noMediaAdded
+      }
       title={copy.generic.listingSaved}
       tone="listing"
     >
@@ -5014,7 +5296,7 @@ function SchedulePreviewCard({
   }
 
   return (
-    <AgentOutputCard
+    <ScheduleEventCard
       actions={
         <>
           <button
@@ -5035,16 +5317,8 @@ function SchedulePreviewCard({
           </button>
         </>
       }
-      className="schedule-preview-card"
-      hint={isEditing ? copy.hints.editSchedule : copy.hints.reviewSchedule}
-      icon={<CalendarClock size={16} />}
-      status={status}
-      summary={isEditing ? copy.hints.editSchedule : copy.hints.reviewSchedule}
-      title={copy.generic.schedulePreview}
-      tone="schedule"
-    >
-
-      {isEditing ? (
+      description={previewEvent.description || copy.generic.noNotes}
+      editForm={
         <div className="agent-draft-form">
           <label>
             <span>{copy.generic.fieldTitle}</span>
@@ -5130,20 +5404,20 @@ function SchedulePreviewCard({
             />
           </label>
         </div>
-      ) : (
-        <div className="schedule-preview">
-          <h3>{previewEvent.title}</h3>
-          <p>{previewEvent.description || copy.generic.noNotes}</p>
-          <div className="schedule-facts">
-            <span>{previewEvent.event_category}</span>
-            <span>{formatScheduleEventType(previewEvent.event_type, language)}</span>
-            <span>{formatEventTime(previewEvent, timeZone)}</span>
-            {previewEvent.lead_name ? <span>{previewEvent.lead_name}</span> : null}
-            {previewEvent.listing_reference ? <span>{previewEvent.listing_reference}</span> : null}
-          </div>
-        </div>
-      )}
-    </AgentOutputCard>
+      }
+      eventTitle={previewEvent.title}
+      fields={[
+        { label: "Category", value: previewEvent.event_category },
+        { label: "Event", value: formatScheduleEventType(previewEvent.event_type, language) },
+        { label: "Time", value: formatEventTime(previewEvent, timeZone) },
+        { hidden: !previewEvent.lead_name, label: "Lead", value: previewEvent.lead_name },
+        { hidden: !previewEvent.listing_reference, label: "Listing", value: previewEvent.listing_reference }
+      ]}
+      isEditing={isEditing}
+      status={status}
+      subtitle={isEditing ? copy.hints.editSchedule : copy.hints.reviewSchedule}
+      title={copy.generic.schedulePreview}
+    />
   );
 }
 
@@ -5165,37 +5439,24 @@ function ScheduleResultsCard({
   const copy = getScheduleCardCopy(language);
 
   return (
-    <AgentOutputCard
-      className="chat-card schedule-results-card"
-      icon={<CalendarClock size={16} />}
+    <ScheduleListCard
+      empty={copy.empty}
+      items={events.map((event) => ({
+        id: event.id,
+        meta: [
+          formatScheduleEventType(event.event_type, language),
+          event.lead_name,
+          event.listing_reference,
+          event.location_text
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        time: formatScheduleResultTime(event, timeZone),
+        title: event.title
+      }))}
+      subtitle={events.length ? `${events.length} scheduled` : undefined}
       title={copy.title}
-      tone="schedule"
-    >
-      {events.length === 0 ? (
-        <p>{copy.empty}</p>
-      ) : (
-        <div className="event-mini-list">
-          {events.map((event) => (
-            <div className="event-mini-row" key={event.id}>
-              <time dateTime={getScheduleResultTime(event)}>{formatScheduleResultTime(event, timeZone)}</time>
-              <div>
-                <strong>{event.title}</strong>
-                <small>
-                  {[
-                    formatScheduleEventType(event.event_type, language),
-                    event.lead_name,
-                    event.listing_reference,
-                    event.location_text
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </small>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </AgentOutputCard>
+    />
   );
 }
 
@@ -8768,11 +9029,6 @@ export function AgentWorkspace({
                         chatReminder: preview
                       });
                     }}
-                    onDeclined={() => {
-                      appendAssistantMessage({
-                        content: "No problem. I did not change the lead. Tell me what you want to do next, for example save a note, update status, or remind you later."
-                      });
-                    }}
                   />
                 ) : null}
                 {message.chatLeadChoice ? (
@@ -8832,10 +9088,7 @@ export function AgentWorkspace({
                   />
                 ) : null}
                 {message.promotion ? (
-                  <>
-                    <PromotionPack promotion={message.promotion} sourceMessage={message.uiLanguage ?? message.sourceMessage} />
-                    {message.promotion.summary ? <p>{message.promotion.summary}</p> : null}
-                  </>
+                  <PromotionPack promotion={message.promotion} sourceMessage={message.uiLanguage ?? message.sourceMessage} />
                 ) : null}
                 {message.promotionTarget ? (
                   <PromotionConfirmCard
