@@ -2737,31 +2737,23 @@ function LeadResultsCard({
               {formatLeadStatusForLanguage(lead.status, lead.urgency, language)}
             </span>
           ),
-          details: [
-            { label: "Time", value: getLeadContactTimeLabel(lead) },
-            {
-              label: "Listing",
-              value: lead.listing_id ? (
-                <Link
-                  className="lead-chat-listing-link"
-                  href={`/listings/${lead.listing_id}`}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  {getLeadListingLabel(lead)}
-                </Link>
-              ) : (
-                getLeadListingLabel(lead)
-              )
-            },
-            { label: "Channel", value: getLeadChannelLabel(lead) },
-            { label: "Content", value: getLeadContentSummary(lead) },
-            ...(followUpRecommendation
-              ? [{ label: "Suggested reply", value: followUpRecommendation.recommended_action }]
-              : [])
-          ],
+          context: lead.listing_id ? (
+            <Link
+              className="lead-chat-listing-link"
+              href={`/listings/${lead.listing_id}`}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {getLeadListingLabel(lead)}
+            </Link>
+          ) : (
+            getLeadListingLabel(lead)
+          ),
+          description: getLeadContentSummary(lead),
           key: lead.id,
           meta: lead.phone || copy.noPhone,
+          pills: [getLeadContactTimeLabel(lead), getLeadChannelLabel(lead)],
+          summary: followUpRecommendation ? followUpRecommendation.recommended_action : null,
           title: lead.full_name || copy.unnamedBuyer
         };
       })}
@@ -3865,24 +3857,62 @@ function EntitySelectionCard({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [skipped, setSkipped] = useState(false);
   const isDone = Boolean(selectedId) || skipped;
+  const skipAction = onSkip ? (
+    <button
+      className="outline-button small"
+      type="button"
+      disabled={isDone}
+      onClick={() => {
+        setSkipped(true);
+        onSkip();
+      }}
+    >
+      {skipped ? copy.buttons.continued : copy.buttons.continueWithoutBinding}
+    </button>
+  ) : null;
+
+  if (!isListingTarget) {
+    return (
+      <LeadListCard
+        footer={skipAction}
+        intent="select"
+        items={preview.candidates
+          .map((candidate) => ({ candidate, lead: resolutionCandidateToLead(candidate) }))
+          .filter((item): item is { candidate: AgentResolutionCandidate; lead: LeadListItem } => Boolean(item.lead))
+          .map(({ candidate, lead }) => ({
+            action: (
+              <button
+                className={selectedId === candidate.id ? "primary-button small" : "outline-button small"}
+                type="button"
+                disabled={isDone}
+                onClick={() => {
+                  setSelectedId(candidate.id);
+                  onSelect(candidate);
+                }}
+              >
+                <CheckCircle2 size={15} /> {selectedId === candidate.id ? copy.buttons.selected : copy.buttons.select}
+              </button>
+            ),
+            badge: (
+              <span className={getLeadStatusClassName(lead.status, lead.urgency)}>
+                {formatLeadStatusForLanguage(lead.status, lead.urgency, language)}
+              </span>
+            ),
+            description: getLeadInterestLine(lead, language),
+            key: candidate.id,
+            meta: lead.phone || copy.lead.noPhone,
+            pills: [lead.phone || copy.lead.noPhone, lead.email],
+            title: lead.full_name || lead.phone || copy.lead.unnamedBuyer
+          }))}
+        subtitle={helper}
+        title={title}
+      />
+    );
+  }
 
   return (
     <AgentOutputCard
-      actions={
-        onSkip ? (
-          <button
-            className="outline-button small"
-            type="button"
-            disabled={isDone}
-            onClick={() => {
-              setSkipped(true);
-              onSkip();
-            }}
-          >
-            {skipped ? copy.buttons.continued : copy.buttons.continueWithoutBinding}
-          </button>
-        ) : null
-      }
+      actions={skipAction}
       className={isListingTarget ? "listing-update-card" : "lead-chat-card"}
       domain={isListingTarget ? "Selection · Listing" : "Selection · Lead"}
       icon={isListingTarget ? <House size={16} /> : <MessageCircle size={16} />}
@@ -3922,31 +3952,6 @@ function EntitySelectionCard({
                 <CheckCircle2 size={15} /> {selectedId === candidate.id ? copy.buttons.selected : copy.buttons.select}
               </button>
             </article>
-          ) : lead ? (
-            <div className="lead-chat-row" key={candidate.id}>
-              <div>
-                <strong>{lead.full_name || lead.phone || copy.lead.unnamedBuyer}</strong>
-                <p>{getLeadInterestLine(lead, language)}</p>
-                <small>
-                  {formatLeadStatusForLanguage(lead.status, lead.urgency, language)} · {lead.phone || copy.lead.noPhone}
-                  {lead.email ? ` · ${lead.email}` : ""}
-                </small>
-              </div>
-              <div className="lead-chat-row-action">
-                <span className={getLeadStatusClassName(lead.status, lead.urgency)}>{formatLeadStatusForLanguage(lead.status, lead.urgency, language)}</span>
-                <button
-                  className="primary-button small"
-                  type="button"
-                  disabled={isDone}
-                  onClick={() => {
-                    setSelectedId(candidate.id);
-                    onSelect(candidate);
-                  }}
-                >
-                  <CheckCircle2 size={15} /> {selectedId === candidate.id ? copy.buttons.selected : copy.buttons.select}
-                </button>
-              </div>
-            </div>
           ) : null;
         })}
       </div>

@@ -5,6 +5,8 @@ import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
 export type LeadListItemCard = {
   action?: ReactNode;
   badge?: ReactNode;
+  context?: ReactNode;
+  description?: ReactNode;
   details?: Array<{
     label: ReactNode;
     value: ReactNode;
@@ -12,6 +14,7 @@ export type LeadListItemCard = {
   initials?: string;
   key: string;
   meta?: ReactNode;
+  pills?: ReactNode[];
   summary?: ReactNode;
   title: ReactNode;
 };
@@ -82,11 +85,20 @@ export function LeadListCard({
           {items.map((item) => (
             <div className="lead-chat-row" key={item.key}>
               <span className="agent-lead-avatar">{item.initials ?? getFallbackInitials(item.title)}</span>
-              <div>
+              <div className="lead-chat-row-main">
                 <div className="lead-chat-row-title">
                   <strong>{item.title}</strong>
                   {item.badge}
                 </div>
+                {item.pills?.length ? (
+                  <div className="lead-chat-pills" aria-label="Lead details">
+                    {item.pills.filter(hasRenderableValue).map((pill, index) => (
+                      <span key={index}>{pill}</span>
+                    ))}
+                  </div>
+                ) : null}
+                {hasRenderableValue(item.context) ? <div className="lead-chat-context">{item.context}</div> : null}
+                {hasRenderableValue(item.description) ? <p className="lead-chat-description">{item.description}</p> : null}
                 {hasRenderableValue(item.summary) ? <p>{item.summary}</p> : null}
                 {item.details?.length ? (
                   <div className="lead-chat-detail-list">
