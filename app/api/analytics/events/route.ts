@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { getSupabaseUserSafely } from "@/lib/auth/safe-user";
 import { createServiceClient, createSupabaseServerClient } from "@/lib/supabase/server";
 
 const analyticsEventNames = [
@@ -85,9 +86,7 @@ export async function POST(request: Request) {
     brokerId = campaign.broker_id;
   } else {
     const supabase = await createSupabaseServerClient();
-    const {
-      data: { user }
-    } = await supabase.auth.getUser();
+    const { user } = await getSupabaseUserSafely(supabase);
 
     authUserId = user?.id ?? null;
 

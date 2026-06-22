@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { getSupabaseUserSafely } from "@/lib/auth/safe-user";
 import { generateChatFollowUpSummary, normalizeWhatsAppChatText } from "@/lib/leads/followup-import";
 import { getRecentLeadsForBroker, leadBaseSelect } from "@/lib/leads/queries";
 import type { LeadListItem, LeadRecord } from "@/lib/leads/types";
@@ -236,9 +237,7 @@ function resolveImportedChatLead(
 export async function POST(request: Request) {
   try {
     const supabase = await createSupabaseServerClient();
-    const {
-      data: { user }
-    } = await supabase.auth.getUser();
+    const { user } = await getSupabaseUserSafely(supabase);
     const { data: broker } = user
       ? await supabase
           .from("broker_profiles")

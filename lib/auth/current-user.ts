@@ -1,11 +1,9 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getSupabaseUserSafely } from "@/lib/auth/safe-user";
 
 export async function requireCurrentBroker() {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-    error: userError
-  } = await supabase.auth.getUser();
+  const { user, error: userError } = await getSupabaseUserSafely(supabase);
 
   if (userError || !user) {
     throw new Error("Unauthorized");

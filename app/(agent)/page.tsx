@@ -3,6 +3,7 @@ import { ProductAnalyticsTracker } from "@/components/analytics/ProductAnalytics
 import { ProfileCompletionForm } from "@/components/profile/ProfileCompletionForm";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
 import { getAgentChatMessages } from "@/lib/agent/conversations";
+import { getSupabaseUserSafely } from "@/lib/auth/safe-user";
 import { getLeadsByIdsForBroker, getNewLeadsCountForBroker, getRecentLeadsForBroker } from "@/lib/leads/queries";
 import type { ListingMediaRecord, ListingRecord } from "@/lib/listings/types";
 import { createServiceClient, createSupabaseServerClient } from "@/lib/supabase/server";
@@ -69,10 +70,7 @@ function formatListingPrice(listing: ListingRecord) {
 
 async function getCurrentBrokerContext() {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-    error: userError
-  } = await supabase.auth.getUser();
+  const { user, error: userError } = await getSupabaseUserSafely(supabase);
 
   if (userError || !user) {
     return { supabase, broker: null };

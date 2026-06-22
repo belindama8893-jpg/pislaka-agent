@@ -3,6 +3,7 @@ import Link from "next/link";
 import { BarChart3, LogIn, MousePointerClick, TrendingUp, Users } from "lucide-react";
 import { getProductAnalyticsSummary } from "@/lib/analytics/product-queries";
 import type { AnalyticsRange } from "@/lib/analytics/types";
+import { getSupabaseUserSafely } from "@/lib/auth/safe-user";
 import { createServiceClient, createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -71,10 +72,7 @@ function MetricLabel({ english, chinese }: { chinese: string; english: string })
 
 async function requireInternalAnalyticsAccess() {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-    error
-  } = await supabase.auth.getUser();
+  const { user, error } = await getSupabaseUserSafely(supabase);
 
   if (error || !user?.email) {
     redirect("/auth/sign-in");

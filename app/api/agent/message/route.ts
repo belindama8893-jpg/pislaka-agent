@@ -9,6 +9,7 @@ import { classifyLocalIntent } from "@/lib/agent/intent-router";
 import { normalizePakistanLocationTerms } from "@/lib/agent/location-normalization";
 import { compileAgentMemoryContext } from "@/lib/agent/memory";
 import { agentMessageSchema } from "@/lib/agent/types";
+import { getSupabaseUserSafely } from "@/lib/auth/safe-user";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export async function POST(request: Request) {
@@ -29,9 +30,7 @@ export async function POST(request: Request) {
         ? { enabled: false, verifiedLocations: [] }
         : await normalizePakistanLocationTerms(parsed.data.message);
     const supabase = await createSupabaseServerClient();
-    const {
-      data: { user }
-    } = await supabase.auth.getUser();
+    const { user } = await getSupabaseUserSafely(supabase);
 
     if (!user) {
       const memory = compileAgentMemoryContext({

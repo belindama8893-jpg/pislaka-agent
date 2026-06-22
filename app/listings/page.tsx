@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { ListingDraftsPanel } from "@/components/listings/ListingDraftsPanel";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
+import { getSupabaseUserSafely } from "@/lib/auth/safe-user";
 import { getNewLeadsCountForBroker } from "@/lib/leads/queries";
 import type { ListingMediaRecord, ListingRecord } from "@/lib/listings/types";
 import { createServiceClient, createSupabaseServerClient } from "@/lib/supabase/server";
@@ -32,10 +33,7 @@ function getInitials(profile: BrokerProfile) {
 
 async function getCurrentBrokerContext() {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-    error: userError
-  } = await supabase.auth.getUser();
+  const { user, error: userError } = await getSupabaseUserSafely(supabase);
 
   if (userError || !user) {
     redirect("/auth/sign-in");
