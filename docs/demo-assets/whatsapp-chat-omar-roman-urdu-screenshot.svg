@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1600" viewBox="0 0 900 1600">
+  <defs>
+    <linearGradient id="wall" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#efe7d6"/>
+      <stop offset="1" stop-color="#e7dcc8"/>
+    </linearGradient>
+    <pattern id="dots" width="64" height="64" patternUnits="userSpaceOnUse">
+      <circle cx="12" cy="18" r="2" fill="#d6cab4" opacity="0.5"/>
+      <circle cx="44" cy="42" r="2" fill="#d6cab4" opacity="0.4"/>
+      <path d="M24 48c8-6 14-6 22 0" fill="none" stroke="#d6cab4" stroke-width="2" opacity="0.22"/>
+    </pattern>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000000" flood-opacity="0.16"/>
+    </filter>
+    <style>
+      .ui { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
+      .header-title { font-size: 34px; font-weight: 700; fill: #ffffff; }
+      .header-sub { font-size: 18px; fill: #d8f1e9; }
+      .bubble-text { font-size: 27px; fill: #111827; }
+      .time { font-size: 18px; fill: #64748b; }
+      .time-out { font-size: 18px; fill: #4d7c61; }
+    </style>
+  </defs>
+
+  <rect width="900" height="1600" rx="58" fill="#111827"/>
+  <rect x="24" y="24" width="852" height="1552" rx="44" fill="url(#wall)"/>
+  <rect x="24" y="24" width="852" height="1552" rx="44" fill="url(#dots)" opacity="0.8"/>
+
+  <rect x="24" y="24" width="852" height="142" rx="44" fill="#075e54"/>
+  <rect x="24" y="104" width="852" height="62" fill="#075e54"/>
+  <text x="68" y="104" class="ui" font-size="44" fill="#ffffff">‹</text>
+  <circle cx="138" cy="94" r="42" fill="#d7f5ee"/>
+  <text x="138" y="106" text-anchor="middle" class="ui" font-size="34" font-weight="700" fill="#075e54">O</text>
+  <text x="198" y="82" class="ui header-title">Omar</text>
+  <text x="198" y="118" class="ui header-sub">online</text>
+  <circle cx="800" cy="94" r="5" fill="#ffffff"/>
+  <circle cx="800" cy="112" r="5" fill="#ffffff"/>
+  <circle cx="800" cy="130" r="5" fill="#ffffff"/>
+
+  <rect x="310" y="196" width="280" height="42" rx="21" fill="#f7f3e9" opacity="0.9"/>
+  <text x="450" y="224" text-anchor="middle" class="ui" font-size="18" fill="#64748b">Today</text>
+
+  <g filter="url(#shadow)">
+    <rect x="58" y="270" width="655" height="118" rx="22" fill="#ffffff"/>
+    <text x="82" y="310" class="ui bubble-text">
+      <tspan x="82" dy="0">Assalam o Alaikum Ali bhai,</tspan>
+      <tspan x="82" dy="35">DHA Phase 5 mein 10 marla</tspan>
+      <tspan x="82" dy="35">house available hai?</tspan>
+    </text>
+    <text x="640" y="366" class="ui time">9:33 am</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="222" y="420" width="620" height="118" rx="22" fill="#dcf8c6"/>
+    <text x="246" y="460" class="ui bubble-text">
+      <tspan x="246" dy="0">Wa Alaikum Salam Omar bhai,</tspan>
+      <tspan x="246" dy="35">ji available options hain.</tspan>
+      <tspan x="246" dy="35">Aap ka budget kya hai?</tspan>
+    </text>
+    <text x="768" y="516" class="ui time-out">9:34 am</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="58" y="570" width="525" height="82" rx="22" fill="#ffffff"/>
+    <text x="82" y="611" class="ui bubble-text">
+      <tspan x="82" dy="0">Budget 4.2 se 4.5 crore</tspan>
+      <tspan x="82" dy="35">tak hai.</tspan>
+    </text>
+    <text x="510" y="630" class="ui time">9:35 am</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="58" y="676" width="650" height="118" rx="22" fill="#ffffff"/>
+    <text x="82" y="716" class="ui bubble-text">
+      <tspan x="82" dy="0">Family ke liye chahiye,</tspan>
+      <tspan x="82" dy="35">possession jaldi mil jaye</tspan>
+      <tspan x="82" dy="35">to best.</tspan>
+    </text>
+    <text x="635" y="772" class="ui time">9:35 am</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="212" y="826" width="630" height="118" rx="22" fill="#dcf8c6"/>
+    <text x="236" y="866" class="ui bubble-text">
+      <tspan x="236" dy="0">Phase 5 hi preferred hai</tspan>
+      <tspan x="236" dy="35">ya Phase 6 bhi theek hai?</tspan>
+    </text>
+    <text x="768" y="922" class="ui time-out">9:36 am</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="58" y="976" width="676" height="128" rx="22" fill="#ffffff"/>
+    <text x="82" y="1016" class="ui bubble-text">
+      <tspan x="82" dy="0">Phase 5 preferred hai, lekin</tspan>
+      <tspan x="82" dy="35">Phase 6 good location ho to</tspan>
+      <tspan x="82" dy="35">consider kar sakta hun.</tspan>
+    </text>
+    <text x="660" y="1082" class="ui time">9:37 am</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="58" y="1136" width="630" height="82" rx="22" fill="#ffffff"/>
+    <text x="82" y="1177" class="ui bubble-text">
+      <tspan x="82" dy="0">Sunday 4 baje ke baad</tspan>
+      <tspan x="82" dy="35">visit possible hai?</tspan>
+    </text>
+    <text x="615" y="1196" class="ui time">9:38 am</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="58" y="1242" width="650" height="82" rx="22" fill="#ffffff"/>
+    <text x="82" y="1283" class="ui bubble-text">
+      <tspan x="82" dy="0">Owner negotiable hai to</tspan>
+      <tspan x="82" dy="35">details bhej dein.</tspan>
+    </text>
+    <text x="635" y="1302" class="ui time">9:39 am</text>
+  </g>
+
+  <rect x="58" y="1406" width="690" height="74" rx="37" fill="#fffefa" opacity="0.96"/>
+  <text x="106" y="1454" class="ui" font-size="24" fill="#94a3b8">Message</text>
+  <circle cx="802" cy="1443" r="37" fill="#128c7e"/>
+  <path d="M786 1428l34 15-34 15 7-15z" fill="#ffffff"/>
+</svg>

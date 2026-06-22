@@ -1,0 +1,162 @@
+Pislaka Agent 经纪人演示提示词
+
+使用说明：
+- 演示时按步骤一句一句输入，不要一次性把所有需求说完。
+- 当 Agent 要求确认时，用一句简单的英文确认。
+- 如果房源链接识别不稳定，就改用文字房源信息。
+- 如果演示需要反复录屏或彩排，提醒时间建议换成具体日期，不要一直用 tomorrow。
+
+
+场景一 - WhatsApp 聊天分析、客户保存或更新、设置提醒
+
+步骤 1 - 上传或粘贴 WhatsApp 聊天记录
+
+Paste the WhatsApp chat export first.
+
+
+步骤 2 - 让 Agent 分析客户需求
+
+Analyze this WhatsApp chat and tell me what the customer wants.
+
+
+步骤 3 - 让 Agent 起草一条简短回复
+
+Draft a short WhatsApp reply for this customer.
+Use the same language as the customer.
+Keep it natural and professional.
+
+
+步骤 4A - 如果这是新客户
+
+Yes, add this customer to my lead list.
+
+
+步骤 4B - 如果这是老客户
+
+Yes, update this customer's follow-up status.
+
+
+步骤 5 - 设置明天回电话提醒
+
+Remind me tomorrow to call this customer back.
+
+
+步骤 6 - Agent 展示提醒预览后确认
+
+Yes, confirm the reminder.
+
+
+场景二 - 推广房源并处理新报名客户
+
+步骤 1A - 用自然语言描述房源
+
+I want to promote a property.
+It is a 10 marla house in DHA Phase 5 Lahore.
+It has 4 bedrooms and 5 bathrooms.
+Demand is 4.35 crore.
+It is near the park, has a renovated kitchen, and is ready possession.
+It is suitable for a family buyer.
+
+
+步骤 1B - 或者直接发送房源链接
+
+Use this property link to create a listing card:
+[paste property link here]
+
+
+步骤 2 - 让 Agent 生成房源卡片
+
+Create a listing card for this property.
+
+
+步骤 3 - 检查房源卡片后确认
+
+Yes, this listing card looks correct.
+
+
+步骤 4 - 让 Agent 推广这套房源
+
+Promote this listing for me.
+
+
+步骤 5 - Agent 询问渠道时选择推广渠道
+
+Use WhatsApp and Facebook.
+
+
+步骤 6 - 确认生成专属推广链接
+
+Yes, create the promotion links.
+
+
+步骤 7 - 买家提交报名表后，查看新的报名客户
+
+Show me the new lead from this promotion.
+
+
+步骤 8 - 让 Agent 起草给新客户的回复
+
+Draft a WhatsApp reply for this buyer.
+Tell them the owner is slightly negotiable.
+Tell them a viewing is possible tomorrow at 5 PM.
+Ask if that time works for them.
+Keep it short and natural.
+
+
+步骤 9 - 保存这次跟进
+
+Save this follow-up.
+
+
+场景三 - 老经纪人用户每天进来查看待办
+
+步骤 1 - 询问今天需要做什么
+
+What do I need to do today?
+
+
+步骤 2 - 查看最近没有联系的客户
+
+Show me the customers I have not contacted recently.
+
+
+步骤 3 - 查看重点客户跟进提醒
+
+Show me my important customer follow-up reminders.
+
+
+步骤 4 - 从列表里选择一个客户后，让 Agent 起草跟进消息
+
+Draft a short follow-up message for this customer.
+
+
+步骤 5 - 看完草稿后保存跟进记录
+
+Save this follow-up note.
+
+
+步骤 6 - 设置下一次跟进提醒
+
+Remind me tomorrow morning to follow up again.
+
+
+可选兜底提示词
+
+如果 Agent 找不到客户：
+
+Show me possible matching customers.
+
+
+如果 Agent 找到多个可能匹配的客户：
+
+Use this customer.
+
+
+如果房源链接无法识别：
+
+Use the property details I provided instead.
+
+
+如果 Agent 在保存、更新、创建链接前要求确认：
+
+Yes, confirm.
