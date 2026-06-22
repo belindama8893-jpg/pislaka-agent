@@ -33,6 +33,10 @@ export const listingDraftUpdateSchema = listingDraftInputSchema
 
 export type ListingDraftUpdateInput = z.infer<typeof listingDraftUpdateSchema>;
 
+export const listingDeleteSchema = z.object({
+  id: z.string().uuid()
+});
+
 export type ListingMediaRecord = {
   id: string;
   listing_id: string;

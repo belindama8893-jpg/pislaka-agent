@@ -12,6 +12,7 @@ import {
   Megaphone,
   MessageCircle,
   Save,
+  Trash2,
   Upload,
   Video
 } from "lucide-react";
@@ -80,6 +81,7 @@ export function ListingDraftsPanel({ className = "", collapsed = false, listings
   const [status, setStatus] = useState<string | null>(null);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [promotingId, setPromotingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [activePromotionSetupId, setActivePromotionSetupId] = useState<string | null>(null);
   const [promotionChannelDrafts, setPromotionChannelDrafts] = useState<Record<string, PromotionChannel[]>>({});
   const [promotions, setPromotions] = useState<Record<string, ListingPromotion>>({});
@@ -157,6 +159,33 @@ export function ListingDraftsPanel({ className = "", collapsed = false, listings
 
     setStatus("Media uploaded.");
     setUploadingId(null);
+    router.refresh();
+  }
+
+  async function handleDeleteListing(listing: ListingRecord) {
+    const label = listing.title || "this listing";
+    if (!window.confirm(`Delete ${label}? Leads will stay in your CRM, but this listing and its media will be removed.`)) {
+      return;
+    }
+
+    setDeletingId(listing.id);
+    setStatus("Deleting listing...");
+    const response = await fetch("/api/listings/draft", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ id: listing.id })
+    });
+
+    setDeletingId(null);
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      setStatus(payload?.error ?? "Unable to delete listing");
+      return;
+    }
+
+    setStatus("Listing deleted.");
     router.refresh();
   }
 
@@ -452,7 +481,7 @@ export function ListingDraftsPanel({ className = "", collapsed = false, listings
                     className="outline-button small promote-action-button"
                     type="button"
                     onClick={() => togglePromotionSetup(listing.id)}
-                    disabled={promotingId === listing.id}
+                    disabled={promotingId === listing.id || deletingId === listing.id}
                     aria-label={promotingId === listing.id ? "Generating promotion pack" : "Promote listing"}
                   >
                     {promotingId === listing.id ? (
@@ -463,6 +492,19 @@ export function ListingDraftsPanel({ className = "", collapsed = false, listings
                         Promote
                       </>
                     )}
+                  </button>
+                  <button
+                    className="outline-button small danger-button"
+                    disabled={deletingId === listing.id}
+                    type="button"
+                    onClick={() => void handleDeleteListing(listing)}
+                  >
+                    {deletingId === listing.id ? (
+                      <LoaderCircle className="button-spinner" size={14} />
+                    ) : (
+                      <Trash2 size={14} />
+                    )}
+                    {deletingId === listing.id ? "Deleting" : "Delete"}
                   </button>
                 </div>
 

@@ -1,7 +1,8 @@
 "use client";
 
-import { Clock, ExternalLink, Filter, MessageCircle, Phone, Search, UserRound, Users } from "lucide-react";
+import { Clock, ExternalLink, Filter, MessageCircle, Phone, Search, Trash2, UserRound, Users } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { formatLeadStatusLabel, getLeadStatusClassName } from "@/lib/leads/display";
 import type { LeadListItem } from "@/lib/leads/types";
@@ -81,9 +82,12 @@ function getLeadRowClassName(lead: LeadListItem) {
 }
 
 export function LeadListPanel({ className = "", leads }: LeadListPanelProps) {
+  const router = useRouter();
   const [statusFilter, setStatusFilter] = useState("all");
   const [channelFilter, setChannelFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const channelOptions = useMemo(
     () =>
       Array.from(new Set(leads.map(getLeadSource).filter((channel) => channel !== "Unknown source"))).sort(),
@@ -116,6 +120,33 @@ export function LeadListPanel({ className = "", leads }: LeadListPanelProps) {
       return matchesStatus && matchesChannel && (!normalizedQuery || searchable.includes(normalizedQuery));
     });
   }, [channelFilter, leads, searchQuery, statusFilter]);
+
+  async function deleteLead(lead: LeadListItem) {
+    const label = lead.full_name || lead.phone || "this lead";
+    if (!window.confirm(`Delete ${label}? This will remove the lead and its follow-up history.`)) {
+      return;
+    }
+
+    setDeletingId(lead.id);
+    setStatus("Deleting lead...");
+    const response = await fetch("/api/leads", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ id: lead.id })
+    });
+
+    setDeletingId(null);
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      setStatus(payload?.error ?? "Unable to delete lead");
+      return;
+    }
+
+    setStatus("Lead deleted.");
+    router.refresh();
+  }
 
   return (
     <section className={`listing-library glass-panel ${className}`}>
@@ -201,11 +232,20 @@ export function LeadListPanel({ className = "", leads }: LeadListPanelProps) {
                 <Link className="outline-button small" href={`/?lead=${lead.id}`}>
                   <MessageCircle size={14} /> Ask Agent
                 </Link>
+                <button
+                  className="outline-button small danger-button"
+                  disabled={deletingId === lead.id}
+                  type="button"
+                  onClick={() => void deleteLead(lead)}
+                >
+                  <Trash2 size={14} /> {deletingId === lead.id ? "Deleting" : "Delete"}
+                </button>
               </div>
             </article>
           ))}
         </div>
       )}
+      {status ? <p className="form-status inline-status">{status}</p> : null}
     </section>
   );
 }

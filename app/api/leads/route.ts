@@ -3,7 +3,7 @@ import { recordProductAnalyticsEvent } from "@/lib/analytics/server-events";
 import { insertAgentChatMessage } from "@/lib/agent/conversations";
 import { generateLeadSummary } from "@/lib/agent/lead-summaries";
 import { requireCurrentBroker } from "@/lib/auth/current-user";
-import { leadRequestSchema, leadUpdateSchema, manualLeadCreateSchema } from "@/lib/leads/lead-api-schemas";
+import { leadDeleteSchema, leadRequestSchema, leadUpdateSchema, manualLeadCreateSchema } from "@/lib/leads/lead-api-schemas";
 import { getLeadsByIdsForBroker, getRecentLeadsForBroker, leadBaseSelect } from "@/lib/leads/queries";
 import type { TodayFollowUpLead } from "@/lib/leads/types";
 import type { ListingRecord } from "@/lib/listings/types";
@@ -281,6 +281,60 @@ export async function PATCH(request: Request) {
     });
 
     return NextResponse.json({ lead });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  const body = await request.json().catch(() => null);
+  const parsed = leadDeleteSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid lead delete payload", issues: parsed.error.flatten() },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const { supabase, broker } = await requireCurrentBroker();
+
+    const { data: existingLead, error: readError } = await supabase
+      .from("leads")
+      .select(leadBaseSelect)
+      .eq("id", parsed.data.id)
+      .eq("broker_id", broker.id)
+      .single();
+
+    if (readError || !existingLead) {
+      return NextResponse.json({ error: readError?.message ?? "Lead not found" }, { status: 404 });
+    }
+
+    const { error } = await supabase
+      .from("leads")
+      .delete()
+      .eq("id", parsed.data.id)
+      .eq("broker_id", broker.id);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    await supabase.from("audit_logs").insert({
+      broker_id: broker.id,
+      actor_type: "user",
+      action: "delete_lead",
+      entity_type: "lead",
+      entity_id: existingLead.id,
+      before_payload: existingLead,
+      metadata: {
+        source: "api"
+      }
+    });
+
+    return NextResponse.json({ deleted: true, id: existingLead.id });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 500 });

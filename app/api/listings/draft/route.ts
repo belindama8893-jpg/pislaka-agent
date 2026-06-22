@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { recordProductAnalyticsEvent } from "@/lib/analytics/server-events";
 import { requireCurrentBroker } from "@/lib/auth/current-user";
 import type { ListingMediaRecord, ListingRecord } from "@/lib/listings/types";
-import { listingDraftInputSchema, listingDraftUpdateSchema } from "@/lib/listings/types";
+import { listingDeleteSchema, listingDraftInputSchema, listingDraftUpdateSchema } from "@/lib/listings/types";
 import { createServiceClient } from "@/lib/supabase/server";
 
 const listingSelect =
@@ -177,6 +177,73 @@ export async function PATCH(request: Request) {
     });
 
     return NextResponse.json({ listing });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  const body = await request.json().catch(() => null);
+  const parsed = listingDeleteSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid listing delete payload", issues: parsed.error.flatten() },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const { supabase, broker } = await requireCurrentBroker();
+    const { data: existingListing, error: readError } = await supabase
+      .from("listings")
+      .select(listingWithMediaSelect)
+      .eq("id", parsed.data.id)
+      .eq("broker_id", broker.id)
+      .single();
+
+    if (readError || !existingListing) {
+      return NextResponse.json({ error: readError?.message ?? "Listing not found" }, { status: 404 });
+    }
+
+    const rawListing = existingListing as RawListingRecord;
+    const storagePaths = (rawListing.listing_media ?? [])
+      .map((media) => media.storage_url)
+      .filter(Boolean);
+
+    if (storagePaths.length) {
+      const service = createServiceClient();
+      const { error: storageError } = await service.storage.from("listing-media").remove(storagePaths);
+      if (storageError) {
+        return NextResponse.json({ error: storageError.message }, { status: 500 });
+      }
+    }
+
+    const { error } = await supabase
+      .from("listings")
+      .delete()
+      .eq("id", parsed.data.id)
+      .eq("broker_id", broker.id);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    await supabase.from("audit_logs").insert({
+      broker_id: broker.id,
+      actor_type: "user",
+      action: "delete_listing",
+      entity_type: "listing",
+      entity_id: rawListing.id,
+      before_payload: rawListing,
+      metadata: {
+        media_count: storagePaths.length,
+        source: "api"
+      }
+    });
+
+    return NextResponse.json({ deleted: true, id: rawListing.id });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 500 });

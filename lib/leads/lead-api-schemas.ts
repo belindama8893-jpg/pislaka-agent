@@ -48,3 +48,7 @@ export const leadUpdateSchema = z
   .refine((value) => Object.keys(value).some((key) => key !== "id"), {
     message: "At least one lead field must be provided"
   });
+
+export const leadDeleteSchema = z.object({
+  id: z.string().uuid()
+});
