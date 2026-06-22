@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Megaphone } from "lucide-react";
-import { AgentFieldList, type AgentFieldItem } from "@/components/agent/AgentCardPrimitives";
+import { AgentCardNotice, AgentFieldList, type AgentFieldItem } from "@/components/agent/AgentCardPrimitives";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
 
 export type PromotionTargetChannel = {
@@ -65,20 +65,16 @@ export function PromotionTargetCard({
             <input
               checked={channel.checked}
               disabled={channel.disabled}
-              type="checkbox"
               onChange={channel.onToggle}
+              readOnly={!channel.onToggle}
+              type="checkbox"
             />
             {channel.icon}
             <span>{channel.label}</span>
           </label>
         ))}
       </div>
-      {hasRenderableValue(hint) ? (
-        <div className="agent-card-inline-hint">
-          <span aria-hidden="true" />
-          {hint}
-        </div>
-      ) : null}
+      {hasRenderableValue(hint) ? <AgentCardNotice>{hint}</AgentCardNotice> : null}
     </AgentOutputCard>
   );
 }

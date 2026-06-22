@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Megaphone } from "lucide-react";
+import { AgentCardNotice, AgentCardTextBlock } from "@/components/agent/AgentCardPrimitives";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
 
 export type PromotionPackCopy = {
@@ -60,14 +61,12 @@ export function PromotionPackCard({
             <div className="promotion-pack-options">
               {channel.copies.map((copy, index) => (
                 <section className="promotion-pack-copy" key={index}>
-                  <div className="promotion-pack-copy-header">
-                    <strong>{copy.title}</strong>
-                    {copy.actions ? <div className="promotion-pack-copy-actions">{copy.actions}</div> : null}
-                  </div>
-                  <p>{copy.body}</p>
+                  <AgentCardTextBlock actions={copy.actions} label={copy.title}>
+                    {copy.body}
+                  </AgentCardTextBlock>
                   {hasRenderableValue(copy.cta) ? <span className="promotion-pack-cta">{copy.cta}</span> : null}
                   {hasRenderableValue(copy.landingUrl) ? <div className="promotion-pack-url">{copy.landingUrl}</div> : null}
-                  {hasRenderableValue(copy.copiedHint) ? <small>{copy.copiedHint}</small> : null}
+                  {hasRenderableValue(copy.copiedHint) ? <AgentCardNotice tone="success">{copy.copiedHint}</AgentCardNotice> : null}
                 </section>
               ))}
             </div>

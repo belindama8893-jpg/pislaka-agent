@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ArrowRight, UserRound } from "lucide-react";
+import { AgentCardNotice } from "@/components/agent/AgentCardPrimitives";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
 
 export type LeadUpdateChangeItem = {
@@ -72,10 +73,12 @@ export function LeadUpdateCard({
       <div className="agent-object-summary-row">
         <span className="agent-object-summary-initials">{initials}</span>
         <div>
-          <strong>{target.title}</strong>
+          <div className="agent-object-summary-title-row">
+            <strong>{target.title}</strong>
+            {target.badge}
+          </div>
           {hasRenderableValue(target.meta) ? <p>{target.meta}</p> : null}
         </div>
-        {target.badge ? <div className="agent-object-summary-badge">{target.badge}</div> : null}
       </div>
       {isEditing ? (
         editForm
@@ -95,12 +98,7 @@ export function LeadUpdateCard({
               ))}
             </div>
           ) : null}
-          {hasRenderableValue(hint) ? (
-            <div className="agent-card-inline-hint">
-              <span aria-hidden="true" />
-              {hint}
-            </div>
-          ) : null}
+          {hasRenderableValue(hint) ? <AgentCardNotice>{hint}</AgentCardNotice> : null}
         </>
       )}
     </AgentOutputCard>

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ArrowRight, House } from "lucide-react";
+import { AgentCardNotice } from "@/components/agent/AgentCardPrimitives";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
 
 export type ListingUpdateChangeItem = {
@@ -100,12 +101,7 @@ export function ListingUpdateCard({
               ))}
             </div>
           ) : null}
-          {hasRenderableValue(hint) ? (
-            <div className="agent-card-inline-hint">
-              <span aria-hidden="true" />
-              {hint}
-            </div>
-          ) : null}
+          {hasRenderableValue(hint) ? <AgentCardNotice>{hint}</AgentCardNotice> : null}
         </>
       )}
     </AgentOutputCard>

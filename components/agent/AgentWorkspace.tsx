@@ -21,7 +21,7 @@ import {
   UserPlus
 } from "lucide-react";
 import { AgentComposer } from "@/components/agent/AgentComposer";
-import { AgentActionGroup, AgentFieldList, AgentInfoGrid, AgentObjectSummary } from "@/components/agent/AgentCardPrimitives";
+import { AgentActionGroup, AgentCandidateList, AgentCardBadge, AgentCardButton, AgentFieldList, AgentInfoGrid, AgentObjectSummary } from "@/components/agent/AgentCardPrimitives";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
 import { AnalyticsInsightCard } from "@/components/agent/cards/AnalyticsInsightCard";
 import { LeadCreateCard } from "@/components/agent/cards/LeadCreateCard";
@@ -80,7 +80,7 @@ import type { AgentChatMessageRecord } from "@/lib/agent/conversations";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { trackProductEvent } from "@/lib/analytics/browser";
 import type { BrokerEventDraftInput, BrokerEventRecord } from "@/lib/events/types";
-import { formatLeadStatusLabel, getLeadStatusClassName } from "@/lib/leads/display";
+import { formatLeadStatusLabel } from "@/lib/leads/display";
 import {
   formatBrokerDateTime,
   fromBrokerDatetimeLocal,
@@ -89,6 +89,7 @@ import {
   toBrokerDatetimeLocal
 } from "@/lib/events/time";
 import type { LeadListItem, LeadRecord, TodayFollowUpLead } from "@/lib/leads/types";
+import type { AgentCardBadgeTone } from "@/components/agent/cards/card-contract";
 import type { LeadReplyDraft } from "@/lib/leads/reply-types";
 import type {
   AgentAction,
@@ -2071,6 +2072,42 @@ function formatLeadStatusForLanguage(
   return copy.statuses[status];
 }
 
+function getAgentLeadStatusBadgeTone(status: LeadRecord["status"], urgency?: LeadRecord["urgency"] | null): AgentCardBadgeTone {
+  if (status === "qualified" && urgency === "high") {
+    return "danger";
+  }
+
+  if (status === "qualified") {
+    return "warning";
+  }
+
+  if (status === "contacted") {
+    return "info";
+  }
+
+  if (status === "closed") {
+    return "success";
+  }
+
+  if (status === "lost") {
+    return "danger";
+  }
+
+  return "neutral";
+}
+
+function renderAgentLeadStatusBadge(
+  status: LeadRecord["status"],
+  urgency: LeadRecord["urgency"] | null | undefined,
+  language: AgentResponseLanguage
+) {
+  return (
+    <AgentCardBadge tone={getAgentLeadStatusBadgeTone(status, urgency)}>
+      {formatLeadStatusForLanguage(status, urgency, language)}
+    </AgentCardBadge>
+  );
+}
+
 function getLeadInterestLine(lead: LeadListItem, language: AgentResponseLanguage = "english") {
   const copy = getLeadCardCopy(language);
   const listing = [lead.listing_title, lead.listing_area, lead.listing_city].filter(Boolean).join(", ");
@@ -2525,24 +2562,18 @@ function PromotionPack({ promotion, sourceMessage }: { promotion: ListingPromoti
 
           return {
             actions: (
-              <>
-                <button
-                  className="icon-button compact"
-                  type="button"
-                  aria-label={`${copy.buttons.copy} ${card.title}`}
-                  onClick={() => void handleCopy(copyKey, copyText)}
-                >
-                  <Copy size={14} />
-                </button>
-                {card.whatsapp_share_url ? (
-                  <a className="icon-button compact" href={card.whatsapp_share_url} target="_blank" rel="noreferrer" aria-label={copy.buttons.shareToWhatsApp}>
-                    <MessageCircle size={14} />
-                  </a>
-                ) : null}
-              </>
+              <AgentCardButton
+                ariaLabel={copiedChannel === copyKey ? copy.buttons.copied : `${copy.buttons.copy} ${card.title}`}
+                icon={copiedChannel === copyKey ? <CheckCircle2 size={14} /> : <Copy size={14} />}
+                iconOnly
+                kind={copiedChannel === copyKey ? "success" : "secondary"}
+                onClick={() => void handleCopy(copyKey, copyText)}
+                title={copiedChannel === copyKey ? copy.buttons.copied : copy.buttons.copy}
+              >
+                {copiedChannel === copyKey ? copy.buttons.copied : copy.buttons.copy}
+              </AgentCardButton>
             ),
             body: card.body,
-            copiedHint: copiedChannel === copyKey ? copy.generic.copiedToClipboard : undefined,
             cta: card.cta,
             landingUrl: card.landing_url ? (
               <a href={card.landing_url} target="_blank" rel="noreferrer">
@@ -2655,10 +2686,10 @@ function PromotionConfirmCard({
   return (
     <PromotionTargetCard
       actions={
-        <button
-          className="primary-button small"
+        <AgentCardButton
           disabled={selectedChannels.length === 0 || isGenerating || hasGenerated}
-          type="button"
+          icon={<CheckCircle2 size={15} />}
+          kind="primary"
           onClick={async () => {
             if (isGenerating || hasGenerated) {
               return;
@@ -2669,9 +2700,8 @@ function PromotionConfirmCard({
             setGenerationState(generated ? "generated" : "idle");
           }}
         >
-          <CheckCircle2 size={15} />{" "}
           {hasGenerated ? copy.buttons.generated : isGenerating ? copy.buttons.generating : copy.buttons.generatePromotionPack}
-        </button>
+        </AgentCardButton>
       }
       channels={promotionChannels.map((item) => ({
         checked: selectedChannels.includes(item.channel),
@@ -2724,9 +2754,8 @@ function LeadResultsCard({
 
         return {
           action: onSelect ? (
-            <button
-              className="outline-button small"
-              type="button"
+            <AgentCardButton
+              kind="secondary"
               disabled={selectedId === lead.id}
               onClick={() => {
                 setSelectedId(lead.id);
@@ -2734,13 +2763,9 @@ function LeadResultsCard({
               }}
             >
               {selectedId === lead.id ? copy.selected : copy.select}
-            </button>
+            </AgentCardButton>
           ) : null,
-          badge: (
-            <span className={getLeadStatusClassName(lead.status, lead.urgency)}>
-              {formatLeadStatusForLanguage(lead.status, lead.urgency, language)}
-            </span>
-          ),
+          badge: renderAgentLeadStatusBadge(lead.status, lead.urgency, language),
           context: lead.listing_id ? (
             <Link
               className="lead-chat-listing-link"
@@ -2778,17 +2803,17 @@ function LeadLatestOfferCard({ onConfirm, sourceMessage }: { onConfirm: () => vo
   return (
     <AgentOutputCard
       actions={
-        <button
-          className="primary-button small"
-          type="button"
+        <AgentCardButton
           disabled={isConfirmed}
+          icon={<CheckCircle2 size={15} />}
+          kind="primary"
           onClick={() => {
             setIsConfirmed(true);
             onConfirm();
           }}
         >
-          <CheckCircle2 size={15} /> {isConfirmed ? copy.buttons.shown : copy.buttons.showLatestLead}
-        </button>
+          {isConfirmed ? copy.buttons.shown : copy.buttons.showLatestLead}
+        </AgentCardButton>
       }
       className="lead-chat-card"
       domain="Lead"
@@ -2917,17 +2942,17 @@ function LeadStatusConfirmCard({
     <LeadUpdateCard
       actions={
         <>
-          <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
-            <CheckCircle2 size={15} /> {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmUpdate}
-          </button>
-          <button
-            className="outline-button small"
-            type="button"
+          <AgentCardButton icon={<CheckCircle2 size={15} />} kind="primary" disabled={isSaving || isSaved} onClick={handleConfirm}>
+            {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmUpdate}
+          </AgentCardButton>
+          <AgentCardButton
+            icon={<Pencil size={14} />}
+            kind="secondary"
             disabled={isSaving || isSaved}
             onClick={() => setIsEditing(!isEditing)}
           >
-            <Pencil size={14} /> {isEditing ? copy.buttons.preview : copy.buttons.editCard}
-          </button>
+            {isEditing ? copy.buttons.preview : copy.buttons.editCard}
+          </AgentCardButton>
         </>
       }
       changes={changes}
@@ -2960,7 +2985,11 @@ function LeadStatusConfirmCard({
       status={status}
       subtitle={preview.urgency ? `Urgency: ${preview.urgency}` : undefined}
       target={{
-        badge: <span className={getLeadStatusClassName(nextStatus ?? preview.lead.status, nextUrgency ?? preview.lead.urgency)}>{nextStatusLabel}</span>,
+        badge: (
+          <AgentCardBadge tone={getAgentLeadStatusBadgeTone(nextStatus ?? preview.lead.status, nextUrgency ?? preview.lead.urgency)}>
+            {nextStatusLabel}
+          </AgentCardBadge>
+        ),
         meta: (
           <>
             {formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language)} · {preview.lead.phone || copy.lead.noPhone}
@@ -3058,17 +3087,17 @@ function LeadDetailsConfirmCard({
     <LeadUpdateCard
       actions={
         <>
-          <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
-            <CheckCircle2 size={15} /> {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmUpdate}
-          </button>
-          <button
-            className="outline-button small"
-            type="button"
+          <AgentCardButton icon={<CheckCircle2 size={15} />} kind="primary" disabled={isSaving || isSaved} onClick={handleConfirm}>
+            {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmUpdate}
+          </AgentCardButton>
+          <AgentCardButton
+            icon={<Pencil size={14} />}
+            kind="secondary"
             disabled={isSaving || isSaved}
             onClick={() => setIsEditing(!isEditing)}
           >
-            <Pencil size={14} /> {isEditing ? copy.buttons.preview : copy.buttons.editCard}
-          </button>
+            {isEditing ? copy.buttons.preview : copy.buttons.editCard}
+          </AgentCardButton>
         </>
       }
       changes={changes}
@@ -3106,11 +3135,7 @@ function LeadDetailsConfirmCard({
       status={status}
       subtitle={preview.lead.phone || copy.lead.noPhone}
       target={{
-        badge: (
-          <span className={getLeadStatusClassName(preview.lead.status, preview.lead.urgency)}>
-            {formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language)}
-          </span>
-        ),
+        badge: renderAgentLeadStatusBadge(preview.lead.status, preview.lead.urgency, language),
         meta: getLeadInterestLine(preview.lead, language),
         title: leadTitle
       }}
@@ -3247,17 +3272,17 @@ function LeadCreateConfirmCard({
     <LeadCreateCard
       actions={
         <>
-          <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
-            <CheckCircle2 size={15} /> {isSaved ? copy.buttons.saved : isSaving ? copy.buttons.saving : copy.buttons.confirmSave}
-          </button>
-          <button
-            className="outline-button small"
-            type="button"
+          <AgentCardButton icon={<CheckCircle2 size={15} />} kind="primary" disabled={isSaving || isSaved} onClick={handleConfirm}>
+            {isSaved ? copy.buttons.saved : isSaving ? copy.buttons.saving : copy.buttons.confirmSave}
+          </AgentCardButton>
+          <AgentCardButton
+            icon={<Pencil size={14} />}
+            kind="secondary"
             disabled={isSaving || isSaved}
             onClick={() => setIsEditing(!isEditing)}
           >
-            <Pencil size={14} /> {isEditing ? copy.buttons.preview : copy.buttons.editCard}
-          </button>
+            {isEditing ? copy.buttons.preview : copy.buttons.editCard}
+          </AgentCardButton>
         </>
       }
       editForm={
@@ -3425,14 +3450,14 @@ function LeadBatchStatusConfirmCard({
   return (
     <AgentOutputCard
       actions={
-        <button
-          className="primary-button small"
-          type="button"
+        <AgentCardButton
           disabled={isSaving || isSaved || !preview.status}
+          icon={<CheckCircle2 size={15} />}
+          kind="primary"
           onClick={handleConfirm}
         >
-          <CheckCircle2 size={15} /> {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmBatchUpdate}
-        </button>
+          {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmBatchUpdate}
+        </AgentCardButton>
       }
       className="lead-chat-card"
       hint={copy.hints.confirmLeadUpdate}
@@ -3456,9 +3481,7 @@ function LeadBatchStatusConfirmCard({
                 {formatLeadStatusForLanguage(lead.status, lead.urgency, language)} {preview.status ? `→ ${formatLeadStatusForLanguage(preview.status, preview.urgency, language)}` : ""} · {lead.phone || copy.lead.noPhone}
               </small>
             </div>
-            <span className={getLeadStatusClassName(preview.status ?? lead.status, preview.urgency ?? lead.urgency)}>
-              {formatLeadStatusForLanguage(preview.status ?? lead.status, preview.urgency ?? lead.urgency, language)}
-            </span>
+            {renderAgentLeadStatusBadge(preview.status ?? lead.status, preview.urgency ?? lead.urgency, language)}
           </div>
         ))}
       </div>
@@ -3542,9 +3565,9 @@ function LeadListingConfirmCard({
   return (
     <AgentOutputCard
       actions={
-        <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
-          <CheckCircle2 size={15} /> {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmListing}
-        </button>
+        <AgentCardButton icon={<CheckCircle2 size={15} />} kind="primary" disabled={isSaving || isSaved} onClick={handleConfirm}>
+          {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmListing}
+        </AgentCardButton>
       }
       className="lead-chat-card"
       hint={copy.hints.confirmLeadListing}
@@ -3554,11 +3577,7 @@ function LeadListingConfirmCard({
       tone="lead"
     >
       <AgentObjectSummary
-        badge={
-          <span className={getLeadStatusClassName(preview.lead.status, preview.lead.urgency)}>
-            {formatLeadStatusForLanguage(preview.lead.status, preview.lead.urgency, language)}
-          </span>
-        }
+        badge={renderAgentLeadStatusBadge(preview.lead.status, preview.lead.urgency, language)}
         description={getLeadInterestLine(preview.lead, language)}
         meta={preview.lead.phone || copy.lead.noPhone}
         title={preview.lead.full_name || preview.lead.phone || copy.lead.unnamedBuyer}
@@ -3686,17 +3705,17 @@ function ListingUpdateConfirmCard({
     <ListingUpdateCard
       actions={
         <>
-          <button className="primary-button small" type="button" disabled={isSaving || isSaved} onClick={handleConfirm}>
-            <CheckCircle2 size={15} /> {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmUpdate}
-          </button>
-          <button
-            className="outline-button small"
-            type="button"
+          <AgentCardButton icon={<CheckCircle2 size={15} />} kind="primary" disabled={isSaving || isSaved} onClick={handleConfirm}>
+            {isSaved ? copy.buttons.updated : isSaving ? copy.buttons.updating : copy.buttons.confirmUpdate}
+          </AgentCardButton>
+          <AgentCardButton
+            icon={<Pencil size={14} />}
+            kind="secondary"
             disabled={isSaving || isSaved}
             onClick={() => setIsEditing(!isEditing)}
           >
-            <Pencil size={14} /> {isEditing ? copy.buttons.preview : copy.buttons.editCard}
-          </button>
+            {isEditing ? copy.buttons.preview : copy.buttons.editCard}
+          </AgentCardButton>
         </>
       }
       changes={changes}
@@ -3809,35 +3828,39 @@ function ListingUpdateSelectionCard({
       title={copy.generic.chooseListingToUpdate}
       tone="listing"
     >
-      <div className="listing-choice-grid">
-        {preview.candidates.map((listing) => (
-          <article className="listing-choice-card" key={listing.id}>
-            <div>
-              <strong>{listing.title || copy.generic.untitledListing}</strong>
-              <p>
-                {[listing.area_value, listing.area_unit].filter(Boolean).join(" ") || copy.generic.areaNotSet} ·{" "}
-                {[listing.location_area, listing.city].filter(Boolean).join(", ") || copy.generic.locationNotSet}
-              </p>
-              <small>
-                {formatListingCurrency(listing.price_amount, listing.price_currency ?? "PKR")} ·{" "}
-                {listing.bedrooms ?? "-"} {copy.generic.beds} / {listing.bathrooms ?? "-"} {copy.generic.baths}
-                {listing.status ? ` · ${listing.status}` : ""}
-              </small>
-            </div>
-            <button
-              className="primary-button small"
-              type="button"
+      <AgentCandidateList
+        label={copy.generic.chooseListingToUpdate}
+        items={preview.candidates.map((listing) => ({
+          action: (
+            <AgentCardButton
+              icon={<CheckCircle2 size={15} />}
+              kind={selectedId === listing.id ? "primary" : "secondary"}
               disabled={Boolean(selectedId)}
               onClick={() => {
                 setSelectedId(listing.id);
                 onSelect(listing);
               }}
             >
-              <CheckCircle2 size={15} /> {selectedId === listing.id ? copy.buttons.selected : copy.buttons.select}
-            </button>
-          </article>
-        ))}
-      </div>
+              {selectedId === listing.id ? copy.buttons.selected : copy.buttons.select}
+            </AgentCardButton>
+          ),
+          description: (
+            <>
+              {[listing.area_value, listing.area_unit].filter(Boolean).join(" ") || copy.generic.areaNotSet} ·{" "}
+              {[listing.location_area, listing.city].filter(Boolean).join(", ") || copy.generic.locationNotSet}
+            </>
+          ),
+          key: listing.id,
+          meta: (
+            <>
+              {formatListingCurrency(listing.price_amount, listing.price_currency ?? "PKR")} ·{" "}
+              {listing.bedrooms ?? "-"} {copy.generic.beds} / {listing.bathrooms ?? "-"} {copy.generic.baths}
+              {listing.status ? ` · ${listing.status}` : ""}
+            </>
+          ),
+          title: listing.title || copy.generic.untitledListing
+        }))}
+      />
     </AgentOutputCard>
   );
 }
@@ -3862,9 +3885,8 @@ function EntitySelectionCard({
   const [skipped, setSkipped] = useState(false);
   const isDone = Boolean(selectedId) || skipped;
   const skipAction = onSkip ? (
-    <button
-      className="outline-button small"
-      type="button"
+    <AgentCardButton
+      kind="secondary"
       disabled={isDone}
       onClick={() => {
         setSkipped(true);
@@ -3872,45 +3894,52 @@ function EntitySelectionCard({
       }}
     >
       {skipped ? copy.buttons.continued : copy.buttons.continueWithoutBinding}
-    </button>
+    </AgentCardButton>
   ) : null;
 
   if (!isListingTarget) {
     return (
-      <LeadListCard
-        footer={skipAction}
+      <AgentOutputCard
+        actions={skipAction}
+        className="lead-chat-card"
+        domain="Lead · Select"
+        icon={<MessageCircle size={16} />}
         intent="select"
-        items={preview.candidates
-          .map((candidate) => ({ candidate, lead: resolutionCandidateToLead(candidate) }))
-          .filter((item): item is { candidate: AgentResolutionCandidate; lead: LeadListItem } => Boolean(item.lead))
-          .map(({ candidate, lead }) => ({
-            action: (
-              <button
-                className={selectedId === candidate.id ? "primary-button small" : "outline-button small"}
-                type="button"
-                disabled={isDone}
-                onClick={() => {
-                  setSelectedId(candidate.id);
-                  onSelect(candidate);
-                }}
-              >
-                <CheckCircle2 size={15} /> {selectedId === candidate.id ? copy.buttons.selected : copy.buttons.select}
-              </button>
-            ),
-            badge: (
-              <span className={getLeadStatusClassName(lead.status, lead.urgency)}>
-                {formatLeadStatusForLanguage(lead.status, lead.urgency, language)}
-              </span>
-            ),
-            description: getLeadInterestLine(lead, language),
-            key: candidate.id,
-            meta: lead.phone || copy.lead.noPhone,
-            pills: [lead.phone || copy.lead.noPhone, lead.email],
-            title: lead.full_name || lead.phone || copy.lead.unnamedBuyer
-          }))}
-        subtitle={helper}
+        summary={helper}
         title={title}
-      />
+        tone="lead"
+      >
+        <AgentCandidateList
+          label={title}
+          items={preview.candidates
+            .map((candidate) => ({ candidate, lead: resolutionCandidateToLead(candidate) }))
+            .filter((item): item is { candidate: AgentResolutionCandidate; lead: LeadListItem } => Boolean(item.lead))
+            .map(({ candidate, lead }) => {
+              const leadTitle = lead.full_name || lead.phone || copy.lead.unnamedBuyer;
+
+              return {
+                action: (
+                  <AgentCardButton
+                    icon={<CheckCircle2 size={15} />}
+                    kind={selectedId === candidate.id ? "primary" : "secondary"}
+                    disabled={isDone}
+                    onClick={() => {
+                      setSelectedId(candidate.id);
+                      onSelect(candidate);
+                    }}
+                  >
+                    {selectedId === candidate.id ? copy.buttons.selected : copy.buttons.select}
+                  </AgentCardButton>
+                ),
+                badge: renderAgentLeadStatusBadge(lead.status, lead.urgency, language),
+                description: getLeadInterestLine(lead, language),
+                key: candidate.id,
+                meta: [lead.phone || copy.lead.noPhone, lead.email].filter(Boolean).join(" · "),
+                title: leadTitle
+              };
+            })}
+        />
+      </AgentOutputCard>
     );
   }
 
@@ -3925,40 +3954,42 @@ function EntitySelectionCard({
       title={title}
       tone={isListingTarget ? "listing" : "lead"}
     >
-      <div className={isListingTarget ? "listing-choice-grid" : "lead-chat-list"}>
-        {preview.candidates.map((candidate) => {
-          const listing = isListingTarget ? resolutionCandidateToListing(candidate) : null;
-          const lead = isListingTarget ? null : resolutionCandidateToLead(candidate);
-
-          return isListingTarget && listing ? (
-            <article className="listing-choice-card" key={candidate.id}>
-              <div>
-                <strong>{listing.title || copy.generic.untitledListing}</strong>
-                <p>
-                  {[listing.area_value, listing.area_unit].filter(Boolean).join(" ") || copy.generic.areaNotSet} ·{" "}
-                  {[listing.location_area, listing.city].filter(Boolean).join(", ") || copy.generic.locationNotSet}
-                </p>
-                <small>
-                  {formatListingCurrency(listing.price_amount, listing.price_currency ?? "PKR")} ·{" "}
-                  {listing.bedrooms ?? "-"} {copy.generic.beds} / {listing.bathrooms ?? "-"} {copy.generic.baths}
-                  {listing.status ? ` · ${listing.status}` : ""}
-                </small>
-              </div>
-              <button
-                className="primary-button small"
-                type="button"
+      <AgentCandidateList
+        label={title}
+        items={preview.candidates
+          .map((candidate) => ({ candidate, listing: resolutionCandidateToListing(candidate) }))
+          .filter((item): item is { candidate: AgentResolutionCandidate; listing: RecentListingSummary } => Boolean(item.listing))
+          .map(({ candidate, listing }) => ({
+            action: (
+              <AgentCardButton
+                icon={<CheckCircle2 size={15} />}
+                kind={selectedId === candidate.id ? "primary" : "secondary"}
                 disabled={isDone}
                 onClick={() => {
                   setSelectedId(candidate.id);
                   onSelect(candidate);
                 }}
               >
-                <CheckCircle2 size={15} /> {selectedId === candidate.id ? copy.buttons.selected : copy.buttons.select}
-              </button>
-            </article>
-          ) : null;
-        })}
-      </div>
+                {selectedId === candidate.id ? copy.buttons.selected : copy.buttons.select}
+              </AgentCardButton>
+            ),
+            description: (
+              <>
+                {[listing.area_value, listing.area_unit].filter(Boolean).join(" ") || copy.generic.areaNotSet} ·{" "}
+                {[listing.location_area, listing.city].filter(Boolean).join(", ") || copy.generic.locationNotSet}
+              </>
+            ),
+            key: candidate.id,
+            meta: (
+              <>
+                {formatListingCurrency(listing.price_amount, listing.price_currency ?? "PKR")} ·{" "}
+                {listing.bedrooms ?? "-"} {copy.generic.beds} / {listing.bathrooms ?? "-"} {copy.generic.baths}
+                {listing.status ? ` · ${listing.status}` : ""}
+              </>
+            ),
+            title: listing.title || copy.generic.untitledListing
+          }))}
+      />
     </AgentOutputCard>
   );
 }
@@ -4026,12 +4057,19 @@ function LeadReplyCard({
     <LeadReplyAgentCard
       actions={
         <>
-          <button className="outline-button small" type="button" onClick={() => void handleCopy()}>
-            <Copy size={14} /> {copied ? copy.buttons.copied : copy.buttons.copy}
-          </button>
-          <button className="primary-button small" type="button" onClick={() => void handleOpenWhatsApp()}>
-            <Phone size={14} /> {copy.buttons.openWhatsApp}
-          </button>
+          <AgentCardButton
+            ariaLabel={copied ? copy.buttons.copied : copy.buttons.copy}
+            icon={copied ? <CheckCircle2 size={14} /> : <Copy size={14} />}
+            iconOnly
+            kind={copied ? "success" : "secondary"}
+            onClick={() => void handleCopy()}
+            title={copied ? copy.buttons.copied : copy.buttons.copy}
+          >
+            {copied ? copy.buttons.copied : copy.buttons.copy}
+          </AgentCardButton>
+          <AgentCardButton icon={<Phone size={14} />} kind="primary" onClick={() => void handleOpenWhatsApp()}>
+            {copy.buttons.openWhatsApp}
+          </AgentCardButton>
         </>
       }
       fields={[
@@ -4141,18 +4179,18 @@ function ChatFollowupSummaryCard({
         <div className="zip-candidate-list" role="group" aria-label={copy.buttons.select}>
           <span>{copy.buttons.select}</span>
           {preview.zipCandidates.map((candidate) => (
-            <button
-              className={selectedZipTextName === candidate.name ? "primary-button small" : "outline-button small"}
+            <AgentCardButton
+              icon={<FileText size={14} />}
+              kind={selectedZipTextName === candidate.name ? "primary" : "secondary"}
               key={candidate.name}
-              type="button"
               onClick={() => setSelectedZipTextName(candidate.name)}
             >
-              <FileText size={14} /> {candidate.name}
-            </button>
+              {candidate.name}
+            </AgentCardButton>
           ))}
-          <button className="primary-button small" type="button" disabled={isWorking} onClick={() => void summarizeSelectedZipText()}>
-            <Sparkles size={14} /> {copy.buttons.generatePromotionPack}
-          </button>
+          <AgentCardButton icon={<Sparkles size={14} />} kind="primary" disabled={isWorking} onClick={() => void summarizeSelectedZipText()}>
+            {copy.buttons.generatePromotionPack}
+          </AgentCardButton>
         </div>
       ) : null}
 
@@ -4162,17 +4200,17 @@ function ChatFollowupSummaryCard({
             <div className="lead-candidate-list" role="group" aria-label={copy.generic.chooseLead}>
               <span>{copy.generic.chooseLead}</span>
               {getVerifiedChatLeadCandidates(summary).map((candidate) => (
-                <button
-                  className={selectedLeadId === candidate.id ? "primary-button small" : "outline-button small"}
+                <AgentCardButton
+                  icon={<UserPlus size={14} />}
+                  kind={selectedLeadId === candidate.id ? "primary" : "secondary"}
                   key={candidate.id}
-                  type="button"
                   onClick={() => {
                     setSelectedLeadId(candidate.id);
                     setActiveAction("manage_followup");
                   }}
                 >
-                  <UserPlus size={14} /> {candidate.full_name || candidate.phone || copy.lead.unnamedBuyer}
-                </button>
+                  {candidate.full_name || candidate.phone || copy.lead.unnamedBuyer}
+                </AgentCardButton>
               ))}
             </div>
           ) : null}
@@ -4192,9 +4230,9 @@ function ChatFollowupSummaryCard({
           <div className="chat-next-actions" aria-label={copy.buttons.select}>
             <span>{copy.buttons.select}</span>
             <AgentActionGroup label={copy.buttons.select}>
-              <button
-                className={activeAction === "reply" ? "primary-button small" : "outline-button small"}
-                type="button"
+              <AgentCardButton
+                icon={<MessageCircle size={14} />}
+                kind={activeAction === "reply" ? "primary" : "secondary"}
                 disabled={Boolean(activeAction) || !targetLead}
                 title={!targetLead ? copy.hints.selectRecord : undefined}
                 onClick={() => {
@@ -4206,28 +4244,28 @@ function ChatFollowupSummaryCard({
                   onDraftReply(summary, targetLead);
                 }}
               >
-                <MessageCircle size={14} /> {copy.generic.draftReply}
-              </button>
+                {copy.generic.draftReply}
+              </AgentCardButton>
               {targetLead ? (
-                <button
-                  className={activeAction === "manage_followup" ? "primary-button small" : "outline-button small"}
-                  type="button"
+                <AgentCardButton
+                  icon={<FileText size={14} />}
+                  kind={activeAction === "manage_followup" ? "primary" : "secondary"}
                   disabled={Boolean(activeAction)}
                   onClick={() => {
                     setActiveAction("manage_followup");
                     onManageFollowup(summary, targetLead);
                   }}
                 >
-                  <FileText size={14} /> {copy.generic.manageFollowUp}
-                </button>
+                  {copy.generic.manageFollowUp}
+                </AgentCardButton>
               ) : (
                 <>
-                  <button className={activeAction === "choose_lead" ? "primary-button small" : "outline-button small"} type="button" onClick={() => setActiveAction("choose_lead")}>
-                    <UserPlus size={14} /> {copy.generic.chooseLead}
-                  </button>
-                  <button
-                    className="outline-button small"
-                    type="button"
+                  <AgentCardButton icon={<UserPlus size={14} />} kind={activeAction === "choose_lead" ? "primary" : "secondary"} onClick={() => setActiveAction("choose_lead")}>
+                    {copy.generic.chooseLead}
+                  </AgentCardButton>
+                  <AgentCardButton
+                    icon={<UserPlus size={14} />}
+                    kind="secondary"
                     onClick={() =>
                       onCreateLead({
                         full_name: summary.detected_customer_name ?? undefined,
@@ -4239,8 +4277,8 @@ function ChatFollowupSummaryCard({
                       }, buildLeadCreateFollowUpFromChat(summary))
                     }
                   >
-                    <UserPlus size={14} /> {copy.generic.confirmNewLead}
-                  </button>
+                    {copy.generic.confirmNewLead}
+                  </AgentCardButton>
                 </>
               )}
             </AgentActionGroup>
@@ -4263,7 +4301,6 @@ function ChatReplyActionCard({ preview, sourceMessage }: { preview: ChatReplyAct
     try {
       await copyToClipboard(summary.reply_draft.reply_text);
       setIsCopied(true);
-      setStatus(copy.buttons.copied);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : copy.buttons.copy);
     }
@@ -4279,9 +4316,16 @@ function ChatReplyActionCard({ preview, sourceMessage }: { preview: ChatReplyAct
       title={copy.generic.whatsappReplyDraft}
       tone="lead"
     >
-      <button className="icon-button subtle" type="button" aria-label={copy.buttons.copy} title={copy.buttons.copy} onClick={() => void copyReply()}>
-        {isCopied ? <CheckCircle2 size={16} /> : <Copy size={16} />}
-      </button>
+      <AgentCardButton
+        ariaLabel={isCopied ? copy.buttons.copied : copy.buttons.copy}
+        icon={isCopied ? <CheckCircle2 size={16} /> : <Copy size={16} />}
+        iconOnly
+        kind={isCopied ? "success" : "secondary"}
+        onClick={() => void copyReply()}
+        title={isCopied ? copy.buttons.copied : copy.buttons.copy}
+      >
+        {isCopied ? copy.buttons.copied : copy.buttons.copy}
+      </AgentCardButton>
       <div className="chat-reply-text">
         {summary.reply_draft.reply_text}
       </div>
@@ -4422,11 +4466,14 @@ function ChatFollowupManageCard({
   return (
     <LeadFollowupAgentCard
       actions={
-        <>
-          <button className="primary-button small" type="button" disabled={Boolean(decision) || isWorking} onClick={() => void acceptSuggestion()}>
-            {action === "reminder" ? <CalendarClock size={15} /> : <CheckCircle2 size={15} />} {primaryActionLabel}
-          </button>
-        </>
+        <AgentCardButton
+          icon={action === "reminder" ? <CalendarClock size={15} /> : <CheckCircle2 size={15} />}
+          kind="primary"
+          disabled={Boolean(decision) || isWorking}
+          onClick={() => void acceptSuggestion()}
+        >
+          {primaryActionLabel}
+        </AgentCardButton>
       }
       fields={fields}
       record={{
@@ -4503,18 +4550,18 @@ function ChatLeadChoiceCard({
         <div className="lead-candidate-list" role="group" aria-label={copy.generic.chooseLead}>
           <span>{copy.generic.chooseLead}</span>
           {candidates.map((candidate) => (
-            <button
-              className={selectedLeadId === candidate.id ? "primary-button small" : "outline-button small"}
+            <AgentCardButton
+              icon={<UserPlus size={14} />}
+              kind={selectedLeadId === candidate.id ? "primary" : "secondary"}
               key={candidate.id}
-              type="button"
               disabled={Boolean(selectedLeadId) || created}
               onClick={() => {
                 setSelectedLeadId(candidate.id);
                 onChooseLead(candidate);
               }}
             >
-              <UserPlus size={14} /> {candidate.full_name || candidate.phone || copy.lead.unnamedBuyer}
-            </button>
+              {candidate.full_name || candidate.phone || copy.lead.unnamedBuyer}
+            </AgentCardButton>
           ))}
         </div>
       ) : (
@@ -4522,9 +4569,9 @@ function ChatLeadChoiceCard({
       )}
       {hasDetectedIdentity ? (
         <AgentActionGroup label={copy.generic.chooseLead}>
-          <button className="outline-button small" type="button" disabled={Boolean(selectedLeadId) || created} onClick={createLead}>
-            <UserPlus size={14} /> {copy.generic.confirmNewLead}
-          </button>
+          <AgentCardButton icon={<UserPlus size={14} />} kind="secondary" disabled={Boolean(selectedLeadId) || created} onClick={createLead}>
+            {copy.generic.confirmNewLead}
+          </AgentCardButton>
         </AgentActionGroup>
       ) : null}
       {selectedLeadId ? <p className="agent-draft-status">{copy.buttons.selected}</p> : null}
@@ -4579,9 +4626,9 @@ function ChatFollowupNoteCard({
     <LeadFollowupAgentCard
       actions={
         <>
-          <button className="primary-button small" type="button" disabled={isSaved || isWorking} onClick={() => void saveNote()}>
-            <CheckCircle2 size={15} /> {copy.buttons.confirmSave}
-          </button>
+          <AgentCardButton icon={<CheckCircle2 size={15} />} kind="primary" disabled={isSaved || isWorking} onClick={() => void saveNote()}>
+            {copy.buttons.confirmSave}
+          </AgentCardButton>
         </>
       }
       record={{
@@ -4665,9 +4712,9 @@ function ChatReminderCard({
     <LeadFollowupAgentCard
       actions={
         <>
-          <button className="primary-button small" type="button" disabled={isSaved || isWorking} onClick={() => void saveReminder()}>
-            <CalendarClock size={15} /> {copy.buttons.confirmSchedule}
-          </button>
+          <AgentCardButton icon={<CalendarClock size={15} />} kind="primary" disabled={isSaved || isWorking} onClick={() => void saveReminder()}>
+            {copy.buttons.confirmSchedule}
+          </AgentCardButton>
         </>
       }
       record={{
@@ -4756,15 +4803,15 @@ function ChatStatusCard({
     <LeadUpdateCard
       actions={
         <>
-          <button className="primary-button small" type="button" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("qualified", "high")}>
-            <CheckCircle2 size={15} /> {formatLeadStatusForLanguage("qualified", "high", language)}
-          </button>
-          <button className="outline-button small" type="button" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("contacted")}>
-            <CheckCircle2 size={15} /> {formatLeadStatusForLanguage("contacted", undefined, language)}
-          </button>
-          <button className="outline-button small" type="button" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("lost")}>
-            <X size={15} /> {formatLeadStatusForLanguage("lost", undefined, language)}
-          </button>
+          <AgentCardButton icon={<CheckCircle2 size={15} />} kind="primary" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("qualified", "high")}>
+            {formatLeadStatusForLanguage("qualified", "high", language)}
+          </AgentCardButton>
+          <AgentCardButton icon={<CheckCircle2 size={15} />} kind="secondary" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("contacted")}>
+            {formatLeadStatusForLanguage("contacted", undefined, language)}
+          </AgentCardButton>
+          <AgentCardButton icon={<X size={15} />} kind="secondary" disabled={Boolean(selected) || isWorking} onClick={() => void updateStatus("lost")}>
+            {formatLeadStatusForLanguage("lost", undefined, language)}
+          </AgentCardButton>
         </>
       }
       changes={[
@@ -4943,17 +4990,17 @@ function DraftPreviewCard({
     <ListingDraftCard
       actions={
         <>
-          <button className="primary-button small" type="button" onClick={handleConfirm} disabled={isSaving || isSaved}>
-            <CheckCircle2 size={15} /> {isSaved ? copy.buttons.saved : isSaving ? copy.buttons.generating : copy.buttons.confirmAdd}
-          </button>
-          <button
-            className="outline-button small"
-            type="button"
+          <AgentCardButton icon={<CheckCircle2 size={15} />} kind="primary" onClick={handleConfirm} disabled={isSaving || isSaved}>
+            {isSaved ? copy.buttons.saved : isSaving ? copy.buttons.generating : copy.buttons.confirmAdd}
+          </AgentCardButton>
+          <AgentCardButton
+            icon={<Pencil size={14} />}
+            kind="secondary"
             disabled={isSaving || isSaved}
             onClick={() => setIsEditing(!isEditing)}
           >
-            <Pencil size={14} /> {isEditing ? copy.buttons.preview : copy.buttons.editCard}
-          </button>
+            {isEditing ? copy.buttons.preview : copy.buttons.editCard}
+          </AgentCardButton>
         </>
       }
       addMediaButton={
@@ -5080,78 +5127,36 @@ function DraftPreviewCard({
         { hidden: !previewDraft.features?.length, label: copy.generic.fieldFeatures, value: previewDraft.features?.join(", ") }
       ]}
       isEditing={isEditing}
-      media={
-        pendingMedia.length || remoteImages.length ? (
-          <>
-            {remoteImages.map((item, index) => {
-              const uploadStatus = mediaUploadStatus[`remote-${index}`] ?? "pending";
-              const isUploading = uploadStatus === "uploading";
-              const isUploaded = uploadStatus === "uploaded";
-              const isFailed = uploadStatus === "failed";
+      mediaItems={[
+        ...remoteImages.map((item, index) => {
+          const uploadStatus = mediaUploadStatus[`remote-${index}`] ?? "pending";
 
-              return (
-                <div className={`agent-media-thumb ${uploadStatus}`} key={item.url}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={getRemoteImagePreviewUrl(item.url)}
-                    alt={item.alt || `Imported property image ${index + 1}`}
-                    referrerPolicy="no-referrer"
-                  />
-                  <span className="agent-media-source">Link</span>
-                  {uploadStatus !== "pending" ? (
-                    <span className="agent-media-upload-state" aria-label={`Imported image ${index + 1} ${uploadStatus}`}>
-                      {isUploading ? (
-                        <LoaderCircle className="spin-icon" size={16} />
-                      ) : isUploaded ? (
-                        <CheckCircle2 size={16} />
-                      ) : isFailed ? (
-                        <X size={15} />
-                      ) : null}
-                    </span>
-                  ) : null}
-                </div>
-              );
-            })}
-            {pendingMedia.map((item) => {
-              const uploadStatus = mediaUploadStatus[item.id] ?? "pending";
-              const isUploading = uploadStatus === "uploading";
-              const isUploaded = uploadStatus === "uploaded";
-              const isFailed = uploadStatus === "failed";
+          return {
+            alt: item.alt || `Imported property image ${index + 1}`,
+            id: `remote-${index}`,
+            label: item.alt || `Imported image ${index + 1}`,
+            mediaType: "image" as const,
+            sourceLabel: "Link",
+            src: getRemoteImagePreviewUrl(item.url),
+            status: uploadStatus
+          };
+        }),
+        ...pendingMedia.map((item) => {
+          const uploadStatus = mediaUploadStatus[item.id] ?? "pending";
 
-              return (
-                <div className={`agent-media-thumb ${uploadStatus}`} key={item.id}>
-                  {item.mediaType === "image" ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={item.previewUrl} alt={item.file.name} />
-                  ) : (
-                    <video src={item.previewUrl} muted playsInline />
-                  )}
-                  {uploadStatus !== "pending" ? (
-                    <span className="agent-media-upload-state" aria-label={`${item.file.name} ${uploadStatus}`}>
-                      {isUploading ? (
-                        <LoaderCircle className="spin-icon" size={16} />
-                      ) : isUploaded ? (
-                        <CheckCircle2 size={16} />
-                      ) : isFailed ? (
-                        <X size={15} />
-                      ) : null}
-                    </span>
-                  ) : null}
-                  <button
-                    aria-label={`Remove ${item.file.name}`}
-                    className="agent-media-remove"
-                    disabled={isSaving || isSaved}
-                    type="button"
-                    onClick={() => onRemoveMedia(item.id)}
-                  >
-                    <X size={13} />
-                  </button>
-                </div>
-              );
-            })}
-          </>
-        ) : null
-      }
+          return {
+            alt: item.file.name,
+            id: item.id,
+            label: item.file.name,
+            mediaType: item.mediaType,
+            onRemove: () => onRemoveMedia(item.id),
+            removeDisabled: isSaving || isSaved,
+            removeLabel: `Remove ${item.file.name}`,
+            src: item.previewUrl,
+            status: uploadStatus
+          };
+        })
+      ]}
       status={status}
       subtitle={copy.hints.reviewListing}
       title={previewDraft.title || copy.generic.untitledListing}
@@ -5179,15 +5184,15 @@ function ListingSavedCard({
     <AgentOutputCard
       actions={
         <>
-          <a className="primary-button small" href={preview.libraryHref}>
-            <House size={14} /> {copy.buttons.openListing}
-          </a>
-          <button className="outline-button small" type="button" onClick={() => onPromote?.(preview)}>
-            <Megaphone size={14} /> {copy.buttons.promoteListing}
-          </button>
-          <button className="outline-button small" type="button" onClick={() => onAskAgent?.(preview, mediaPreview)}>
-            <MessageCircle size={14} /> {copy.buttons.askAgent}
-          </button>
+          <AgentCardButton href={preview.libraryHref} icon={<House size={14} />} kind="primary">
+            {copy.buttons.openListing}
+          </AgentCardButton>
+          <AgentCardButton icon={<Megaphone size={14} />} kind="secondary" onClick={() => onPromote?.(preview)}>
+            {copy.buttons.promoteListing}
+          </AgentCardButton>
+          <AgentCardButton icon={<MessageCircle size={14} />} kind="secondary" onClick={() => onAskAgent?.(preview, mediaPreview)}>
+            {copy.buttons.askAgent}
+          </AgentCardButton>
         </>
       }
       className="listing-saved-card"
@@ -5313,22 +5318,22 @@ function SchedulePreviewCard({
     <ScheduleEventCard
       actions={
         <>
-          <button
-            className="primary-button small"
-            type="button"
+          <AgentCardButton
+            icon={<CheckCircle2 size={15} />}
+            kind="primary"
             onClick={handleConfirm}
             disabled={isSaving || isSaved || !hasScheduleTime}
           >
-            <CheckCircle2 size={15} /> {isSaved ? copy.buttons.saved : isSaving ? copy.buttons.generating : copy.buttons.confirmSchedule}
-          </button>
-          <button
-            className="outline-button small"
-            type="button"
+            {isSaved ? copy.buttons.saved : isSaving ? copy.buttons.generating : copy.buttons.confirmSchedule}
+          </AgentCardButton>
+          <AgentCardButton
+            icon={<Pencil size={14} />}
+            kind="secondary"
             disabled={isSaving || isSaved}
             onClick={() => setIsEditing(!isEditing)}
           >
-            <Pencil size={14} /> {isEditing ? copy.buttons.preview : copy.buttons.editCard}
-          </button>
+            {isEditing ? copy.buttons.preview : copy.buttons.editCard}
+          </AgentCardButton>
         </>
       }
       description={previewEvent.description || copy.generic.noNotes}

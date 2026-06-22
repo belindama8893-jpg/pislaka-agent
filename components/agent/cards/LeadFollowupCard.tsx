@@ -1,6 +1,12 @@
 import type { ReactNode } from "react";
 import { ListChecks } from "lucide-react";
-import { AgentFieldList, type AgentFieldItem } from "@/components/agent/AgentCardPrimitives";
+import {
+  AgentCardNotice,
+  AgentCardTextBlock,
+  AgentFieldList,
+  AgentStepList,
+  type AgentFieldItem
+} from "@/components/agent/AgentCardPrimitives";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
 
 export type LeadFollowupTarget = {
@@ -72,33 +78,20 @@ export function LeadFollowupCard({
       <div className="agent-object-summary-row">
         <span className="agent-object-summary-initials">{initials}</span>
         <div>
-          <strong>{target.title}</strong>
+          <div className="agent-object-summary-title-row">
+            <strong>{target.title}</strong>
+            {target.badge}
+          </div>
           {hasRenderableValue(target.meta) ? <p>{target.meta}</p> : null}
         </div>
-        {target.badge ? <div className="agent-object-summary-badge">{target.badge}</div> : null}
       </div>
-      {steps.length ? (
-        <div className="agent-followup-step-list">
-          {steps.map((step, index) => (
-            <span key={index}>{step}</span>
-          ))}
-        </div>
-      ) : null}
-      <div className="chat-followup-record">
-        <div className="chat-followup-record-header">
-          <span>{record.label}</span>
-          {hasRenderableValue(record.meta) ? <small>{record.meta}</small> : null}
-        </div>
-        <p>{record.body}</p>
-      </div>
+      <AgentStepList label="Follow-up steps" steps={steps} />
+      <AgentCardTextBlock label={record.label} meta={record.meta}>
+        {record.body}
+      </AgentCardTextBlock>
       {children}
       <AgentFieldList fields={fields} />
-      {hasRenderableValue(hint) ? (
-        <div className="agent-card-inline-hint">
-          <span aria-hidden="true" />
-          {hint}
-        </div>
-      ) : null}
+      {hasRenderableValue(hint) ? <AgentCardNotice>{hint}</AgentCardNotice> : null}
     </AgentOutputCard>
   );
 }

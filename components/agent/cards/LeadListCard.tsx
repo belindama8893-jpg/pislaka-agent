@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { UsersRound } from "lucide-react";
+import { AgentCandidateList, AgentCardNotice } from "@/components/agent/AgentCardPrimitives";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
 
 export type LeadListItemCard = {
@@ -40,14 +41,19 @@ function hasRenderableValue(value: ReactNode) {
   return value !== null && value !== undefined && value !== "";
 }
 
-function getFallbackInitials(title: ReactNode) {
-  const text = typeof title === "string" ? title : "";
-  const initials = (text.match(/[A-Za-z0-9]+/g) ?? [])
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("");
+function renderDetailMeta(details?: LeadListItemCard["details"]) {
+  const visibleDetails = details?.filter((detail) => hasRenderableValue(detail.value)) ?? [];
 
-  return (initials || "L").toUpperCase();
+  if (!visibleDetails.length) {
+    return null;
+  }
+
+  return visibleDetails.map((detail, index) => (
+    <span key={index}>
+      {index > 0 ? " · " : null}
+      {detail.value}
+    </span>
+  ));
 }
 
 export function LeadListCard({
@@ -72,50 +78,26 @@ export function LeadListCard({
     >
       {recommendation ? (
         <div className="agent-lead-recommendation">
-          <div>
-            <small>{recommendation.eyebrow}</small>
-            <strong>{recommendation.title}</strong>
-            {hasRenderableValue(recommendation.meta) ? <span>{recommendation.meta}</span> : null}
-          </div>
-          {recommendation.action}
+          <AgentCardNotice tone="success">
+            {recommendation.eyebrow}: {recommendation.title}
+            {hasRenderableValue(recommendation.meta) ? <> · {recommendation.meta}</> : null}
+          </AgentCardNotice>
+          {recommendation.action ? <div className="agent-lead-recommendation-action">{recommendation.action}</div> : null}
         </div>
       ) : null}
       {items.length ? (
-        <div className="lead-chat-list">
-          {items.map((item) => (
-            <div className="lead-chat-row" key={item.key}>
-              <span className="agent-lead-avatar">{item.initials ?? getFallbackInitials(item.title)}</span>
-              <div className="lead-chat-row-main">
-                <div className="lead-chat-row-title">
-                  <strong>{item.title}</strong>
-                  {item.badge}
-                </div>
-                {item.pills?.length ? (
-                  <div className="lead-chat-pills" aria-label="Lead details">
-                    {item.pills.filter(hasRenderableValue).map((pill, index) => (
-                      <span key={index}>{pill}</span>
-                    ))}
-                  </div>
-                ) : null}
-                {hasRenderableValue(item.context) ? <div className="lead-chat-context">{item.context}</div> : null}
-                {hasRenderableValue(item.description) ? <p className="lead-chat-description">{item.description}</p> : null}
-                {hasRenderableValue(item.summary) ? <p>{item.summary}</p> : null}
-                {item.details?.length ? (
-                  <div className="lead-chat-detail-list">
-                    {item.details.map((detail, index) => (
-                      <p key={index}>
-                        <span>{detail.label}</span>
-                        {detail.value}
-                      </p>
-                    ))}
-                  </div>
-                ) : null}
-                {hasRenderableValue(item.meta) ? <small>{item.meta}</small> : null}
-              </div>
-              {item.action ? <div className="lead-chat-row-action">{item.action}</div> : null}
-            </div>
-          ))}
-        </div>
+        <AgentCandidateList
+          className="lead-list-candidate-list"
+          label="Leads"
+          items={items.map((item) => ({
+            action: item.action,
+            badge: item.badge,
+            description: item.description ?? item.summary ?? item.context,
+            key: item.key,
+            meta: item.meta ?? renderDetailMeta(item.details),
+            title: item.title
+          }))}
+        />
       ) : (
         <p className="agent-draft-status">{emptyText}</p>
       )}

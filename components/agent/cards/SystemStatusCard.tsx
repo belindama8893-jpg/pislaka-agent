@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
-import { AgentFieldList, type AgentFieldItem } from "@/components/agent/AgentCardPrimitives";
+import { AgentCardNotice, AgentFieldList, type AgentFieldItem } from "@/components/agent/AgentCardPrimitives";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
 
 export type SystemStatusCardProps = {
@@ -37,12 +37,7 @@ export function SystemStatusCard({
       tone="default"
     >
       <AgentFieldList fields={fields} />
-      {hasRenderableValue(hint) ? (
-        <div className="agent-card-inline-hint warning">
-          <span aria-hidden="true" />
-          {hint}
-        </div>
-      ) : null}
+      {hasRenderableValue(hint) ? <AgentCardNotice tone="warning">{hint}</AgentCardNotice> : null}
     </AgentOutputCard>
   );
 }

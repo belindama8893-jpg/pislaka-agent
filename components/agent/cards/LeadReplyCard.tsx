@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { MessageCircle } from "lucide-react";
-import { AgentFieldList, type AgentFieldItem } from "@/components/agent/AgentCardPrimitives";
+import { AgentCardNotice, AgentCardTextBlock, AgentFieldList, type AgentFieldItem } from "@/components/agent/AgentCardPrimitives";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
 
 export type LeadReplyCardProps = {
@@ -39,13 +39,8 @@ export function LeadReplyCard({
       tone="lead"
     >
       <AgentFieldList fields={fields} />
-      <p className="lead-chat-reply">{replyText}</p>
-      {hasRenderableValue(hint) ? (
-        <div className="agent-card-inline-hint">
-          <span aria-hidden="true" />
-          {hint}
-        </div>
-      ) : null}
+      <AgentCardTextBlock label="Reply draft">{replyText}</AgentCardTextBlock>
+      {hasRenderableValue(hint) ? <AgentCardNotice>{hint}</AgentCardNotice> : null}
     </AgentOutputCard>
   );
 }

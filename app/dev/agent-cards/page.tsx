@@ -33,9 +33,18 @@ import { PromotionTargetCard as PromotionTargetAgentCard } from "@/components/ag
 import { ScheduleEventCard as ScheduleEventAgentCard } from "@/components/agent/cards/ScheduleEventCard";
 import { ScheduleListCard as ScheduleListAgentCard } from "@/components/agent/cards/ScheduleListCard";
 import { SystemStatusCard as SystemStatusAgentCard } from "@/components/agent/cards/SystemStatusCard";
+import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
+import {
+  AgentCardBadge,
+  AgentCardButton,
+  AgentCardNotice,
+  AgentCardTextBlock,
+  AgentCandidateList,
+  AgentInfoGrid,
+  AgentStepList
+} from "@/components/agent/AgentCardPrimitives";
 
 type Intent = "draft" | "read" | "confirm" | "external" | "select" | "partial";
-type ActionKind = "primary" | "secondary" | "quiet" | "ghost" | "success" | "warning" | "icon";
 
 type Fact = {
   label: string;
@@ -81,31 +90,55 @@ const intentCopy: Record<Intent, string> = {
   partial: "Partial"
 };
 
+const foundationTokens = [
+  {
+    group: "Card",
+    tokens: [
+      { name: "--agent-card-width", value: "620px", usage: "Max card width" },
+      { name: "--agent-card-radius", value: "16px", usage: "Outer card radius" },
+      { name: "--agent-card-header-x", value: "18px", usage: "Header horizontal padding" },
+      { name: "--agent-card-body-x", value: "18px", usage: "Body horizontal padding" },
+      { name: "--agent-card-body-gap", value: "13px", usage: "Stack spacing inside body" }
+    ]
+  },
+  {
+    group: "Typography",
+    tokens: [
+      { name: "--agent-card-title-size", value: "1.04rem", usage: "Card title" },
+      { name: "--agent-card-title-weight", value: "650", usage: "Card title weight" },
+      { name: "--agent-card-summary-size", value: "0.79rem", usage: "Subtitle and summary copy" },
+      { name: "--agent-card-label-size", value: "0.66rem", usage: "Field labels" },
+      { name: "--agent-card-value-size", value: "0.85rem", usage: "Field values" }
+    ]
+  },
+  {
+    group: "Actions",
+    tokens: [
+      { name: "--agent-card-button-height", value: "32px", usage: "Default card action height" },
+      { name: "--agent-card-button-radius", value: "8px", usage: "Action radius" },
+      { name: "--agent-card-button-size", value: "0.82rem", usage: "Action label size" },
+      { name: "--agent-card-button-weight", value: "500", usage: "Action label weight" },
+      { name: "--agent-card-button-primary-bg", value: "#1b332e", usage: "Primary action surface" }
+    ]
+  },
+  {
+    group: "Badges",
+    tokens: [
+      { name: "--agent-card-badge-height", value: "22px", usage: "Badge minimum height" },
+      { name: "--agent-card-badge-radius", value: "999px", usage: "Pill shape" },
+      { name: "--agent-card-badge-size", value: "0.625rem", usage: "Badge label size" },
+      { name: "--agent-card-badge-weight", value: "560", usage: "Badge label weight" },
+      { name: "--agent-card-accent", value: "oklch(0.42 0.09 168)", usage: "Listing/card accent" }
+    ]
+  }
+];
+
 function Badge({ intent }: { intent: Intent }) {
   return (
     <span className={`agent-card-showcase-badge ${intent}`}>
       <span aria-hidden="true" />
       {intentCopy[intent]}
     </span>
-  );
-}
-
-function ActionButton({
-  ariaLabel,
-  children,
-  icon,
-  kind = "secondary"
-}: {
-  ariaLabel?: string;
-  children: ReactNode;
-  icon?: ReactNode;
-  kind?: ActionKind;
-}) {
-  return (
-    <button aria-label={ariaLabel} className={`agent-card-showcase-action ${kind}`} type="button">
-      {icon}
-      <span>{children}</span>
-    </button>
   );
 }
 
@@ -235,17 +268,124 @@ function MiniList({
   );
 }
 
+function FoundationBlock() {
+  return (
+    <section className="agent-card-showcase-foundation" aria-labelledby="foundation-title">
+      <div className="agent-card-showcase-foundation-heading">
+        <span>Foundation</span>
+        <div>
+          <h2 id="foundation-title">Base Components And Design Tokens</h2>
+          <p>These are the smallest card primitives. Full cards below should be composed from these instead of inventing local styles.</p>
+        </div>
+      </div>
+
+      <div className="agent-card-showcase-foundation-grid">
+        <div className="agent-card-showcase-foundation-panel">
+          <h3>Components</h3>
+          <div className="agent-card-showcase-foundation-stack">
+            <div className="agent-card-showcase-foundation-row">
+              <span>Buttons</span>
+              <div className="agent-card-showcase-foundation-controls">
+                <AgentCardButton icon={<CheckCircle2 size={15} />} kind="primary">
+                  Confirm & save
+                </AgentCardButton>
+                <AgentCardButton icon={<Pencil size={15} />} kind="secondary">
+                  Edit fields
+                </AgentCardButton>
+                <AgentCardButton ariaLabel="Open" icon={<ExternalLink size={15} />} kind="icon">
+                  Open
+                </AgentCardButton>
+              </div>
+            </div>
+
+            <div className="agent-card-showcase-foundation-row">
+              <span>Badges</span>
+              <div className="agent-card-showcase-foundation-controls">
+                <AgentCardBadge tone="neutral">Draft</AgentCardBadge>
+                <AgentCardBadge tone="success">Saved</AgentCardBadge>
+                <AgentCardBadge tone="info">Select</AgentCardBadge>
+                <AgentCardBadge tone="warning">Partial</AgentCardBadge>
+                <AgentCardBadge tone="danger">Failed</AgentCardBadge>
+              </div>
+            </div>
+
+            <div className="agent-card-showcase-foundation-row">
+              <span>Notice</span>
+              <div className="agent-card-showcase-foundation-notices">
+                <AgentCardNotice tone="neutral">This card writes only the reviewed fields.</AgentCardNotice>
+                <AgentCardNotice tone="warning">No record changes until a candidate is selected.</AgentCardNotice>
+              </div>
+            </div>
+
+            <div className="agent-card-showcase-foundation-row">
+              <span>Text Block</span>
+              <AgentCardTextBlock label="Reply draft" meta="Not sent">
+                Salam Ahmed, the viewing slot is available tomorrow after 4pm.
+              </AgentCardTextBlock>
+            </div>
+
+            <div className="agent-card-showcase-foundation-row">
+              <span>Steps</span>
+              <AgentStepList label="Workflow steps" steps={["Matched by phone", "Needs follow-up", "Reminder ready"]} />
+            </div>
+
+            <div className="agent-card-showcase-foundation-row">
+              <span>Field Row</span>
+              <div className="listing-update-list agent-card-showcase-foundation-fields">
+                <div className="listing-update-row">
+                  <span>Price</span>
+                  <div>
+                    <strong>PKR 4.2 Cr</strong>
+                  </div>
+                </div>
+                <div className="listing-update-row">
+                  <span>Location</span>
+                  <div>
+                    <strong>DHA Phase 6, Lahore</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="agent-card-showcase-foundation-panel">
+          <h3>Design Tokens</h3>
+          <div className="agent-card-showcase-token-groups">
+            {foundationTokens.map((group) => (
+              <section className="agent-card-showcase-token-group" key={group.group} aria-label={`${group.group} tokens`}>
+                <h4>{group.group}</h4>
+                <dl>
+                  {group.tokens.map((token) => (
+                    <div key={token.name}>
+                      <dt>
+                        <code>{token.name}</code>
+                        <span>{token.usage}</span>
+                      </dt>
+                      <dd>{token.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ListingDraftCard() {
   return (
     <ListingDraftAgentCard
       actions={
         <>
-          <button className="primary-button small" type="button">
-            <CheckCircle2 size={15} /> Confirm & save
-          </button>
-          <button className="outline-button small" type="button">
-            <Pencil size={15} /> Edit fields
-          </button>
+          <AgentCardButton icon={<CheckCircle2 size={15} />} kind="primary">
+            Confirm & save
+          </AgentCardButton>
+          <AgentCardButton icon={<Pencil size={15} />} kind="secondary">
+            Edit fields
+          </AgentCardButton>
         </>
       }
       addMediaButton={
@@ -261,13 +401,14 @@ function ListingDraftCard() {
         { label: "Area · Type", value: "1,450 sqft · Apartment" },
         { label: "Beds · Baths", value: "2 · 2" }
       ]}
-      media={
-        <>
-          <span className="agent-media-thumb placeholder">living</span>
-          <span className="agent-media-thumb placeholder">kitchen</span>
-          <span className="agent-media-thumb placeholder">balcony</span>
-        </>
-      }
+      mediaItems={[
+        { id: "living", label: "living", mediaType: "placeholder" },
+        { id: "kitchen", label: "kitchen", mediaType: "placeholder" },
+        { id: "balcony", label: "balcony", mediaType: "placeholder" },
+        { id: "bedroom", label: "bedroom", mediaType: "placeholder" },
+        { id: "bath", label: "bath", mediaType: "placeholder" },
+        { id: "parking", label: "parking", mediaType: "placeholder" }
+      ]}
       status="Missing floor and furnishing. Safe to save as draft."
       subtitle="Auto-drafted from broker message · 6 of 8 fields"
       title="2 BHK Apartment · DHA Phase 6"
@@ -280,12 +421,12 @@ function ListingUpdateCard() {
     <ListingUpdateAgentCard
       actions={
         <>
-          <button className="primary-button small" type="button">
-            <CheckCircle2 size={15} /> Confirm update
-          </button>
-          <button className="outline-button small" type="button">
-            <Pencil size={15} /> Edit fields
-          </button>
+          <AgentCardButton icon={<CheckCircle2 size={15} />} kind="primary">
+            Confirm update
+          </AgentCardButton>
+          <AgentCardButton icon={<Pencil size={15} />} kind="secondary">
+            Edit fields
+          </AgentCardButton>
         </>
       }
       changes={[
@@ -302,6 +443,109 @@ function ListingUpdateCard() {
       }}
       title="Update listing facts"
     />
+  );
+}
+
+function ListingSelectionCard() {
+  return (
+    <AgentOutputCard
+      actions={
+        <AgentCardButton kind="secondary">
+          Continue without selecting
+        </AgentCardButton>
+      }
+      className="listing-update-card"
+      domain="Listing · Select"
+      icon={<Home size={16} />}
+      intent="select"
+      summary="I found multiple matching listings. Choose the exact property before I update anything."
+      title="Choose listing to update"
+      tone="listing"
+    >
+      <AgentCandidateList
+        label="Matching listings"
+        items={[
+          {
+            action: (
+              <AgentCardButton icon={<CheckCircle2 size={14} />} kind="primary">
+                Select
+              </AgentCardButton>
+            ),
+            description: "8 marla · 5, Lahore",
+            key: "10-marla",
+            meta: "PKR 3.2 Crore · 4 beds / 5 baths · draft",
+            title: "10 marla House"
+          },
+          {
+            action: (
+              <AgentCardButton icon={<CheckCircle2 size={14} />} kind="secondary">
+                Select
+              </AgentCardButton>
+            ),
+            description: "DHA, Lahore",
+            key: "dha-apartment",
+            meta: "PKR 1,000,000 · 3 beds / - baths · draft",
+            title: "3-Bedroom Apartment in DHA"
+          },
+          {
+            action: (
+              <AgentCardButton icon={<CheckCircle2 size={14} />} kind="secondary">
+                Select
+              </AgentCardButton>
+            ),
+            description: "DHA Phase 5, Lahore",
+            key: "phase-5",
+            meta: "PKR 1.5 Crore · 3 beds / - baths · draft",
+            title: "5 Marla House in DHA Phase 5"
+          }
+        ]}
+      />
+      <AgentCardNotice tone="warning">
+        No listing will be changed until one candidate is selected.
+      </AgentCardNotice>
+    </AgentOutputCard>
+  );
+}
+
+function ListingSavedCard() {
+  return (
+    <AgentOutputCard
+      actions={
+        <>
+          <AgentCardButton icon={<Home size={14} />} kind="primary">
+            Open listing
+          </AgentCardButton>
+          <AgentCardButton icon={<Sparkles size={14} />} kind="secondary">
+            Promote
+          </AgentCardButton>
+          <AgentCardButton icon={<MessageCircle size={14} />} kind="secondary">
+            Ask agent
+          </AgentCardButton>
+        </>
+      }
+      className="listing-saved-card"
+      domain="Listing"
+      icon={<CheckCircle2 size={16} />}
+      intent="saved"
+      summary="3 media files saved"
+      title="Listing saved"
+      tone="listing"
+    >
+      <div className="listing-saved-summary">
+        <div>
+          <strong>2 BHK Apartment · DHA Phase 6</strong>
+          <span>DHA Phase 6, Lahore · PKR 4.2 Cr</span>
+        </div>
+        <div className="listing-saved-media" aria-label="Saved listing media">
+          <div className="listing-saved-thumbs">
+            <span className="listing-saved-thumb" />
+            <span className="listing-saved-thumb" />
+            <span className="listing-saved-thumb" />
+          </div>
+          <span>3 media files</span>
+        </div>
+      </div>
+    </AgentOutputCard>
   );
 }
 
@@ -325,10 +569,12 @@ function PromotionTargetCard() {
       title="Generate promotion pack"
       actions={
         <>
-          <ActionButton icon={<Sparkles size={15} />} kind="primary">
+          <AgentCardButton icon={<Sparkles size={15} />} kind="primary">
             Generate pack
-          </ActionButton>
-          <ActionButton icon={<Pencil size={15} />}>Change channels</ActionButton>
+          </AgentCardButton>
+          <AgentCardButton icon={<Pencil size={15} />} kind="secondary">
+            Change channels
+          </AgentCardButton>
         </>
       }
     />
@@ -351,17 +597,9 @@ function PromotionPackCard() {
               cta: "CTA: Message agent",
               landingUrl: <code>pslk.co/dha6-2bhk</code>,
               actions: (
-                <>
-                  <ActionButton icon={<Copy size={14} />} kind="secondary">
-                    Copy
-                  </ActionButton>
-                  <ActionButton ariaLabel="Open landing page" icon={<ExternalLink size={14} />} kind="icon">
-                    Open landing
-                  </ActionButton>
-                  <ActionButton ariaLabel="Share promotion" icon={<Send size={14} />} kind="icon">
-                    Share
-                  </ActionButton>
-                </>
+                <AgentCardButton ariaLabel="Copy draft" icon={<Copy size={14} />} iconOnly kind="secondary" title="Copy draft">
+                  Copy draft
+                </AgentCardButton>
               )
             }
           ]
@@ -375,11 +613,10 @@ function PromotionPackCard() {
             {
               title: "Instagram caption",
               body: "New in DHA Phase 6: bright 2BHK corner unit, 1,450 sqft, two covered parking spaces.",
-              copiedHint: "On your clipboard · not published",
               actions: (
-                <ActionButton icon={<Check size={14} />} kind="success">
+                <AgentCardButton ariaLabel="Copied" icon={<Check size={14} />} iconOnly kind="success" title="Copied">
                   Copied
-                </ActionButton>
+                </AgentCardButton>
               )
             }
           ]
@@ -402,12 +639,12 @@ function LeadCreateCard() {
     <LeadCreateAgentCard
       actions={
         <>
-          <button className="primary-button small" type="button">
-            <CheckCircle2 size={15} /> Confirm save
-          </button>
-          <button className="outline-button small" type="button">
-            <Pencil size={15} /> Edit fields
-          </button>
+          <AgentCardButton icon={<CheckCircle2 size={15} />} kind="primary">
+            Confirm save
+          </AgentCardButton>
+          <AgentCardButton icon={<Pencil size={15} />} kind="secondary">
+            Edit fields
+          </AgentCardButton>
         </>
       }
       fields={[
@@ -432,64 +669,48 @@ function LeadListCard() {
   return (
     <LeadListAgentCard
       footer={
-        <button className="agent-card-showcase-link" type="button">
+        <AgentCardButton kind="secondary">
           View all 18 in Leads
-        </button>
+        </AgentCardButton>
       }
       items={[
         {
           action: (
-            <button className="agent-card-showcase-action icon" type="button" aria-label="Open Ahmed Raza">
-              <ChevronRight size={15} />
-              <span>Open lead</span>
-            </button>
+            <AgentCardButton ariaLabel="Open Ahmed Raza" icon={<ChevronRight size={15} />} kind="secondary">
+              Open
+            </AgentCardButton>
           ),
-          badge: <span className="lead-status hot">Hot</span>,
-          details: [{ label: "Listing", value: "DHA Phase 6" }, { label: "Time", value: "2h ago" }],
-          initials: "AR",
+          badge: <AgentCardBadge tone="danger">Hot</AgentCardBadge>,
           key: "ahmed",
+          meta: "DHA Phase 6 · 2h ago",
           summary: "2BHK under PKR 4.5 Cr",
           title: "Ahmed Raza"
         },
         {
           action: (
-            <button className="agent-card-showcase-action icon" type="button" aria-label="Open Sara Khan">
-              <ChevronRight size={15} />
-              <span>Open lead</span>
-            </button>
+            <AgentCardButton ariaLabel="Open Sara Khan" icon={<ChevronRight size={15} />} kind="secondary">
+              Open
+            </AgentCardButton>
           ),
-          badge: <span className="lead-status qualified">Warm</span>,
-          details: [{ label: "Listing", value: "Bahria Town" }, { label: "Time", value: "1d ago" }],
-          initials: "SK",
+          badge: <AgentCardBadge tone="warning">Warm</AgentCardBadge>,
           key: "sara",
+          meta: "Bahria Town · 1d ago",
           summary: "Viewing this week",
           title: "Sara Khan"
         },
         {
           action: (
-            <button className="agent-card-showcase-action icon" type="button" aria-label="Open Bilal Ahmed">
-              <ChevronRight size={15} />
-              <span>Open lead</span>
-            </button>
+            <AgentCardButton ariaLabel="Open Bilal Ahmed" icon={<ChevronRight size={15} />} kind="secondary">
+              Open
+            </AgentCardButton>
           ),
-          badge: <span className="lead-status new">New</span>,
-          details: [{ label: "Listing", value: "No listing yet" }, { label: "Time", value: "3d ago" }],
-          initials: "BA",
+          badge: <AgentCardBadge tone="neutral">New</AgentCardBadge>,
           key: "bilal",
+          meta: "No listing yet · 3d ago",
           summary: "Investor, 3-4 units",
           title: "Bilal Ahmed"
         }
       ]}
-      recommendation={{
-        action: (
-          <button className="primary-button small" type="button">
-            <Send size={14} /> Draft reply
-          </button>
-        ),
-        eyebrow: "Next best action",
-        meta: "Hot lead · asked 2h ago · listing matched",
-        title: "Send the price reply first"
-      }}
       subtitle="4 leads need a touch · sorted by urgency"
       title="Today's follow-ups"
     />
@@ -501,12 +722,12 @@ function LeadUpdateCard() {
     <LeadUpdateAgentCard
       actions={
         <>
-          <button className="primary-button small" type="button">
-            <CheckCircle2 size={15} /> Confirm update
-          </button>
-          <button className="outline-button small" type="button">
-            <Pencil size={15} /> Edit fields
-          </button>
+          <AgentCardButton icon={<CheckCircle2 size={15} />} kind="primary">
+            Confirm update
+          </AgentCardButton>
+          <AgentCardButton icon={<Pencil size={15} />} kind="secondary">
+            Edit fields
+          </AgentCardButton>
         </>
       }
       changes={[
@@ -517,7 +738,7 @@ function LeadUpdateCard() {
       hint="Writes to your CRM. Review the changes before confirming."
       subtitle="+92 300 1234567 · currently New"
       target={{
-        badge: <span className="lead-status contacted">Contacted</span>,
+        badge: <AgentCardBadge tone="info">Contacted</AgentCardBadge>,
         initials: "AR",
         meta: "Lead profile changes pending confirmation",
         title: "Ahmed Raza"
@@ -527,19 +748,201 @@ function LeadUpdateCard() {
   );
 }
 
+function LeadSelectionCard() {
+  return (
+    <AgentOutputCard
+      actions={<AgentCardButton kind="secondary">Create a new lead instead</AgentCardButton>}
+      className="lead-chat-card"
+      domain="Lead · Select"
+      icon={<UserRound size={16} />}
+      intent="select"
+      summary="I found 4 possible leads. Select the right record before linking it to a listing."
+      title="Choose lead"
+      tone="lead"
+    >
+      <AgentCandidateList
+        label="Matching leads"
+        items={[
+          {
+            action: (
+              <AgentCardButton icon={<CheckCircle2 size={14} />} kind="primary">
+                Select
+              </AgentCardButton>
+            ),
+            badge: <AgentCardBadge tone="neutral">New</AgentCardBadge>,
+            description: "NEW MODERN DESIGN HOUSE FOR SALE IN DHA PHASE 8 EX AIR AVENUE, DHA Phase 8, Lahore",
+            key: "belinda-1",
+            meta: "+9818511832222 · belinda.ma8893@gmail.com",
+            title: "belinda ma"
+          },
+          {
+            action: (
+              <AgentCardButton icon={<CheckCircle2 size={14} />} kind="secondary">
+                Select
+              </AgentCardButton>
+            ),
+            badge: <AgentCardBadge tone="neutral">New</AgentCardBadge>,
+            description: "Listing not set",
+            key: "belinda-2",
+            meta: "030013001123 · belinda.ma8893@gmail.com",
+            title: "belinda ma"
+          },
+          {
+            action: (
+              <AgentCardButton icon={<CheckCircle2 size={14} />} kind="secondary">
+                Select
+              </AgentCardButton>
+            ),
+            badge: <AgentCardBadge tone="info">Contacted</AgentCardBadge>,
+            description: "Villa in DHA Phase 5, DHA Phase 5, Lahore",
+            key: "belinda-3",
+            meta: "185111119999 · belinda.ma8893@gmail.com",
+            title: "belinda ma"
+          }
+        ]}
+      />
+      <AgentCardNotice tone="warning">
+        No CRM record will be shown or changed until one candidate is selected.
+      </AgentCardNotice>
+    </AgentOutputCard>
+  );
+}
+
+function LeadBatchUpdateCard() {
+  return (
+    <AgentOutputCard
+      actions={
+        <>
+          <AgentCardButton icon={<CheckCircle2 size={14} />} kind="primary">
+            Confirm 3 updates
+          </AgentCardButton>
+          <AgentCardButton icon={<Pencil size={14} />} kind="secondary">
+            Edit selection
+          </AgentCardButton>
+        </>
+      }
+      className="lead-chat-card lead-update-card"
+      domain="Lead · Batch update"
+      icon={<UsersRound size={16} />}
+      intent="confirm"
+      summary="Apply the same status change to selected leads."
+      title="Mark 3 leads as contacted"
+      tone="lead"
+    >
+      <AgentCandidateList
+        label="Leads to update"
+        items={[
+          {
+            badge: <AgentCardBadge tone="neutral">New</AgentCardBadge>,
+            description: "Primary listing · DHA Phase 6 Apt",
+            key: "ahmed",
+            meta: "Status will change from New to Contacted",
+            title: "Ahmed Raza"
+          },
+          {
+            badge: <AgentCardBadge tone="warning">Warm</AgentCardBadge>,
+            description: "Primary listing · Bahria Town 10 Marla",
+            key: "sara",
+            meta: "Status will change from Warm to Contacted",
+            title: "Sara Khan"
+          },
+          {
+            badge: <AgentCardBadge tone="neutral">New</AgentCardBadge>,
+            description: "Primary listing not set",
+            key: "bilal",
+            meta: "Status will change from New to Contacted",
+            title: "Bilal Ahmed"
+          }
+        ]}
+      />
+      <AgentCardNotice>
+        This batch writes only the status field. Notes, listing links, and reminders stay untouched.
+      </AgentCardNotice>
+    </AgentOutputCard>
+  );
+}
+
+function LeadListingBindingCard() {
+  return (
+    <LeadUpdateAgentCard
+      actions={
+        <>
+          <AgentCardButton icon={<CheckCircle2 size={15} />} kind="primary">
+            Confirm link
+          </AgentCardButton>
+          <AgentCardButton icon={<Search size={15} />} kind="secondary">
+            Choose another listing
+          </AgentCardButton>
+        </>
+      }
+      changes={[
+        { label: "Primary listing", previousValue: "Not set", value: "DHA Phase 6 Apt", highlight: true },
+        { label: "Lead source", previousValue: "Manual", value: "WhatsApp campaign" },
+        { label: "Next action", previousValue: "Not set", value: "Draft WhatsApp reply" }
+      ]}
+      hint="Linking the listing does not message the lead automatically."
+      subtitle="+92 300 1234567 · possible DHA buyer"
+      target={{
+        badge: <AgentCardBadge tone="neutral">New</AgentCardBadge>,
+        initials: "AR",
+        meta: "Lead record needs one confirmed listing",
+        title: "Ahmed Raza"
+      }}
+      title="Link lead to listing"
+    />
+  );
+}
+
+function WhatsAppImportSummaryCard() {
+  return (
+    <AgentOutputCard
+      actions={
+        <>
+          <AgentCardButton icon={<CheckCircle2 size={14} />} kind="primary">
+            Save summary
+          </AgentCardButton>
+          <AgentCardButton icon={<CalendarPlus size={14} />} kind="secondary">
+            Set reminder
+          </AgentCardButton>
+        </>
+      }
+      className="lead-chat-card lead-followup-card"
+      domain="Lead · WhatsApp"
+      icon={<MessageCircle size={16} />}
+      intent="confirm"
+      summary="Imported chat matched to Ahmed Raza by phone number."
+      title="Save WhatsApp follow-up"
+      tone="lead"
+    >
+      <AgentInfoGrid
+        fields={[
+          { label: "Matched lead", value: "Ahmed Raza" },
+          { label: "Need", value: "2BHK in DHA Phase 6" },
+          { label: "Budget", value: "PKR 4.5 Cr" },
+          { label: "Suggested status", previousValue: "New", value: "Hot" }
+        ]}
+      />
+      <AgentCardTextBlock label="Follow-up record" meta="Today 4:20 PM">
+        Ahmed asked for a DHA Phase 6 viewing this week and needs covered parking. He can visit after 4pm.
+      </AgentCardTextBlock>
+      <AgentCardNotice>
+        The original chat text is not saved by default.
+      </AgentCardNotice>
+    </AgentOutputCard>
+  );
+}
+
 function LeadReplyCard() {
   return (
     <LeadReplyAgentCard
       actions={
         <>
-          <button className="outline-button small" type="button">
-            <Copy size={15} />
+          <AgentCardButton ariaLabel="Copy reply" icon={<Copy size={15} />} iconOnly kind="secondary" title="Copy reply">
             Copy reply
-          </button>
-          <button className="primary-button small" type="button">
-            <ExternalLink size={15} />
+          </AgentCardButton>
+          <AgentCardButton icon={<ExternalLink size={15} />} kind="primary">
             Open WhatsApp
-          </button>
+          </AgentCardButton>
         </>
       }
       fields={[
@@ -585,10 +988,12 @@ function LeadFollowupCard() {
       title="Save follow-up summary"
       actions={
         <>
-          <ActionButton icon={<CheckCircle2 size={15} />} kind="primary">
+          <AgentCardButton icon={<CheckCircle2 size={15} />} kind="primary">
             Save note
-          </ActionButton>
-          <ActionButton icon={<CalendarPlus size={15} />}>Set reminder</ActionButton>
+          </AgentCardButton>
+          <AgentCardButton icon={<CalendarPlus size={15} />} kind="secondary">
+            Set reminder
+          </AgentCardButton>
         </>
       }
     />
@@ -610,11 +1015,15 @@ function ScheduleEventCard() {
       title="Schedule preview"
       actions={
         <>
-          <ActionButton icon={<CheckCircle2 size={15} />} kind="primary">
+          <AgentCardButton icon={<CheckCircle2 size={15} />} kind="primary">
             Confirm schedule
-          </ActionButton>
-          <ActionButton icon={<Clock3 size={15} />}>Edit time</ActionButton>
-          <ActionButton icon={<Pencil size={15} />}>Edit details</ActionButton>
+          </AgentCardButton>
+          <AgentCardButton icon={<Clock3 size={15} />} kind="secondary">
+            Edit time
+          </AgentCardButton>
+          <AgentCardButton icon={<Pencil size={15} />} kind="secondary">
+            Edit details
+          </AgentCardButton>
         </>
       }
     />
@@ -632,9 +1041,9 @@ function ScheduleListCard() {
       subtitle="Today · broker timezone"
       title="3 events scheduled"
       actions={
-        <button className="agent-card-showcase-link" type="button">
+        <AgentCardButton kind="secondary">
           Open Schedule
-        </button>
+        </AgentCardButton>
       }
     />
   );
@@ -642,40 +1051,49 @@ function ScheduleListCard() {
 
 function EntitySelectionCard() {
   return (
-    <CardShell
-      domain="Selection"
-      icon={<Search size={15} />}
+    <AgentOutputCard
+      actions={<AgentCardButton kind="secondary">Continue without binding</AgentCardButton>}
+      className="lead-chat-card"
+      domain="Entity · Select"
+      icon={<Search size={16} />}
       intent="select"
-      subtitle="Several Ahmed leads matched this request"
+      summary="Several Ahmed records matched this request. Choose one entity before continuing."
       title="Choose a lead to continue"
-      actions={<ActionButton kind="ghost">Continue without binding</ActionButton>}
+      tone="lead"
     >
-      <MiniList
+      <AgentCandidateList
+        label="Matching entities"
         items={[
           {
             action: (
-              <ActionButton ariaLabel="Select Ahmed Raza" icon={<ChevronRight size={15} />} kind="icon">
+              <AgentCardButton icon={<CheckCircle2 size={14} />} kind="primary">
                 Select
-              </ActionButton>
+              </AgentCardButton>
             ),
-            eyebrow: "Phone match",
-            meta: "+92 300 1234567 · DHA Phase 6 · Hot",
+            badge: <AgentCardBadge tone="info">Phone match</AgentCardBadge>,
+            description: "DHA Phase 6 · Hot lead",
+            key: "ahmed-raza",
+            meta: "+92 300 1234567",
             title: "Ahmed Raza"
           },
           {
             action: (
-              <ActionButton ariaLabel="Select Ahmed Rafique" icon={<ChevronRight size={15} />} kind="icon">
+              <AgentCardButton icon={<CheckCircle2 size={14} />} kind="secondary">
                 Select
-              </ActionButton>
+              </AgentCardButton>
             ),
-            eyebrow: "Name match",
-            meta: "No phone · Gulberg · New",
+            badge: <AgentCardBadge tone="neutral">Name match</AgentCardBadge>,
+            description: "Gulberg · New lead",
+            key: "ahmed-rafique",
+            meta: "No phone on record",
             title: "Ahmed Rafique"
           }
         ]}
       />
-      <Hint tone="warning">No records will be shown or changed until one candidate is selected.</Hint>
-    </CardShell>
+      <AgentCardNotice tone="warning">
+        No records will be shown or changed until one candidate is selected.
+      </AgentCardNotice>
+    </AgentOutputCard>
   );
 }
 
@@ -696,10 +1114,12 @@ function AttributionSummaryCard() {
       title="WhatsApp is driving qualified leads"
       actions={
         <>
-          <ActionButton icon={<BarChart3 size={15} />} kind="primary">
+          <AgentCardButton icon={<BarChart3 size={15} />} kind="primary">
             Open analytics
-          </ActionButton>
-          <ActionButton icon={<MessageCircle size={15} />}>Ask why</ActionButton>
+          </AgentCardButton>
+          <AgentCardButton icon={<MessageCircle size={15} />} kind="secondary">
+            Ask why
+          </AgentCardButton>
         </>
       }
     />
@@ -720,10 +1140,12 @@ function StatusStateCard() {
       title="Listing saved · 1 media upload failed"
       actions={
         <>
-          <ActionButton icon={<Plus size={15} />} kind="warning">
+          <AgentCardButton icon={<Plus size={15} />} kind="warning">
             Retry media
-          </ActionButton>
-          <ActionButton icon={<ExternalLink size={15} />}>Open listing</ActionButton>
+          </AgentCardButton>
+          <AgentCardButton icon={<ExternalLink size={15} />} kind="secondary">
+            Open listing
+          </AgentCardButton>
         </>
       }
     />
@@ -737,7 +1159,9 @@ const catalogSections: CatalogSection[] = [
     description: "Draft, update, and save-state patterns for property records.",
     cards: [
       { id: "listing-draft", label: "listing_draft", render: ListingDraftCard },
-      { id: "listing-update", label: "listing_update", render: ListingUpdateCard }
+      { id: "listing-update", label: "listing_update", render: ListingUpdateCard },
+      { id: "listing-selection", label: "listing_selection", render: ListingSelectionCard },
+      { id: "listing-saved", label: "listing_saved", render: ListingSavedCard }
     ]
   },
   {
@@ -747,9 +1171,13 @@ const catalogSections: CatalogSection[] = [
     cards: [
       { id: "lead-create", label: "lead_create", render: LeadCreateCard },
       { id: "lead-list", label: "lead_list", render: LeadListCard },
+      { id: "lead-selection", label: "lead_selection", render: LeadSelectionCard },
       { id: "lead-update", label: "lead_update", render: LeadUpdateCard },
+      { id: "lead-batch-update", label: "lead_batch_update", render: LeadBatchUpdateCard },
+      { id: "lead-listing-binding", label: "lead_listing_binding", render: LeadListingBindingCard },
       { id: "lead-reply", label: "lead_reply", render: LeadReplyCard },
-      { id: "lead-followup", label: "lead_followup", render: LeadFollowupCard }
+      { id: "lead-followup", label: "lead_followup", render: LeadFollowupCard },
+      { id: "whatsapp-import-summary", label: "whatsapp_import_summary", render: WhatsAppImportSummaryCard }
     ]
   },
   {
@@ -844,9 +1272,11 @@ export default function AgentCardsShowcasePage() {
         </div>
       </section>
 
+      <FoundationBlock />
+
       <section className="agent-card-showcase-section" aria-labelledby="desktop-title">
         <div className="agent-card-showcase-section-heading">
-          <span>1</span>
+          <span>2</span>
           <div>
             <h2 id="desktop-title">Desktop Catalog</h2>
             <p>All card families at workspace width, grouped by workflow domain.</p>
@@ -857,7 +1287,7 @@ export default function AgentCardsShowcasePage() {
 
       <section className="agent-card-showcase-section" aria-labelledby="mobile-title">
         <div className="agent-card-showcase-section-heading">
-          <span>2</span>
+          <span>3</span>
           <div>
             <h2 id="mobile-title">Mobile Catalog</h2>
             <p>The same formal content inside a 360px chat column.</p>

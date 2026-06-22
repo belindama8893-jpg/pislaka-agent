@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { CalendarClock } from "lucide-react";
-import { AgentFieldList, type AgentFieldItem } from "@/components/agent/AgentCardPrimitives";
+import { AgentCardTextBlock, AgentFieldList, type AgentFieldItem } from "@/components/agent/AgentCardPrimitives";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
 
 export type ScheduleEventCardProps = {
@@ -14,10 +14,6 @@ export type ScheduleEventCardProps = {
   title: string;
   eventTitle: ReactNode;
 };
-
-function hasRenderableValue(value: ReactNode) {
-  return value !== null && value !== undefined && value !== "";
-}
 
 export function ScheduleEventCard({
   actions,
@@ -46,10 +42,9 @@ export function ScheduleEventCard({
         editForm
       ) : (
         <>
-          <div className="schedule-event-summary">
-            <h3>{eventTitle}</h3>
-            {hasRenderableValue(description) ? <p>{description}</p> : null}
-          </div>
+          <AgentCardTextBlock label="Event preview" title={eventTitle}>
+            {description}
+          </AgentCardTextBlock>
           <AgentFieldList fields={fields} />
         </>
       )}

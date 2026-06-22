@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { UserPlus } from "lucide-react";
-import { AgentFieldList, type AgentFieldItem } from "@/components/agent/AgentCardPrimitives";
+import { AgentCardNotice, AgentFieldList, type AgentFieldItem } from "@/components/agent/AgentCardPrimitives";
 import { AgentOutputCard } from "@/components/agent/AgentOutputCard";
 
 export type LeadCreateTarget = {
@@ -73,12 +73,7 @@ export function LeadCreateCard({
       </div>
       {isEditing ? editForm : <AgentFieldList fields={fields} />}
       {hasRenderableValue(followUp) ? <AgentFieldList compact fields={[{ label: followUpLabel, value: followUp }]} /> : null}
-      {!isEditing && hasRenderableValue(hint) ? (
-        <div className="agent-card-inline-hint">
-          <span aria-hidden="true" />
-          {hint}
-        </div>
-      ) : null}
+      {!isEditing && hasRenderableValue(hint) ? <AgentCardNotice>{hint}</AgentCardNotice> : null}
     </AgentOutputCard>
   );
 }
