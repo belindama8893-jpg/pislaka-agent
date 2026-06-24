@@ -102,66 +102,29 @@ function buildSuggestion(
   };
 }
 
-function rankedHomeIntents(context: AgentGuidanceContext): RankedIntent[] {
-  const { brokerState, conversationState } = context;
-  const ranked: RankedIntent[] = [];
-
-  if ((brokerState.overdueFollowupCount ?? 0) > 0 || (brokerState.todayFollowupCount ?? 0) > 0) {
-    ranked.push({
-      intent: "list_today_followups",
-      reason: "Follow-ups are due in this broker workspace.",
-      priorityBoost: 40
-    });
-  }
-
-  if (!brokerState.hasListings) {
-    ranked.push({
-      intent: "create_listing_draft",
-      reason: "The broker has no saved listings yet.",
-      priorityBoost: 35
-    });
-  }
-
-  if (brokerState.hasListings || conversationState.activeListingId) {
-    ranked.push({
-      intent: "create_campaign_links",
-      reason: "Saved or selected listings can be promoted next.",
-      priorityBoost: 25
-    });
-  }
-
-  if (!brokerState.hasLeads) {
-    ranked.push({
-      intent: "create_lead",
-      reason: "The broker has no saved leads yet.",
-      priorityBoost: 20
-    });
-  }
-
-  ranked.push(
+function rankedHomeIntents(_context: AgentGuidanceContext): RankedIntent[] {
+  return [
     {
       intent: "create_listing_draft",
-      reason: "Listing creation is the fastest first broker workflow.",
-      priorityBoost: 0
-    },
-    {
-      intent: "create_lead",
-      reason: "Lead capture is a common broker starting point.",
-      priorityBoost: 0
-    },
-    {
-      intent: "list_today_followups",
-      reason: "Daily follow-up review keeps broker work moving.",
-      priorityBoost: 0
+      reason: "Listing Builder is the first recommended Agent skill.",
+      priorityBoost: 400
     },
     {
       intent: "create_campaign_links",
-      reason: "Promotion is the next step after a listing exists.",
-      priorityBoost: 0
+      reason: "Promotion is the second recommended Agent skill.",
+      priorityBoost: 300
+    },
+    {
+      intent: "list_today_followups",
+      reason: "Lead Follow-up is the third recommended Agent skill.",
+      priorityBoost: 200
+    },
+    {
+      intent: "create_schedule_event",
+      reason: "Schedule is the fourth recommended Agent skill.",
+      priorityBoost: 100
     }
-  );
-
-  return ranked;
+  ];
 }
 
 function getDayKey(date: Date, timeZone?: string) {

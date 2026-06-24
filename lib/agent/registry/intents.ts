@@ -157,11 +157,11 @@ export const agentIntentRegistry = {
     policy: { risk: "draft" },
     resolution: { allowCurrentContext: false, allowLatestOnlyWhenExplicit: false },
     ui: {
-      emptyStateLabel: "List from Link",
+      emptyStateLabel: "Listing Builder",
       actionLabel: "Create listing",
       placeholder: "Paste a listing link, photos, or property details...",
       starterPrompt:
-        "I can help you create a property listing in seconds. Send me a property link, photos, details, or just tell me what you want to list."
+        "Listing Builder Skill started. Send me property details, photos, a link, or a voice note. I will turn it into a listing draft."
     },
     guidance: {
       proactiveTriggers: ["broker_has_no_listings", "empty_workspace"],
@@ -372,11 +372,11 @@ export const agentIntentRegistry = {
     policy: { risk: "external" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: true },
     ui: {
-      emptyStateLabel: "Create Promo Post",
+      emptyStateLabel: "Promotion",
       actionLabel: "Promote listing",
       placeholder: "Choose a property and channel, for example WhatsApp or Facebook...",
       starterPrompt:
-        "I can help you promote a property on WhatsApp or Facebook. Send me a listing link, photos, details, or tell me what kind of buyers you want to attract."
+        "Promotion Skill started. Choose a listing and I will create promotion content for WhatsApp, Facebook, and Instagram."
     },
     guidance: {
       proactiveTriggers: ["listing_created_not_promoted", "broker_has_listings"],
@@ -415,11 +415,11 @@ export const agentIntentRegistry = {
     policy: { risk: "read" },
     resolution: { allowCurrentContext: false, allowLatestOnlyWhenExplicit: false },
     ui: {
-      emptyStateLabel: "Today's Follow-ups",
+      emptyStateLabel: "Lead Follow-up",
       actionLabel: "Check follow-ups",
       placeholder: "Ask who to follow up today, or paste a recent customer chat...",
       starterPrompt:
-        "I can help you decide who to follow up with today. Send recent chats, a lead list, screenshots, or just tell me who you have been talking to."
+        "Lead Follow-up Skill started. Choose a lead, paste a WhatsApp chat, or ask who needs follow-up today."
     },
     guidance: {
       proactiveTriggers: ["today_followups_due", "overdue_followups"],
@@ -608,8 +608,11 @@ export const agentIntentRegistry = {
     policy: { risk: "write" },
     resolution: { allowCurrentContext: true, allowLatestOnlyWhenExplicit: false },
     ui: {
+      emptyStateLabel: "Schedule",
       actionLabel: "Schedule task",
-      placeholder: "Tell me who, what, and when to schedule..."
+      placeholder: "Tell me who, what, and when to schedule...",
+      starterPrompt:
+        "Schedule Skill started. Tell me the lead, listing, time, and what needs to happen."
     },
     guidance: {
       proactiveTriggers: ["lead_has_viewing_signal", "reply_drafted", "lead_selected"],

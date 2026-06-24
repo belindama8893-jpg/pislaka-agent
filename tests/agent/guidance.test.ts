@@ -37,7 +37,7 @@ describe("agent guidance", () => {
 
     expect(suggestions[0]).toMatchObject({
       intent: "create_listing_draft",
-      label: "List from Link",
+      label: "Listing Builder",
       confirmationRequired: false
     });
   });
@@ -76,7 +76,7 @@ describe("agent guidance", () => {
     });
   });
 
-  it("moves due follow-ups above general setup actions", () => {
+  it("keeps the recommended Agent skills in the product-defined order", () => {
     const suggestions = getAgentGuidanceSuggestions(
       baseContext({
         brokerState: {
@@ -86,10 +86,15 @@ describe("agent guidance", () => {
           overdueFollowupCount: 1
         }
       }),
-      { surface: "home", limit: 1 }
+      { surface: "home", limit: 4 }
     );
 
-    expect(suggestions[0]?.intent).toBe("list_today_followups");
+    expect(suggestions.map((suggestion) => suggestion.intent)).toEqual([
+      "create_listing_draft",
+      "create_campaign_links",
+      "list_today_followups",
+      "create_schedule_event"
+    ]);
   });
 
   it("uses contextual placeholders for import, lead, and listing states", () => {
